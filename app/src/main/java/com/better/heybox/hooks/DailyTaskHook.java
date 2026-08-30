@@ -23,61 +23,56 @@ import com.better.heybox.App;
 import com.better.heybox.HeyboxPrefs;
 import com.better.heybox.Logs;
 import com.better.heybox.MainModule;
+import com.better.heybox.ViewUtils;
 
 /**
- * 每日任务自动化：自动完成小黑盒每日「分享帖子」任务（3 种分享类型）。
- *
- * <p>小黑盒每日任务包含 3 种分享任务，依次完成：</p>
- * <ol>
- *   <li><b>分享任意帖子</b>：打开用户配置的帖子（{@code PicturePostPageActivityV2}/{@code NormalPostPageActivity}）→ 自动点分享按钮；</li>
- *   <li><b>分享游戏详情</b>：打开游戏详情页（{@code ChannelsDetailActivity}）→ 自动点分享按钮；</li>
- *   <li><b>分享游戏评价</b>：打开游戏评价页（{@code GameDetailFragment}）→ 自动点分享按钮。</li>
- * </ol>
- *
- * <p>3 个任务的链接由用户在模块设置中分别配置（帖子/游戏详情/游戏评价）。</p>
- *
- * <p>完成机制：Hook {@code com.max.hbcommon.component.i.show()}（分享面板）自动点「QQ」渠道，
- * 并 Hook {@code Tencent.shareToQQ(Activity, Bundle, IUiListener)} 直接触发 {@code IUiListener.onComplete({"ret":0})}
- * 跳过真实 QQ SDK；同时对走 {@code ShareUtils.P/y(Context, HBShareData)} 的分享入口（如游戏详情页）触发
- * {@code HBShareData.shareListener}（UMShareListener）的 {@code onResult}。只触发任务自身回调，
- * 用户手动 QQ 分享不受影响。</p>
+ * 每日任务自动化：自动完成小黑盒每日 3 种分享任务（帖子 / 游戏详情 / 游戏评价），
+ * 链接在设置中分别配置。Hook 分享面板与各 SDK 分享入口，自动化进行中直接触发
+ * 成功回调跳过真实 SDK；只触发任务自身回调，不影响用户手动分享。
  */
 public final class DailyTaskHook {
 
-    /** 3 种分享类型步骤 */
+    /** 3 种分享步骤 */
     private static final int STEP_PICTURE = 0;
     private static final int STEP_NORMAL = 1;
     private static final int STEP_CHANNEL = 2;
-    private static final int STEP_COUNT = 3;
+    private static final String[] STEP_KEYS = {
+            App.KEY_DAILY_TASK_PICTURE,
+            App.KEY_DAILY_TASK_NORMAL,
+            App.KEY_DAILY_TASK_CHANNEL,
+    };
+    private static final String[] STEP_NAMES = {"分享任意帖子", "分享游戏详情", "分享游戏评价"};
+    private static final int STEP_COUNT = STEP_KEYS.length;
+
+    private static final java.util.Map<String, String[]> CHANNEL_VIEW_TEXTS =
+            new java.util.HashMap<>();
+    static {
+        CHANNEL_VIEW_TEXTS.put("WECHAT", new String[]{"微信", "朋友圈"});
+        CHANNEL_VIEW_TEXTS.put("WEIBO", new String[]{"微博"});
+        CHANNEL_VIEW_TEXTS.put("QQ", new String[]{"QQ"});
+    }
 
     private final MainModule module;
 
-    /** 小黑盒进程 classloader（openStep 打开页面时使用，避免用模块 classloader 找不到小黑盒类） */
+    /** 宿主进程 classloader（打开页面用） */
     private volatile ClassLoader targetCl;
 
-    /** 自动化进行中标记（仅自动化流程内生效） */
     private volatile boolean autoActive;
     private volatile int currentStep = -1;
-    /** 当前步骤是否已自动触发过分享（setter hook 去重，防止页面多次设置监听器导致重复触发） */
-    private volatile int triggeredStep = -1;
+    /** 本步是否已自动触发过（防重复触发） */
+    private volatile boolean stepTriggered;
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
-    /** 自动化启动时缓存的上下文（applicationContext），供拿不到 Context 的回调路径（微信/微博）兜底 */
+    /** 缓存的 applicationContext（微信/微博回调拿不到 Context 时兜底） */
     private volatile Context autoContext;
 
     /**
-     * 各 TitleBar 实例当前 action 图标的资源名（setActionIcon 时记录）。
-     * 同一个 {@code setActionIconOnClickListener} 在不同页面语义不同：帖子页（含评论页）的
-     * action 图标是右上角"⋯"（{@code common_more}，点击直接弹分享面板），而游戏详情页
-     * （ChannelsDetailActivity）是消息入口（{@code common_notice}，点击跳消息中心）。
-     * 自动化点它之前先看图标，防止误触进消息页。
+     * TitleBar 当前 action 图标资源名：同一 setter 在不同页面语义不同
+     * （帖子页为分享按钮，游戏详情页为消息入口），点之前先看图标防误触。
      */
     private final java.util.Map<Object, String> actionIcons =
             java.util.Collections.synchronizedMap(new java.util.WeakHashMap<Object, String>());
-
-    /** 单步看门狗：超时未完成则跳过（避免卡死） */
-    private static final long STEP_TIMEOUT_MS = 25000L;
 
     public DailyTaskHook(MainModule module) {
         this.module = module;
@@ -85,11 +80,6 @@ public final class DailyTaskHook {
 
     public void install(ClassLoader cl) {
         this.targetCl = cl;
-        // 强制输出到 logcat（不依赖「记录日志」开关），确认主进程是否执行了本方法
-        try {
-            Logs.i(module.TAG, "DailyTaskHook.install ENTER pid=" + android.os.Process.myPid());
-        } catch (Throwable ignored) {
-        }
         hookShareUtils(cl);
         hookSharePanel(cl);
         hookTencentShareToQQ(cl);
@@ -179,7 +169,6 @@ public final class DailyTaskHook {
         }
     }
 
-    /** 按配置的分享渠道（QQ/WECHAT）在面板中自动点击对应渠道按钮 */
     private void autoClickChannel(final Dialog dialog) {
         final String channel = currentChannel();
         mainHandler.postDelayed(new Runnable() {
@@ -192,17 +181,16 @@ public final class DailyTaskHook {
                     ViewGroup root = dialog.getWindow() != null
                             && dialog.getWindow().getDecorView() instanceof ViewGroup
                             ? (ViewGroup) dialog.getWindow().getDecorView() : null;
-                    // 按配置渠道在面板查找对应按钮文本
+                    String[] candidates = CHANNEL_VIEW_TEXTS.get(channel);
+                    if (candidates == null) {
+                        candidates = CHANNEL_VIEW_TEXTS.get("QQ");
+                    }
                     View target = null;
-                    if ("WECHAT".equals(channel)) {
-                        target = findChannelView(root, "微信");
-                        if (target == null) {
-                            target = findChannelView(root, "朋友圈");
+                    for (String text : candidates) {
+                        target = findChannelView(root, text);
+                        if (target != null) {
+                            break;
                         }
-                    } else if ("WEIBO".equals(channel)) {
-                        target = findChannelView(root, "微博");
-                    } else {
-                        target = findChannelView(root, "QQ");
                     }
                     if (target == null) {
                         module.logd(Log.WARN, module.TAG, "分享面板未找到渠道按钮(" + channel + ")，跳过该步");
@@ -224,7 +212,7 @@ public final class DailyTaskHook {
         return v == null || v.isEmpty() ? "QQ" : v;
     }
 
-    /** 递归查找分享面板里文本为目标渠道名的可点击 View（SoulFrog 3.8.0 b() 同款） */
+    /** 递归查文本为目标渠道名的可点击 View */
     private static View findChannelView(ViewGroup root, String targetText) {
         if (root == null || targetText == null) {
             return null;
@@ -260,69 +248,30 @@ public final class DailyTaskHook {
         try {
             Class<?> tencent = Class.forName("com.tencent.tauth.Tencent", false, cl);
             Class<?> iUiListener = Class.forName("com.tencent.tauth.IUiListener", false, cl);
-            Method shareToQQ = null;
-            for (Method m : tencent.getDeclaredMethods()) {
-                if ("shareToQQ".equals(m.getName())) {
-                    Class<?>[] pts = m.getParameterTypes();
-                    if (pts.length == 3 && pts[0] == Activity.class
-                            && pts[1] == android.os.Bundle.class && pts[2] == iUiListener) {
-                        shareToQQ = m;
-                        break;
-                    }
-                }
-            }
+            Method shareToQQ = ViewUtils.findMethod(tencent, "shareToQQ",
+                    Activity.class, android.os.Bundle.class, iUiListener);
             if (shareToQQ == null) {
                 module.logd(Log.WARN, module.TAG, "✘ 未找到 Tencent.shareToQQ(Activity,Bundle,IUiListener)");
                 return;
             }
             final Method onComplete = iUiListener.getMethod("onComplete", Object.class);
-            module.hook(shareToQQ).intercept(chain -> {
-                if (!autoActive || !"QQ".equals(currentChannel())) {
-                    return chain.proceed();
-                }
-                try {
-                    Object listener = chain.getArg(2);
-                    if (listener != null) {
-                        org.json.JSONObject ret = new org.json.JSONObject();
-                        ret.put("ret", 0);
-                        onComplete.invoke(listener, ret);
-                        module.logd(Log.INFO, module.TAG, "✔ 每日任务：Tencent.shareToQQ 伪造成功回调 (步骤 "
-                                + (currentStep + 1) + "/" + STEP_COUNT + ")");
-                    }
-                    Object ctx = chain.getArg(0);
-                    Context context = ctx instanceof Context ? (Context) ctx : null;
-                    mainHandler.post(() -> onStepCompleted(context));
-                } catch (Throwable t) {
-                    module.logd(Log.WARN, module.TAG, "Tencent.shareToQQ 伪造回调异常: " + t);
-                }
-                return null; // 跳过真实 QQ SDK
+            hookFakeShareSuccess(shareToQQ, "QQ", "Tencent.shareToQQ", 2, listener -> {
+                org.json.JSONObject ret = new org.json.JSONObject();
+                ret.put("ret", 0);
+                onComplete.invoke(listener, ret);
             });
-            module.logd(Log.INFO, module.TAG, "✔ 分享完成 Hook 已安装: Tencent.shareToQQ");
         } catch (Throwable t) {
             module.logd(Log.ERROR, module.TAG, "✘ Tencent.shareToQQ Hook 失败", t);
         }
     }
 
-    // ---------- 1d. 微信分享完成核心：UMWXHandler.share(ShareContent, UMShareListener) ----------
-    /**
-     * 微信好友/朋友圈分享经友盟 {@code UMWXHandler.share(ShareContent, UMShareListener)}。
-     * 自动化进行中直接触发 {@code UMShareListener.onResult(SHARE_MEDIA.WEIXIN)} 并返回 true
-     * 跳过真实微信 SDK（不调起微信），让小黑盒判定分享成功。393/394 双版本同签名。
-     */
+    /** 微信分享经 UMWXHandler.share；自动化中直接触发 onResult(WEIXIN) 跳过真实微信 SDK */
     private void hookWeChatShare(ClassLoader cl) {
         try {
             Class<?> handler = Class.forName("com.umeng.socialize.handler.UMWXHandler", false, cl);
             Class<?> listener = Class.forName("com.umeng.socialize.UMShareListener", false, cl);
             Class<?> shareContent = Class.forName("com.umeng.socialize.ShareContent", false, cl);
-            Method share = null;
-            for (Method m : handler.getDeclaredMethods()) {
-                if ("share".equals(m.getName()) && m.getParameterTypes().length == 2
-                        && m.getParameterTypes()[0] == shareContent
-                        && m.getParameterTypes()[1] == listener) {
-                    share = m;
-                    break;
-                }
-            }
+            Method share = ViewUtils.findMethod(handler, "share", shareContent, listener);
             if (share == null) {
                 module.logd(Log.WARN, module.TAG, "✘ 未找到 UMWXHandler.share(ShareContent,UMShareListener)");
                 return;
@@ -332,78 +281,58 @@ public final class DailyTaskHook {
             final Object weixin = Enum.valueOf(
                     (Class<Enum>) Class.forName("com.umeng.socialize.bean.SHARE_MEDIA", false, cl),
                     "WEIXIN");
-            module.hook(share).intercept(chain -> {
-                if (!autoActive || !"WECHAT".equals(currentChannel())) {
-                    return chain.proceed();
-                }
-                try {
-                    Object l = chain.getArg(1);
-                    if (l != null) {
-                        onResult.invoke(l, weixin);
-                        module.logd(Log.INFO, module.TAG, "✔ 每日任务：微信分享成功回调已触发 (步骤 "
-                                + (currentStep + 1) + "/" + STEP_COUNT + ")");
-                    }
-                    mainHandler.post(() -> onStepCompleted(null));
-                } catch (Throwable t) {
-                    module.logd(Log.WARN, module.TAG, "微信分享伪造回调异常: " + t);
-                }
-                return Boolean.TRUE; // 跳过真实微信 SDK
-            });
-            module.logd(Log.INFO, module.TAG, "✔ 分享完成 Hook 已安装: UMWXHandler.share");
+            hookFakeShareSuccess(share, "WECHAT", "微信分享", 1, l -> onResult.invoke(l, weixin));
         } catch (Throwable t) {
             module.logd(Log.ERROR, module.TAG, "✘ 微信分享 Hook 失败", t);
         }
     }
 
-    // ---------- 1e. 微博分享完成核心：SinaSsoHandler.share(ShareContent, UMShareListener) ----------
-    /**
-     * 微博分享经友盟 {@code SinaSsoHandler.share(ShareContent, UMShareListener)} → 新浪
-     * {@code WBAPI.shareMessage} 拉起微博，成功回调经 {@code WbShareCallback.onComplete} →
-     * {@code UMShareListener.onResult(SHARE_MEDIA.SINA)}。自动化进行中直接触发 onResult
-     * 并返回 true 跳过真实微博 SDK。393/394 双版本同签名。
-     */
+    /** 微博分享经 SinaSsoHandler.share；自动化中直接触发 onResult(SINA) 跳过真实微博 SDK */
     private void hookSinaShare(ClassLoader cl) {
         try {
             Class<?> handler = Class.forName("com.umeng.socialize.handler.SinaSsoHandler", false, cl);
             Class<?> listener = Class.forName("com.umeng.socialize.UMShareListener", false, cl);
             Class<?> shareContent = Class.forName("com.umeng.socialize.ShareContent", false, cl);
             Class<?> shareMedia = Class.forName("com.umeng.socialize.bean.SHARE_MEDIA", false, cl);
-            Method share = null;
-            for (Method m : handler.getDeclaredMethods()) {
-                if ("share".equals(m.getName()) && m.getParameterTypes().length == 2
-                        && m.getParameterTypes()[0] == shareContent
-                        && m.getParameterTypes()[1] == listener) {
-                    share = m;
-                    break;
-                }
-            }
+            Method share = ViewUtils.findMethod(handler, "share", shareContent, listener);
             if (share == null) {
                 module.logd(Log.WARN, module.TAG, "✘ 未找到 SinaSsoHandler.share(ShareContent,UMShareListener)");
                 return;
             }
             final Method onResult = listener.getMethod("onResult", shareMedia);
             final Object sina = Enum.valueOf((Class<Enum>) shareMedia, "SINA");
-            module.hook(share).intercept(chain -> {
-                if (!autoActive || !"WEIBO".equals(currentChannel())) {
-                    return chain.proceed();
-                }
-                try {
-                    Object l = chain.getArg(1);
-                    if (l != null) {
-                        onResult.invoke(l, sina);
-                        module.logd(Log.INFO, module.TAG, "✔ 每日任务：微博分享成功回调已触发 (步骤 "
-                                + (currentStep + 1) + "/" + STEP_COUNT + ")");
-                    }
-                    mainHandler.post(() -> onStepCompleted(null));
-                } catch (Throwable t) {
-                    module.logd(Log.WARN, module.TAG, "微博分享伪造回调异常: " + t);
-                }
-                return Boolean.TRUE; // 跳过真实微博 SDK
-            });
-            module.logd(Log.INFO, module.TAG, "✔ 分享完成 Hook 已安装: SinaSsoHandler.share");
+            hookFakeShareSuccess(share, "WEIBO", "微博分享", 1, l -> onResult.invoke(l, sina));
         } catch (Throwable t) {
             module.logd(Log.ERROR, module.TAG, "✘ 微博分享 Hook 失败", t);
         }
+    }
+
+    /** 返回语义按被 hook 方法：void→null、boolean→TRUE */
+    private void hookFakeShareSuccess(Method share, String channel, String logLabel,
+                                      int listenerArg, FakeShareInvoker fake) {
+        module.hook(share).intercept(chain -> {
+            if (!autoActive || !channel.equals(currentChannel())) {
+                return chain.proceed();
+            }
+            try {
+                Object listener = chain.getArg(listenerArg);
+                if (listener != null) {
+                    fake.invoke(listener);
+                    module.logd(Log.INFO, module.TAG, "✔ 每日任务：" + logLabel
+                            + " 成功回调已触发 (步骤 " + (currentStep + 1) + "/" + STEP_COUNT + ")");
+                }
+                Object ctx = chain.getArg(0);
+                Context context = ctx instanceof Context ? (Context) ctx : null;
+                mainHandler.post(() -> onStepCompleted(context));
+            } catch (Throwable t) {
+                module.logd(Log.WARN, module.TAG, logLabel + " 伪造回调异常: " + t);
+            }
+            return share.getReturnType() == boolean.class ? Boolean.TRUE : null;
+        });
+    }
+
+    private interface FakeShareInvoker {
+        void invoke(Object listener) throws Throwable;
     }
     private void hookMainResume(ClassLoader cl) {
         try {
@@ -433,18 +362,7 @@ public final class DailyTaskHook {
         if (!module.isEnabled(App.KEY_DAILY_TASK_ENABLED, false)) {
             return;
         }
-        if (module.isEnabled(App.KEY_DAILY_TASK_RESET, false)) {
-            clearDoneDate();
-            HeyboxPrefs.setBoolean(App.KEY_DAILY_TASK_RESET, false);
-            try {
-                SharedPreferences remote = module.getRemotePreferences(App.PREFS_GROUP);
-                if (remote != null) {
-                    remote.edit().remove(App.KEY_DAILY_TASK_RESET).apply();
-                }
-            } catch (Throwable ignored) {
-            }
-            module.logd(Log.INFO, module.TAG, "检测到清除今日打卡标志，已重置完成状态");
-        }
+        handleResetFlag();
         if (isTodayDone()) {
             return;
         }
@@ -455,7 +373,7 @@ public final class DailyTaskHook {
         autoActive = true;
         autoContext = activity.getApplicationContext();
         currentStep = STEP_PICTURE;
-        triggeredStep = -1;
+        stepTriggered = false;
         module.logd(Log.INFO, module.TAG, "每日任务启动（3 种分享类型：图片帖→普通帖→频道）");
         openStep(activity, STEP_PICTURE);
     }
@@ -518,18 +436,7 @@ public final class DailyTaskHook {
                                     final int... allowedSteps) {
         try {
             Method setter = titleBar.getMethod(setterName, View.OnClickListener.class);
-            try {
-                Logs.i(module.TAG, "TitleBar " + setterName + " hooking pid="
-                        + android.os.Process.myPid());
-            } catch (Throwable ignored) {
-            }
             module.hook(setter).intercept(chain -> {
-                try {
-                    Logs.i(module.TAG, "TitleBar " + setterName + " CALLED autoActive="
-                            + autoActive + " step=" + currentStep
-                            + " pid=" + android.os.Process.myPid());
-                } catch (Throwable ignored) {
-                }
                 Object result = chain.proceed();
                 if (!autoActive) {
                     return result;
@@ -580,33 +487,17 @@ public final class DailyTaskHook {
                                         return;
                                     }
 
-                                    if (triggeredStep == currentStep) {
+                                    if (stepTriggered) {
                                         return;
                                     }
-                                    triggeredStep = currentStep;
+                                    stepTriggered = true;
 
-                                    int btnId = act.getResources().getIdentifier(
-                                            viewName, "id", MainModule.TARGET_PKG);
-                                    View btn = btnId == 0 ? null
-                                            : act.findViewById(btnId);
                                     View.OnClickListener l = (View.OnClickListener) listener;
                                     module.logd(Log.INFO, module.TAG, "每日任务：自动触发 "
                                             + viewName + " 分享 (步骤 " + (currentStep + 1)
                                             + "/" + STEP_COUNT + ") 页面="
                                             + act.getClass().getSimpleName());
-                                    if (btn != null) {
-                                        l.onClick(btn);
-                                    } else {
-                                        try {
-                                            Method getView = titleBar.getMethod(
-                                                    "getAppbarActionButtonView");
-                                            Object v = getView.invoke(titleBarObj);
-                                            if (v instanceof View) {
-                                                l.onClick((View) v);
-                                            }
-                                        } catch (Throwable ignored) {
-                                        }
-                                    }
+                                    clickShareButton(act, titleBar, titleBarObj, viewName, l);
                                 } catch (Throwable t2) {
                                     module.logd(Log.WARN, module.TAG, "自动触发分享异常: " + t2);
                                 }
@@ -626,24 +517,31 @@ public final class DailyTaskHook {
             module.logd(Log.WARN, module.TAG, "✘ TitleBar " + setterName + " Hook 失败", t);
         }
     }
+    private static void clickShareButton(Activity act, Class<?> titleBar, Object titleBarObj,
+                                         String viewName, View.OnClickListener l) {
+        int btnId = act.getResources().getIdentifier(viewName, "id", MainModule.TARGET_PKG);
+        View btn = btnId == 0 ? null : act.findViewById(btnId);
+        if (btn != null) {
+            l.onClick(btn);
+            return;
+        }
+        try {
+            Method getView = titleBar.getMethod("getAppbarActionButtonView");
+            Object v = getView.invoke(titleBarObj);
+            if (v instanceof View) {
+                l.onClick((View) v);
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
     private boolean isMessageIconPage(Object titleBar) {
-        Activity act = activityOf(titleBar instanceof View ? (View) titleBar : null);
+        Activity act = ViewUtils.findActivity(titleBar instanceof View ? (View) titleBar : null);
         if (act != null && "com.max.xiaoheihe.module.bbs.ChannelsDetailActivity"
                 .equals(act.getClass().getName())) {
             return true;
         }
         return titleBar != null && "common_notice".equals(actionIcons.get(titleBar));
-    }
-
-    private static Activity activityOf(View v) {
-        Context c = v != null ? v.getContext() : null;
-        while (c instanceof android.content.ContextWrapper) {
-            if (c instanceof Activity) {
-                return (Activity) c;
-            }
-            c = ((android.content.ContextWrapper) c).getBaseContext();
-        }
-        return c instanceof Activity ? (Activity) c : null;
     }
 
     private void onStepCompleted(Context context) {
@@ -662,7 +560,7 @@ public final class DailyTaskHook {
         int next = currentStep + 1;
         if (next < STEP_COUNT) {
             currentStep = next;
-            triggeredStep = -1;
+            stepTriggered = false;
             Context ctx = context != null ? context : autoContext;
             if (ctx != null) {
                 openStep(ctx, next);
@@ -712,47 +610,63 @@ public final class DailyTaskHook {
         }
     }
     private void abortDailyTask() {
-        autoActive = false;
-        currentStep = -1;
-        triggeredStep = -1;
+        reset();
         module.logd(Log.WARN, module.TAG,
                 "每日任务：打开帖子失败，已复位（今日未标记完成，下次进入主页将重试）");
     }
     public void clearTodayAndRetry(Activity activity) {
-        autoActive = false;
-        currentStep = -1;
-        triggeredStep = -1;
+        reset();
         clearDoneDate();
         module.logd(Log.INFO, module.TAG, "已清除今日打卡状态，重新尝试每日任务");
         if (activity != null) {
             maybeStartDailyTask(activity);
         }
     }
-    private void clearDoneDate() {
-        HeyboxPrefs.setString(App.KEY_DAILY_TASK_DONE_DATE, "");
+    private void handleResetFlag() {
+        if (!module.isEnabled(App.KEY_DAILY_TASK_RESET, false)) {
+            return;
+        }
+        clearDoneDate();
+        HeyboxPrefs.setBoolean(App.KEY_DAILY_TASK_RESET, false);
         try {
             SharedPreferences remote = module.getRemotePreferences(App.PREFS_GROUP);
-            if (remote != null && remote.contains(App.KEY_DAILY_TASK_DONE_DATE)) {
-                remote.edit().remove(App.KEY_DAILY_TASK_DONE_DATE).apply();
+            if (remote != null) {
+                remote.edit().remove(App.KEY_DAILY_TASK_RESET).apply();
+            }
+        } catch (Throwable ignored) {
+        }
+        module.logd(Log.INFO, module.TAG, "检测到清除今日打卡标志，已重置完成状态");
+    }
+    private void clearDoneDate() {
+        writeDoneDate("");
+    }
+
+    private void reset() {
+        autoActive = false;
+        currentStep = -1;
+        stepTriggered = false;
+    }
+
+    private void writeDoneDate(String value) {
+        HeyboxPrefs.setString(App.KEY_DAILY_TASK_DONE_DATE, value);
+        try {
+            SharedPreferences remote = module.getRemotePreferences(App.PREFS_GROUP);
+            if (remote != null) {
+                if (value == null || value.isEmpty()) {
+                    remote.edit().remove(App.KEY_DAILY_TASK_DONE_DATE).apply();
+                } else {
+                    remote.edit().putString(App.KEY_DAILY_TASK_DONE_DATE, value).apply();
+                }
             }
         } catch (Throwable ignored) {
         }
     }
 
     private void finishDailyTask(Context context) {
-        autoActive = false;
-        currentStep = -1;
-        triggeredStep = -1;
-        HeyboxPrefs.setString(App.KEY_DAILY_TASK_DONE_DATE, today());
-        try {
-            SharedPreferences remote = module.getRemotePreferences(App.PREFS_GROUP);
-            if (remote != null) {
-                remote.edit().putString(App.KEY_DAILY_TASK_DONE_DATE, today()).apply();
-            }
-        } catch (Throwable ignored) {
-        }
+        reset();
+        writeDoneDate(today());
         module.logd(Log.INFO, module.TAG, "每日任务：3 种分享类型全部完成，已记录今日状态");
-        // 微信/微博路径传入的 context 为 null，用缓存上下文兜底弹 Toast
+        // 微信/微博回调 context 为 null，用缓存兜底
         Context ctx = context != null ? context : autoContext;
         if (ctx != null) {
             try {
@@ -763,21 +677,10 @@ public final class DailyTaskHook {
         }
     }
     private String getLinkForStep(int step) {
-        String key;
-        switch (step) {
-            case STEP_PICTURE:
-                key = App.KEY_DAILY_TASK_PICTURE;
-                break;
-            case STEP_NORMAL:
-                key = App.KEY_DAILY_TASK_NORMAL;
-                break;
-            case STEP_CHANNEL:
-                key = App.KEY_DAILY_TASK_CHANNEL;
-                break;
-            default:
-                return null;
+        if (step < 0 || step >= STEP_KEYS.length) {
+            return null;
         }
-        String value = module.getString(key, "");
+        String value = module.getString(STEP_KEYS[step], "");
         return value == null ? null : value.trim();
     }
 
@@ -788,16 +691,7 @@ public final class DailyTaskHook {
     }
 
     private static String stepName(int step) {
-        switch (step) {
-            case STEP_PICTURE:
-                return "分享任意帖子";
-            case STEP_NORMAL:
-                return "分享游戏详情";
-            case STEP_CHANNEL:
-                return "分享游戏评价";
-            default:
-                return "未知";
-        }
+        return step >= 0 && step < STEP_NAMES.length ? STEP_NAMES[step] : "未知";
     }
 
     private boolean isTodayDone() {

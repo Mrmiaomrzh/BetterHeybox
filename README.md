@@ -4,8 +4,12 @@
 
 增强小黑盒（Heybox）的 LSPosed 模块。
 
-# 免责声明
-本应用与清枫（北京）科技有限公司无关，仅学习研究小黑盒APP部分原理，请在下载后24h内删除
+> [!CAUTION]
+> **免责声明**
+> - 本应用与清枫(北京)科技有限公司**无任何关联**，亦未经其授权或认可  
+> - 本项目仅用于**学习与研究**小黑盒 APP 的部分技术原理，**严禁**用于任何商业或非法用途  
+> - 请在下载后 **24 小时内**删除本应用及相关文件  
+> - **禁止**在 **小黑盒 / HeyBox** 平台内发布、讨论或传播本模块的内容，违者后果自负  
 
 > [!Note]
 >本应用兼容 [小黑盒 1.3.393](https://github.com/Mrmiaomrzh/BetterHeybox/releases/download/v0.2.0/heybox_1.3.393.apk) 及以上版本，其他版本出现的问题不会进行处理
@@ -83,7 +87,7 @@
   - 任务三：**分享游戏评价**（配置游戏评价链接）
 - **3 个独立链接设置**：帖子链接 / 游戏详情链接 / 游戏评价链接，各自独立配置；
   未配置的任务自动跳过；每日状态按日期记录，跨天重置
-- **分享渠道可配置**：内嵌面板/独立设置页「分享渠道」可选 **QQ / QQ空间**、**微信 / 朋友圈** 或 **微博**，
+- **分享渠道可配置**：设置面板「分享渠道」可选 **QQ / QQ空间**、**微信 / 朋友圈** 或 **微博**，
   自动分享按所选渠道在分享面板点击对应按钮并伪造成功回调（默认 QQ；抖音因无分享成功回调暂不支持）
 - **清除今日打卡**：打卡失败或想重新执行时，点击「清除今日打卡」清除今日已完成状态并立即重新尝试
 
@@ -127,7 +131,7 @@
 | Hook API | `io.github.libxposed:api:102.0.0` |
 | Service | `io.github.libxposed:service:102.0.0` |
 | 字节码分析 | `org.luckypray:dexkit:2.2.0` |
-| 液态玻璃渲染 | `com.github.QWEA0:liquidglass:90f4ea28e3`（JitPack）+ 内嵌 AGSL shader（QmDeve，MIT） |
+| 液态玻璃渲染 | `com.github.QWEA0:liquidglass:90f4ea28e3`（JitPack） |
 | compileSdk / targetSdk | 37 |
 | minSdk | 26 |
 | AGP / Gradle | 9.2.1 / 9.7.1 |
@@ -141,29 +145,33 @@ app/src/main/
 ├── java/com/better/heybox/
 │   ├── MainModule.java          # 模块入口：生命周期 + Hook 安装编排 + 共享工具
 │   ├── App.java                 # Application：连接框架服务、RemotePreferences 存取
-│   ├── SettingsActivity.java    # 模块独立设置界面
-│   ├── HeyboxPrefs.java         # 小黑盒进程本地配置存储（配置文件放小黑盒目录）
+│   ├── ViewUtils.java           # 宿主视图/反射解析：findActivity / findOuter / findMethod
 │   ├── ThemeUtils.java          # 共享主题工具：Monet 动态取色 / surface 色板 / 设计 token
+│   ├── HeyboxPrefs.java         # 小黑盒进程本地配置存储（配置文件放小黑盒目录）
+│   ├── Logs.java                # 统一日志出口（Release 只留 error）
 │   ├── LogRecorder.java         # 文件日志记录器（日志开关）
-│   ├── VideoDownloadManager.java # 视频下载：任务状态机/注册表/断点续传/HLS 分片/mp4 转封装/保存/通知
-│   ├── PreferenceReceiver.java  # 设置写回广播接收（镜像同步 RemotePreferences）
+│   ├── LogExport.java           # 日志导出
+│   ├── Checkpoint.java          # Debug 运行检查点
+│   ├── ConfigBackup.java        # 配置导入/导出（JSON）
 │   ├── DexKitResolver.java      # DexKit 自动分析：小黑盒更新后自动定位原生弹窗
+│   ├── VideoDownloadManager.java # 视频下载：任务状态机/断点续传/HLS 分片/转封装/保存/通知
+│   ├── CustomTextSelection.java # 自绘制文本选择（禁用系统选择 API）
+│   ├── PreferenceReceiver.java  # 设置写回广播接收（镜像同步 RemotePreferences）
 │   └── hooks/                   # 各功能 Hook 按模块拆分
 │       ├── GeneralHook.java     #   通用：版本检测 / 屏蔽更新 / 伪装通知权限
 │       ├── AdFilterHook.java    #   广告过滤：开屏 / 信息流 / 气泡 / 角标
-│       ├── SettingsEntryHook.java # 设置页入口注入 + 内嵌设置面板（入口混淆名失效自动回退生命周期 Hook）
+│       ├── SettingsEntryHook.java # 设置页入口注入 + 内嵌设置面板
 │       ├── BottomTabHook.java   #   底部导航栏隐藏（tab 名版本自适应）
 │       ├── PromotePostHook.java #   推广贴屏蔽
 │       ├── TextSelectHook.java  #   解除复制 / 标准文本选择 / 跨行选择
 │       ├── ImageShareHook.java  #   图片系统分享（优先保存系统相册）
-│       ├── ShareLinkPurifyHook.java #   净化分享链接：去除分享/复制链接上的追踪参数
-│       ├── VideoDownloadHook.java #   视频下载：URL 捕获 + 圆形下载按钮 + 底部下载面板
+│       ├── ShareLinkPurifyHook.java # 净化分享链接
+│       ├── VideoDownloadHook.java # 视频下载：URL 捕获 + 悬浮按钮 + 底部面板
 │       ├── LiquidGlassBottomBarHook.java # 液态玻璃底栏：主 Activity 生命周期触发安装
-│       ├── WebViewDevToolsHook.java #   网页 DevTools：WebView Chrome 远程调试
+│       ├── WebViewDevToolsHook.java # 网页 DevTools：WebView Chrome 远程调试
 │       └── DailyTaskHook.java   #   每日任务：3 种分享类型自动完成
 │   └── liquidglass/             #   液态玻璃底栏：安装器 / 调节面板 / 配置 / 沉浸式 / 毛玻璃降级
-├── java/com/qmdeve/liquidglass/ # vendored 液态玻璃渲染器（QmDeve，AGSL shader）
-├── res/                         # 设置页布局 / 字符串 / drawable / raw（AGSL shader）
+├── res/                         # 字符串 / drawable / raw（AGSL shader）
 └── resources/META-INF/xposed/   # 模块声明
 ```
 
@@ -197,7 +205,7 @@ app/src/main/resources/META-INF/xposed/
      `staticScope=true` 时作用域固定为 scope.list 中的小黑盒，无需（也无法）手动勾选其它应用
    - 重启小黑盒进程
 4. **看日志**：`adb logcat -s BetterHeybox`（每个 Hook 安装成功/失败均有 ✔/✘ 日志）；
-   也可在小黑盒设置面板 / 独立设置页开启「记录日志」，日志自动写入文件便于离线排查
+   也可在小黑盒设置面板开启「记录日志」，日志自动写入文件便于离线排查
 
 ## 致谢
 

@@ -7,7 +7,6 @@ import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.BitmapShader;
 import android.graphics.Canvas;
-import android.graphics.Color;
 import android.graphics.ColorMatrix;
 import android.graphics.ColorMatrixColorFilter;
 import android.graphics.LinearGradient;
@@ -33,7 +32,6 @@ final class LiquidGlassHostLayout extends FrameLayout {
 
     private final ViewGroup mSampleRoot;
     private final float mDensity;
-    private final android.widget.RadioGroup mThemeProbe;
     private boolean mDarkMode;
     private int mCaptureCount;
 
@@ -61,10 +59,7 @@ final class LiquidGlassHostLayout extends FrameLayout {
         super(context);
         mSampleRoot = sampleRoot;
         mDensity = context.getResources().getDisplayMetrics().density;
-        Boolean detected = null;
         mDarkMode = isSystemNight(context);
-        mThemeProbe = bar instanceof android.widget.RadioGroup
-                ? (android.widget.RadioGroup) bar : null;
         mUseAgsl = Build.VERSION.SDK_INT >= 33;
         setTag(GLASS_TAG);
         setWillNotDraw(false);
@@ -72,8 +67,7 @@ final class LiquidGlassHostLayout extends FrameLayout {
         LiquidGlassLog.log(android.util.Log.INFO,
                 "host created: sdk=" + Build.VERSION.SDK_INT
                         + " path=" + (mUseAgsl ? "agsl" : "legacy-frost")
-                        + " dark=" + mDarkMode + " source="
-                        + (detected != null ? "text-color" : "uiMode"));
+                        + " dark=" + mDarkMode + " source=uiMode");
     }
 
     void setGlassTuner(GlassTuner tuner) {
@@ -85,31 +79,6 @@ final class LiquidGlassHostLayout extends FrameLayout {
         int mode = context.getResources().getConfiguration().uiMode
                 & Configuration.UI_MODE_NIGHT_MASK;
         return mode == Configuration.UI_MODE_NIGHT_YES;
-    }
-
-    static Boolean detectDarkFromText(ViewGroup bar) {
-        if (bar == null) {
-            return null;
-        }
-        try {
-            for (int i = 0; i < bar.getChildCount(); i++) {
-                View c = bar.getChildAt(i);
-                if (c instanceof android.widget.TextView) {
-                    android.content.res.ColorStateList csl =
-                            ((android.widget.TextView) c).getTextColors();
-                    if (csl == null) {
-                        continue;
-                    }
-                    int col = csl.getDefaultColor();
-                    float lum = (0.299f * Color.red(col)
-                            + 0.587f * Color.green(col)
-                            + 0.114f * Color.blue(col)) / 255f;
-                    return lum > 0.5f;
-                }
-            }
-        } catch (Throwable ignored) {
-        }
-        return null;
     }
 
     private void setupPaints() {
@@ -125,13 +94,18 @@ final class LiquidGlassHostLayout extends FrameLayout {
             }
             mBorderPaint.setStyle(Paint.Style.STROKE);
             mBorderPaint.setStrokeWidth(Math.max(mDensity * 0.8f, 0.75f));
-            if (getWidth() > 0 && getHeight() > 0) {
-                mGlossPaint.setShader(new LinearGradient(
-                        0f, 0f, 0f, getHeight() * 0.45f,
-                        mDarkMode ? 0x14FFFFFF : 0x30FFFFFF,
-                        0x00FFFFFF, Shader.TileMode.CLAMP));
-            }
+            updateGlossShader(getHeight());
         }
+    }
+
+    private void updateGlossShader(int h) {
+        if (getWidth() <= 0 || h <= 0) {
+            return;
+        }
+        mGlossPaint.setShader(new LinearGradient(
+                0f, 0f, 0f, h * 0.45f,
+                mDarkMode ? 0x1FFFFFFF : 0x40FFFFFF,
+                0x00FFFFFF, Shader.TileMode.CLAMP));
     }
 
     void attach() {
@@ -172,10 +146,7 @@ final class LiquidGlassHostLayout extends FrameLayout {
             return;
         }
         if (!mUseAgsl) {
-            mGlossPaint.setShader(new LinearGradient(
-                    0f, 0f, 0f, h * 0.45f,
-                    mDarkMode ? 0x1FFFFFFF : 0x40FFFFFF,
-                    0x00FFFFFF, Shader.TileMode.CLAMP));
+            updateGlossShader(h);
         }
     }
 
@@ -360,9 +331,5 @@ final class LiquidGlassHostLayout extends FrameLayout {
             set.start();
         } catch (Throwable ignored) {
         }
-    }
-
-    static void cancelAnimators(View v) {
-        v.animate().cancel();
     }
 }

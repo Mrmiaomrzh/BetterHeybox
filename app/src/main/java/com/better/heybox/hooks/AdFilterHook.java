@@ -18,7 +18,6 @@ public final class AdFilterHook {
         this.module = module;
     }
 
-    /** 安装本模块的全部 Hook */
     public void install(ClassLoader cl) {
         hookOpenScreenAd(cl);
         hookFeedAds(cl);
@@ -67,8 +66,7 @@ public final class AdFilterHook {
         }
     }
 
-    private Object filterFeedAd(Object chainObj) throws Throwable {
-        XposedInterface.Chain chain = (XposedInterface.Chain) chainObj;
+    private Object filterFeedAd(XposedInterface.Chain chain) throws Throwable {
         if (!module.isEnabled(App.KEY_FEED_AD, true)) {
             return chain.proceed();
         }

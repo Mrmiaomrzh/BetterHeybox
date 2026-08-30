@@ -45,29 +45,13 @@ import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * 小黑盒视频下载：后台下载、保存、任务注册表与通知反馈（宿主进程内单例）。
- *
- * <p>职责边界：{@link hooks.VideoDownloadHook} 负责捕获 URL + 渲染入口/面板，一切网络、
- * 文件、通知、任务状态管理都在本类。设计要点：</p>
- * <ul>
- *   <li>状态机：PENDING → DOWNLOADING → PAUSED / COMPLETED / FAILED / CANCELLED；
- *       PAUSED 保留断点（mp4 .part 文件 / HLS 已下载分片），支持续传；</li>
- *   <li>任务注册表：所有任务（含终态）常驻内存供下载管理页展示；终态任务持久化为 JSON
- *       （HeyboxPrefs），进程重启后恢复，DOWNLOADING 一律归档为 PAUSED；</li>
- *   <li>{@link TaskListener}：主线程回调，视频页 FAB / 底部抽屉 / 下载管理页三方同步；</li>
- *   <li>双管线：mp4 直链单请求流式下载（Range 断点续传）；m3u8/HLS 解析播放列表 →
- *       逐分片下载（续传跳过已存在分片）→ 合并为 MPEG-TS → 按需转封装 MP4；
- *       加密 HLS（#EXT-X-KEY 非 NONE）拒绝；</li>
- *   <li>保存：API 29+ MediaStore.Video IS_PENDING 流程；用户选择过 SAF 目录则写入
- *       DocumentsContract 树；API 26–28 写公共 Movies；重名自动 (n) 不覆盖；</li>
- *   <li>通知：进度（速度/大小/取消）、完成（路径/播放/分享/删除）、失败（原因/重试/取消）。</li>
- * </ul>
+ * 小黑盒视频下载：下载、保存、任务注册表与通知反馈（宿主进程内单例）。
+ * 要点：mp4 直链 Range 续传 / HLS 分片下载合并转 MP4（加密拒绝）；终态任务持久化、重启恢复；保存走 MediaStore/SAF/公共 Movies。
  */
 public final class VideoDownloadManager {
 
@@ -85,7 +69,7 @@ public final class VideoDownloadManager {
     /** 任务历史持久化 key（HeyboxPrefs 内 JSON 数组） */
     private static final String KEY_TASK_HISTORY = "video_task_history";
 
-    /** 单例：宿主进程内仅一份（所有 Activity/线程共享） */
+    /** 进程内单例 */
     private static final VideoDownloadManager INSTANCE = new VideoDownloadManager();
 
     private static final int NOTIF_BASE = 0x5644; // 'VD'
@@ -113,7 +97,7 @@ public final class VideoDownloadManager {
     /** 任务变化监听（主线程回调） */
     private final CopyOnWriteArrayList<TaskListener> listeners = new CopyOnWriteArrayList<>();
 
-    /** 主线程 Handler（通知、回调等 UI 操作） */
+    /** UI 操作 */
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     private volatile Context appContext;
@@ -125,7 +109,6 @@ public final class VideoDownloadManager {
         return INSTANCE;
     }
 
-    /* ================= 任务监听 ================= */
 
     /** 任务集变化回调（主线程）。任何状态/进度变化都会触发，UI 侧自行按需读取。 */
     public interface TaskListener {
@@ -161,7 +144,7 @@ public final class VideoDownloadManager {
         });
     }
 
-    /* ================= 对外 API（全部线程安全） ================= */
+    /* 对外 API（全部线程安全） */
 
     private volatile boolean receiverRegistered;
     private final BroadcastReceiver receiver = new BroadcastReceiver() {
@@ -171,7 +154,7 @@ public final class VideoDownloadManager {
         }
     };
 
-    /** 初始化：捕获 Context、注册通知广播、恢复任务历史（幂等）。 */
+    /** 幂等 */
     public void init(Context context) {
         if (context == null) {
             return;
@@ -205,22 +188,6 @@ public final class VideoDownloadManager {
         restoreHistory();
     }
 
-    /** 任务快照（进行中在前，其余按创建时间倒序）。 */
-    public List<DownloadTask> getTasksSnapshot() {
-        synchronized (tasks) {
-            List<DownloadTask> list = new ArrayList<>(tasks.values());
-            Collections.sort(list, (a, b) -> {
-                boolean aa = a.state == State.DOWNLOADING || a.state == State.PENDING;
-                boolean bb = b.state == State.DOWNLOADING || b.state == State.PENDING;
-                if (aa != bb) {
-                    return aa ? -1 : 1;
-                }
-                return Long.compare(b.createdAt, a.createdAt);
-            });
-            return list;
-        }
-    }
-
     /** 按 URL 查找任务（含终态），无则 null。同视频不同清晰度地址会归并到同一任务。 */
     public DownloadTask findTask(String url) {
         if (url == null) {
@@ -231,43 +198,9 @@ public final class VideoDownloadManager {
         }
     }
 
-    /** 是否有未完成任务（下载入口去重显示用） */
-    public boolean isActive(String url) {
-        DownloadTask t = findTask(url);
-        return t != null && !t.isTerminal();
-    }
-
-
-    /** 进行中（下载中/排队）任务数 */
-    public int activeCount() {
-        int n = 0;
-        synchronized (tasks) {
-            for (DownloadTask t : tasks.values()) {
-                if (t.state == State.DOWNLOADING || t.state == State.PENDING) {
-                    n++;
-                }
-            }
-        }
-        return n;
-    }
-
-    /** 已完成任务数 */
-    public int completedCount() {
-        int n = 0;
-        synchronized (tasks) {
-            for (DownloadTask t : tasks.values()) {
-                if (t.state == State.COMPLETED) {
-                    n++;
-                }
-            }
-        }
-        return n;
-    }
-
     /**
-     * 创建下载任务（幂等）：未完成任务重复请求只刷新通知；已完成/失败/取消的任务
-     * 重新请求则重置并重新下载。
-     */
+ * 创建下载任务（幂等）：未完成任务重复请求只刷新通知；终态任务重新请求则重置重下
+ */
     public boolean startDownload(String url, Map<String, String> headers, String suggestedName) {
         if (url == null || !isSupportedUrl(url)) {
             return false;
@@ -306,11 +239,6 @@ public final class VideoDownloadManager {
         }
     }
 
-    /** 重试失败的任务（等价 resume） */
-    public void retry(String url) {
-        resume(url);
-    }
-
     /** 取消任务：删除断点与半成品，任务进入 CANCELLED 态（保留在列表，可重新下载） */
     public void cancel(String url) {
         DownloadTask task = findTask(url);
@@ -331,49 +259,6 @@ public final class VideoDownloadManager {
         }
         synchronized (tasks) {
             tasks.remove(task.key);
-        }
-        persistTasks();
-        notifyChanged();
-    }
-
-    /** 批量移除任务（按注册表键）；deleteFile 为 true 时同时删除已保存的文件/断点 */
-    public void removeTasks(java.util.Collection<String> keys, boolean deleteFile) {
-        if (keys == null || keys.isEmpty()) {
-            return;
-        }
-        List<DownloadTask> doomed = new ArrayList<>();
-        synchronized (tasks) {
-            for (DownloadTask t : tasks.values()) {
-                if (keys.contains(t.key)) {
-                    doomed.add(t);
-                }
-            }
-        }
-        for (DownloadTask t : doomed) {
-            t.cancel();
-            if (deleteFile) {
-                t.deleteSavedFile();
-            }
-            synchronized (tasks) {
-                tasks.remove(t.key);
-            }
-        }
-        persistTasks();
-        notifyChanged();
-    }
-
-    /** 清空已完成任务记录（不删除已保存的视频文件） */
-    public void clearCompleted() {
-        List<DownloadTask> doomed = new ArrayList<>();
-        synchronized (tasks) {
-            for (DownloadTask t : tasks.values()) {
-                if (t.state == State.COMPLETED) {
-                    doomed.add(t);
-                }
-            }
-            for (DownloadTask t : doomed) {
-                tasks.remove(t.key);
-            }
         }
         persistTasks();
         notifyChanged();
@@ -454,7 +339,6 @@ public final class VideoDownloadManager {
         });
     }
 
-    /** 处理模块内广播（取消 / 重试 / 删除） */
     public boolean handleAction(Context context, String action, Intent intent) {
         if (action == null || intent == null) {
             return false;
@@ -495,12 +379,10 @@ public final class VideoDownloadManager {
         return false;
     }
 
-    /* ================= 可下载性判定 ================= */
 
     /**
-     * 入口判断：http(s) 直链（含 m3u8/HLS 播放列表）、非明显网页/接口地址、
-     * 非第三方站点（Steam 等游戏卡片预告片 CDN）。
-     */
+ * 入口判断：http(s) 直链（含 m3u8），排除网页/接口地址与第三方站点 CDN
+ */
     public static boolean isSupportedUrl(String url) {
         if (url == null) {
             return false;
@@ -526,7 +408,6 @@ public final class VideoDownloadManager {
                 || lower.contains("store_trailers");
     }
 
-    /** 明显不是媒体文件的路径（页面/接口） */
     private static boolean hasWebExtension(String lower) {
         String path = lower;
         try {
@@ -548,10 +429,8 @@ public final class VideoDownloadManager {
     }
 
     /**
-     * 任务去重键：小黑盒同一视频在不同入口（信息流/详情页/不同清晰度）的
-     * m3u8 地址 query 不同（quality= 等），但 link_id 一致——用它做注册表键，
-     * 避免同一视频被重复下载。
-     */
+ * 任务去重键：取 query 的 link_id（同视频不同清晰度归并），无则用 URL
+ */
     private static String taskKey(String url) {
         try {
             String query = new URL(url).getQuery();
@@ -567,12 +446,11 @@ public final class VideoDownloadManager {
         return url;
     }
 
-    /** URL 是否为 HLS 播放列表 */
     private static boolean isHlsUrl(String url) {
         return url != null && url.toLowerCase(Locale.US).contains(".m3u8");
     }
 
-    /** 常见视频扩展名（ts 亦为合法产物：HLS 合并输出） */
+    /** ts 为 HLS 合并产物 */
     private static boolean isVideoExtension(String ext) {
         switch (ext) {
             case "mp4":
@@ -592,14 +470,12 @@ public final class VideoDownloadManager {
         }
     }
 
-    /* ================= 下载任务 ================= */
 
-    /** 任务状态 */
     public enum State {
         PENDING, DOWNLOADING, PAUSED, COMPLETED, FAILED, CANCELLED
     }
 
-    /** 单个下载任务：Runnable 跑在线程池上；状态迁移统一走 {@link #transition}。 */
+    /** 状态迁移统一走 {@link #transition} */
     public final class DownloadTask implements Runnable {
         public final String url;
         public final String key;
@@ -613,15 +489,12 @@ public final class VideoDownloadManager {
         private final Object runLock = new Object();
         /** 运行代际：暂停/继续都会递增，旧代线程在任何收尾点发现代际过期即静默退出 */
         private volatile long runGeneration;
-        volatile Future<?> future;
-        volatile boolean running;
         public volatile State state = State.PENDING;
-        volatile int retryCount; // 已自动重试的次数
+        volatile int retryCount;
         volatile boolean hlsMode; // m3u8：进度按分段计
         volatile int segmentsDone;
         volatile int segmentsTotal;
-        volatile boolean converting; // ts→mp4 转封装进行中
-        public volatile long downloaded; // 已下载字节
+        public volatile long downloaded;
         public volatile long total; // 总字节（-1 未知）；完成后 = downloaded
         volatile long speedBps; // 平滑后速度（字节/秒）
         volatile File tempFile;
@@ -629,7 +502,7 @@ public final class VideoDownloadManager {
         volatile String resolvedExt;
         public volatile Uri resultUri;
         public volatile String savedPath; // 人类可读保存路径（完成后填充）
-        public volatile String errorMsg; // 失败原因
+        public volatile String errorMsg;
 
         DownloadTask(String url, Map<String, String> headers, String suggestedName) {
             this.url = url;
@@ -638,7 +511,6 @@ public final class VideoDownloadManager {
             this.suggestedName = suggestedName;
         }
 
-        /* ---- 状态与展示 ---- */
 
         public boolean isTerminal() {
             State s = state;
@@ -682,7 +554,6 @@ public final class VideoDownloadManager {
             return -1;
         }
 
-        /** 状态行文案（管理页/通知用） */
         public String statusLine() {
             State s = state;
             switch (s) {
@@ -709,7 +580,6 @@ public final class VideoDownloadManager {
             }
         }
 
-        /** 用系统播放器打开已下载的视频（完成态） */
         public void open(Context context) {
             Uri uri = resultUri;
             if (uri == null) {
@@ -727,7 +597,6 @@ public final class VideoDownloadManager {
             }
         }
 
-        /** 系统分享已下载的视频文件（完成态） */
         public void share(Context context) {
             Uri uri = resultUri;
             if (uri == null) {
@@ -747,7 +616,6 @@ public final class VideoDownloadManager {
             }
         }
 
-        /* ---- 用户操作 ---- */
 
         void start() {
             runGeneration++;
@@ -763,7 +631,6 @@ public final class VideoDownloadManager {
             }
             pauseRequested.set(true);
             runGeneration++;
-            running = false;
             transition(State.PAUSED);
         }
 
@@ -773,9 +640,6 @@ public final class VideoDownloadManager {
             if (s != State.PAUSED && s != State.FAILED && s != State.CANCELLED
                     && s != State.PENDING) {
                 return;
-            }
-            if (running) {
-                return; // 旧线程尚未到达检查点；其退出后再次点击继续即可
             }
             cancelled.set(false);
             pauseRequested.set(false);
@@ -793,10 +657,6 @@ public final class VideoDownloadManager {
             if (cancelled.compareAndSet(false, true)) {
                 pauseRequested.set(false);
                 runGeneration++; // 使进行中的收尾（finish/网络读取）失效
-                running = false;
-                if (future != null) {
-                    future.cancel(true);
-                }
                 deleteTemp();
                 transition(State.CANCELLED);
                 mainHandler.post(new Runnable() {
@@ -844,7 +704,6 @@ public final class VideoDownloadManager {
             }
         }
 
-        /* ---- 工作循环 ---- */
 
         @Override
         public void run() {
@@ -854,7 +713,6 @@ public final class VideoDownloadManager {
                 if (cancelled.get() || pauseRequested.get()) {
                     return; // 提交后未开跑就被暂停/取消（状态已由调用方迁移）
                 }
-                running = true;
                 try {
                     transition(State.DOWNLOADING);
                     long fetched = isHlsUrl(url) ? fetchHls() : fetchOnce();
@@ -875,9 +733,6 @@ public final class VideoDownloadManager {
                         return;
                     }
                     handleFailure(t);
-                } finally {
-                    running = false;
-                    future = null;
                 }
             }
         }
@@ -920,7 +775,6 @@ public final class VideoDownloadManager {
             });
         }
 
-        /* ---- mp4 直链管线（Range 断点续传） ---- */
 
         private long fetchOnce() throws Exception {
             File part = stableTempFile();
@@ -933,7 +787,7 @@ public final class VideoDownloadManager {
             tempFile = part;
             downloaded = offset;
 
-            HttpURLConnection connection = openConnection(url);
+            HttpURLConnection connection = openConnection(url, headers);
             if (appending) {
                 connection.addRequestProperty("Range", "bytes=" + offset + "-");
             }
@@ -980,7 +834,7 @@ public final class VideoDownloadManager {
                      FileOutputStream file = new FileOutputStream(part, appending)) {
                     byte[] buffer = new byte[BUFFER_SIZE];
                     int read;
-                    while (running && !cancelled.get() && !pauseRequested.get()
+                    while (!cancelled.get() && !pauseRequested.get()
                             && (read = input.read(buffer)) != -1) {
                         file.write(buffer, 0, read);
                         count += read;
@@ -1000,7 +854,7 @@ public final class VideoDownloadManager {
                 if (pauseRequested.get()) {
                     return -1; // run() 统一转 PAUSED
                 }
-                if (!running || cancelled.get()) {
+                if (cancelled.get()) {
                     throw new IllegalStateException("cancelled");
                 }
                 downloaded = offset + count;
@@ -1012,7 +866,6 @@ public final class VideoDownloadManager {
             }
         }
 
-        /* ---- HLS (m3u8) 管线：分片下载（断点跳过已下载分片）→ 合并 MPEG-TS ---- */
 
         private long fetchHls() throws Exception {
             File dir = stableHlsDir();
@@ -1025,14 +878,14 @@ public final class VideoDownloadManager {
             total = -1;
             try {
                 String playlistUrl = url;
-                String playlist = fetchText(playlistUrl);
+                String playlist = fetchText(playlistUrl, headers);
                 if (playlist == null || playlist.trim().isEmpty()) {
                     throw new IllegalStateException("HLS 播放列表为空");
                 }
                 if (playlist.contains("#EXT-X-STREAM-INF")) {
-                    playlistUrl = pickBestVariant(playlistUrl, playlist);
+                    playlistUrl = pickBestVariantStatic(playlistUrl, playlist);
                     LogRecorder.record(Log.INFO, "BetterHeybox", "HLS 媒体播放列表: " + playlistUrl);
-                    playlist = fetchText(playlistUrl);
+                    playlist = fetchText(playlistUrl, headers);
                     if (playlist == null || playlist.trim().isEmpty()) {
                         throw new IllegalStateException("HLS 媒体播放列表为空");
                     }
@@ -1052,12 +905,12 @@ public final class VideoDownloadManager {
                     if (pauseRequested.get()) {
                         return -1;
                     }
-                    if (!running || cancelled.get()) {
+                    if (cancelled.get()) {
                         throw new IllegalStateException("cancelled");
                     }
                     File seg = new File(dir, String.format(Locale.US, "seg_%05d", i));
                     if (resuming && seg.exists() && seg.length() > 0) {
-                        bytes += seg.length(); // 断点：跳过已下载分片
+                        bytes += seg.length();
                     } else {
                         bytes += downloadToFile(segments.get(i), seg);
                         if (bytes > MAX_FILE_SIZE) {
@@ -1075,26 +928,21 @@ public final class VideoDownloadManager {
                     }
                 }
                 // 按序合并为单个 MPEG-TS（ts 顺序拼接即可播放，无需 ffmpeg）。
-                // 注意合并文件必须写在分片目录之外：合并完成后 deleteDir(dir) 会清掉分片，
-                // 若 merged 位于 dir 内会把自己一并删除，导致 finish 报「临时文件缺失」
+                // 合并文件必须写在分片目录之外：deleteDir(dir) 会清分片目录，写在内会连自己一起删
                 File merged = new File(newTempDir(),
                         "m_" + Integer.toHexString(url.hashCode()) + ".tmp");
                 tempFile = merged;
                 try (OutputStream out = new FileOutputStream(merged)) {
-                    byte[] buffer = new byte[BUFFER_SIZE];
                     for (int i = 0; i < segments.size(); i++) {
                         if (pauseRequested.get()) {
                             return -1;
                         }
-                        if (!running || cancelled.get()) {
+                        if (cancelled.get()) {
                             throw new IllegalStateException("cancelled");
                         }
                         File seg = new File(dir, String.format(Locale.US, "seg_%05d", i));
                         try (InputStream in = new FileInputStream(seg)) {
-                            int read;
-                            while ((read = in.read(buffer)) != -1) {
-                                out.write(buffer, 0, read);
-                            }
+                            copyStream(in, out);
                         }
                     }
                 }
@@ -1134,7 +982,6 @@ public final class VideoDownloadManager {
             return new File(newTempDir(), "hls_" + Integer.toHexString(url.hashCode()));
         }
 
-        /* ---- 完成收尾：转封装 → 转存 → 通知 ---- */
 
         private void finish(long fetched) {
             if (cancelled.get() || pauseRequested.get()) {
@@ -1163,10 +1010,8 @@ public final class VideoDownloadManager {
             }
             // HLS 合并产物是 ts：按设置自动转封装为 MP4（无转码；失败保留 ts）
             if ("ts".equals(ext) && HeyboxPrefs.getBoolean(App.KEY_VIDEO_TO_MP4, true)) {
-                converting = true;
                 notifyProgress(-1);
                 File mp4 = remuxTsToMp4(tmp);
-                converting = false;
                 if (cancelled.get() || pauseRequested.get()) {
                     return;
                 }
@@ -1249,11 +1094,7 @@ public final class VideoDownloadManager {
                     if (os == null) {
                         return null;
                     }
-                    byte[] buffer = new byte[BUFFER_SIZE];
-                    int read;
-                    while ((read = in.read(buffer)) != -1) {
-                        os.write(buffer, 0, read);
-                    }
+                    copyStream(in, os);
                 }
                 ContentValues done = new ContentValues();
                 done.put(MediaStore.Video.Media.IS_PENDING, 0);
@@ -1266,9 +1107,8 @@ public final class VideoDownloadManager {
         }
 
         /**
-         * 写入用户选择的文件夹（SAF tree）：重名由系统去重/追加 (n)，
-         * outPath 填充人类可读的保存路径（primary 存储映射为 /sdcard/…）。
-         */
+ * 写入用户选择的 SAF 文件夹；重名自动 (n)，outPath 填充可读保存路径
+ */
         private Uri saveToTree(Context context, File file, String fileName, String mime,
                                String treeUriString, StringBuilder outPath) {
             try {
@@ -1301,11 +1141,7 @@ public final class VideoDownloadManager {
                     if (os == null) {
                         return null;
                     }
-                    byte[] buffer = new byte[BUFFER_SIZE];
-                    int read;
-                    while ((read = in.read(buffer)) != -1) {
-                        os.write(buffer, 0, read);
-                    }
+                    copyStream(in, os);
                 }
                 // 人类可读路径："primary:Movies/xx/名.mp4" → "/sdcard/Movies/xx/名.mp4"
                 String docId = android.provider.DocumentsContract.getDocumentId(doc);
@@ -1335,11 +1171,7 @@ public final class VideoDownloadManager {
                 File target = new File(dir, fileName);
                 try (InputStream in = new FileInputStream(file);
                      OutputStream os = new FileOutputStream(target)) {
-                    byte[] buffer = new byte[BUFFER_SIZE];
-                    int read;
-                    while ((read = in.read(buffer)) != -1) {
-                        os.write(buffer, 0, read);
-                    }
+                    copyStream(in, os);
                 }
                 MediaScannerConnection.scanFile(context,
                         new String[]{target.getAbsolutePath()}, null, null);
@@ -1392,11 +1224,8 @@ public final class VideoDownloadManager {
         }
 
         /**
-         * ts → mp4 转封装（无转码）：MediaExtractor 解包 ts 轨道，
-         * MediaMuxer 以 MPEG-4 容器原样写入样本。全轨道交错读取——
-         * 按轨依次抽干会把提取器读到文件尾，音轨将一个样本都写不到（曾致无声）。
-         * 失败（如 MPEG2 等 MP4 不支持的内容）返回 null，调用方保留 ts。
-         */
+ * ts→mp4 无转码转封装；全轨道交错读取（按轨抽干会致音轨无样本），失败返回 null 保留 ts
+ */
         private File remuxTsToMp4(File tsFile) {
             MediaExtractor extractor = new MediaExtractor();
             MediaMuxer muxer = null;
@@ -1486,7 +1315,6 @@ public final class VideoDownloadManager {
             }
         }
 
-        /* ---- 通知 ---- */
 
         private int id() {
             return NOTIF_BASE + (url.hashCode() & 0xFFFF);
@@ -1515,7 +1343,7 @@ public final class VideoDownloadManager {
             if (downloadedNow >= 0) {
                 downloaded = downloadedNow;
             }
-            notifyChanged(); // 抽屉/FAB/下载管理页实时刷新
+            notifyChanged(); // 实时刷新
             if (!notifAllowed()) {
                 return;
             }
@@ -1621,17 +1449,6 @@ public final class VideoDownloadManager {
             return c;
         }
 
-        /* ---- 网络工具（实例侧） ---- */
-
-        /** 拉取文本（播放列表），复用防盗链请求头 */
-        private String fetchText(String textUrl) throws Exception {
-            return VideoDownloadManager.fetchText(textUrl, headers);
-        }
-
-        /** master playlist：选 BANDWIDTH 最高的变体，返回绝对 URL（委托静态版，探测/下载共用） */
-        private String pickBestVariant(String playlistUrl, String playlist) {
-            return VideoDownloadManager.pickBestVariantStatic(playlistUrl, playlist);
-        }
 
         /** 加密 HLS（DRM 等价物）不支持下载 */
         private void requireUnencrypted(String playlist) {
@@ -1644,50 +1461,25 @@ public final class VideoDownloadManager {
             }
         }
 
-        /** 提取媒体播放列表的分片 URI（非注释行），并绝对化 */
-        private List<String> parseSegmentUris(String playlistUrl, String playlist) {
-            List<String> segments = new ArrayList<>();
-            for (String line : playlist.split("\n")) {
-                String l = line.trim();
-                if (l.isEmpty() || l.startsWith("#")) {
-                    continue;
-                }
-                segments.add(absolutize(playlistUrl, l));
-            }
-            return segments;
-        }
-
         /** 单文件下载（分片）：返回字节数 */
         private long downloadToFile(String fileUrl, File target) throws Exception {
-            HttpURLConnection connection = openConnection(fileUrl);
+            HttpURLConnection connection = openConnection(fileUrl, headers);
             try {
                 int code = connection.getResponseCode();
                 if (code < 200 || code >= 300) {
                     throw new IllegalStateException("HTTP " + code + " (segment)");
                 }
-                long count = 0;
                 try (InputStream input = connection.getInputStream();
                      FileOutputStream file = new FileOutputStream(target)) {
-                    byte[] buffer = new byte[BUFFER_SIZE];
-                    int read;
-                    while ((read = input.read(buffer)) != -1) {
-                        file.write(buffer, 0, read);
-                        count += read;
-                    }
+                    return copyStream(input, file);
                 }
-                return count;
             } finally {
                 connection.disconnect();
             }
         }
 
-        /** 统一建连（任务请求头） */
-        private HttpURLConnection openConnection(String target) throws Exception {
-            return VideoDownloadManager.openConnection(target, headers);
-        }
     }
 
-    /* ================= 静态网络工具（任务与探测共用） ================= */
 
     /** 统一建连：防盗链请求头（捕获的 + 默认 UA/Referer 兜底）+ 超时 + 重定向 */
     private static HttpURLConnection openConnection(String target, Map<String, String> headers)
@@ -1713,7 +1505,17 @@ public final class VideoDownloadManager {
         return connection;
     }
 
-    /** 拉取文本（播放列表） */
+    private static long copyStream(InputStream in, OutputStream out) throws Exception {
+        byte[] buffer = new byte[BUFFER_SIZE];
+        long count = 0;
+        int read;
+        while ((read = in.read(buffer)) != -1) {
+            out.write(buffer, 0, read);
+            count += read;
+        }
+        return count;
+    }
+
     private static String fetchText(String textUrl, Map<String, String> headers) throws Exception {
         HttpURLConnection connection = openConnection(textUrl, headers);
         try {
@@ -1723,11 +1525,7 @@ public final class VideoDownloadManager {
             }
             try (InputStream in = connection.getInputStream()) {
                 java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
-                byte[] buffer = new byte[BUFFER_SIZE];
-                int read;
-                while ((read = in.read(buffer)) != -1) {
-                    bos.write(buffer, 0, read);
-                }
+                copyStream(in, bos);
                 return new String(bos.toByteArray(), java.nio.charset.StandardCharsets.UTF_8);
             }
         } finally {
@@ -1758,7 +1556,6 @@ public final class VideoDownloadManager {
         return absolutize(playlistUrl, bestUri);
     }
 
-    /** 解析 #EXT-X-STREAM-INF 的 BANDWIDTH 属性 */
     private static long parseBandwidth(String line) {
         int idx = line.toUpperCase(Locale.US).indexOf("BANDWIDTH=");
         if (idx < 0) {
@@ -1801,7 +1598,6 @@ public final class VideoDownloadManager {
         return segments;
     }
 
-    /* ================= 通知公共工具 ================= */
 
     private void ensureChannel(Context context) {
         if (Build.VERSION.SDK_INT < 26) {
@@ -1840,9 +1636,8 @@ public final class VideoDownloadManager {
     }
 
     /**
-     * 发出通知。注意：方法名刻意避开 {@code notify}（否则在内部类里会与
-     * {@link Object#notify()} 冲突而被解析为空操作），统一通过 NotificationManager 提交。
-     */
+ * 发通知（方法名避开 notify，防在内部类里与 Object.notify() 冲突）
+ */
     private void showNotification(int id, Notification notification) {
         Context context = appContext;
         if (context == null) {
@@ -1859,7 +1654,6 @@ public final class VideoDownloadManager {
         }
     }
 
-    /* ================= 历史持久化 ================= */
 
     private void persistTasks() {
         try {
@@ -1951,7 +1745,6 @@ public final class VideoDownloadManager {
         }
     }
 
-    /* ================= 工具 ================= */
 
     private File newTempDir() {
         Context context = appContext;
@@ -1991,7 +1784,6 @@ public final class VideoDownloadManager {
                 || lower.equals("hls") || lower.equals("main");
     }
 
-    /** 递归删除目录（HLS 分片目录清理） */
     private static void deleteDir(File dir) {
         try {
             File[] children = dir.listFiles();
@@ -2013,7 +1805,7 @@ public final class VideoDownloadManager {
         }
     }
 
-    /** 清洗文件名字段：去掉非法字符与控制符、压缩空白、截断过长 */
+    /** 去非法字符、压缩空白、截断过长 */
     static String cleanName(String raw, String fallback) {
         if (raw == null) {
             return fallback;
@@ -2122,12 +1914,8 @@ public final class VideoDownloadManager {
         }
     }
 
-    /** 人类可读大小（UI 跨包使用） */
-    public static String formatSizePublic(long bytes) {
-        return formatSize(bytes);
-    }
-
-    private static String formatSize(long bytes) {
+    /** UI 跨包使用 */
+    public static String formatSize(long bytes) {
         if (bytes < 0) {
             return "";
         }

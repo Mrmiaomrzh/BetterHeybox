@@ -14,23 +14,8 @@ import java.util.Date;
 import java.util.Locale;
 
 /**
- * 模块文件日志记录器。
- *
- * <p>受「记录日志」开关（{@link App#KEY_LOG}，默认关闭）控制：开启后，模块在运行中产生的
- * 日志会自动写入文件，便于不接 logcat 时离线排查（例如复现「开关不生效」等问题）。</p>
- *
- * <p>写入位置：{@code <filesDir>/betterheybox/log.txt}</p>
- * <ul>
- *   <li>小黑盒进程（Hook 侧）→ 小黑盒的 files 目录（模块以小黑盒 uid 运行，可直接写）</li>
- *   <li>模块进程（设置页/广播接收）→ 模块自己的 files 目录</li>
- * </ul>
- *
- * <p>滚动：单文件超过 {@link #MAX_BYTES} 时重命名为 log.1.txt（覆盖旧备份），
- * 始终保持最多 2 个文件。所有写入都在 {@link #LOCK} 上同步，线程安全。</p>
- *
- * <p>上下文获取：优先使用调用方显式传入的 {@link #setContext(Context)}，
- * 兜底反射 {@code ActivityThread.currentApplication()}；拿不到 Context 时跳过文件写入
- * （logcat 输出不受影响）。</p>
+ * 模块文件日志（受「记录日志」开关控制）：写入 <filesDir>/betterheybox/log.txt，超限滚动为 log.1.txt（最多 2 个）。
+ * 上下文：优先 setContext，兜底 ActivityThread.currentApplication()，拿不到则跳过文件写入
  */
 public final class LogRecorder {
 
@@ -59,16 +44,12 @@ public final class LogRecorder {
         sEnabled = enabled;
     }
 
-    public static boolean isEnabled() {
-        return sEnabled;
-    }
-
     public static void record(int level, String tag, String msg) {
         if (!sEnabled || msg == null) {
             return;
         }
-        if (!BuildFlags.DEBUG && level < Log.ERROR) {
-            return; // 正式版只保留 error 级日志
+        if (!Logs.shouldLog(level)) {
+            return;
         }
         recordLocked(level, tag, msg, null);
     }
@@ -77,8 +58,8 @@ public final class LogRecorder {
         if (!sEnabled) {
             return;
         }
-        if (!BuildFlags.DEBUG && level < Log.ERROR) {
-            return; // 正式版只保留 error 级日志
+        if (!Logs.shouldLog(level)) {
+            return;
         }
         recordLocked(level, tag, msg, tr);
     }
@@ -88,16 +69,16 @@ public final class LogRecorder {
     }
 
     public static String getLogFilePath() {
-        Context ctx = sContext != null ? sContext : resolveApplicationContext();
+        Context ctx = sContext != null ? sContext : App.resolveAppContext();
         if (ctx == null) {
             return null;
         }
         return new File(new File(ctx.getFilesDir(), DIR_NAME), FILE_NAME).getAbsolutePath();
     }
 
-    /** 滚动备份日志（log.1.txt）路径，供导出日志时一并打包 */
+    /** log.1.txt 备份路径 */
     public static String getLogBackupFilePath() {
-        Context ctx = sContext != null ? sContext : resolveApplicationContext();
+        Context ctx = sContext != null ? sContext : App.resolveAppContext();
         if (ctx == null) {
             return null;
         }
@@ -109,7 +90,7 @@ public final class LogRecorder {
             try {
                 Context ctx = sContext;
                 if (ctx == null) {
-                    ctx = resolveApplicationContext();
+                    ctx = App.resolveAppContext();
                     if (ctx == null) {
                         return;
                     }
@@ -170,17 +151,5 @@ public final class LogRecorder {
             default:
                 return '?';
         }
-    }
-
-    private static Context resolveApplicationContext() {
-        try {
-            Class<?> activityThread = Class.forName("android.app.ActivityThread");
-            Object app = activityThread.getMethod("currentApplication").invoke(null);
-            if (app instanceof Context) {
-                return (Context) app;
-            }
-        } catch (Throwable ignored) {
-        }
-        return null;
     }
 }

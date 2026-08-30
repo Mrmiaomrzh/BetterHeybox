@@ -12,31 +12,9 @@ public final class ConfigBackup {
     private static final String KEY_EXPORTED_AT = "exportedAt";
     private static final String KEY_BOOLEANS = "booleans";
     private static final String KEY_STRINGS = "strings";
-    private static final String[] BOOLEAN_KEYS = {
-            App.KEY_OPEN_SCREEN,
-            App.KEY_FEED_AD,
-            App.KEY_BUBBLE_AD,
-            App.KEY_CORNER_AD,
-            App.KEY_PROMOTE_AD,
-            App.KEY_HIDE_TAB_HOME,
-            App.KEY_HIDE_TAB_HOT,
-            App.KEY_HIDE_TAB_GAME,
-            App.KEY_HIDE_ADD,
-            App.KEY_COPY_POST,
-            App.KEY_CUSTOM_TEXT_SELECT,
-            App.KEY_SYSTEM_SHARE,
-            App.KEY_VIDEO_DOWNLOAD,
-            App.KEY_VIDEO_TO_MP4,
-            App.KEY_PURIFY_SHARE_LINK,
-            App.KEY_BLOCK_UPDATE,
-            App.KEY_DAILY_TASK_ENABLED,
-            App.KEY_FAKE_NOTIFICATION,
-            App.KEY_LOG,
-            App.KEY_LIQUID_GLASS,
-            App.KEY_GLASS_IMMERSIVE,
-            App.KEY_GLASS_ADAPTIVE,
-            App.KEY_GLASS_FIT_TABS,
-    };
+    /** 派生自 {@link App#BOOLEAN_DEFAULTS} */
+    private static final String[] BOOLEAN_KEYS =
+            App.BOOLEAN_DEFAULTS.keySet().toArray(new String[0]);
     private static final String[] STRING_KEYS = {
             App.KEY_DAILY_TASK_PICTURE,
             App.KEY_DAILY_TASK_NORMAL,
@@ -60,19 +38,13 @@ public final class ConfigBackup {
 
     private ConfigBackup() {
     }
-    public interface BooleanReader {
-        boolean get(String key, boolean def);
+    public interface Reader<T> {
+        T get(String key, T def);
     }
-    public interface StringReader {
-        String get(String key, String def);
+    public interface Writer<T> {
+        void write(String key, T value);
     }
-    public interface BooleanWriter {
-        void write(String key, boolean value);
-    }
-    public interface StringWriter {
-        void write(String key, String value);
-    }
-    public static String buildJson(BooleanReader booleanReader, StringReader stringReader) {
+    public static String buildJson(Reader<Boolean> booleanReader, Reader<String> stringReader) {
         try {
             JSONObject booleans = new JSONObject();
             for (String key : BOOLEAN_KEYS) {
@@ -95,7 +67,7 @@ public final class ConfigBackup {
             return null;
         }
     }
-    public static ApplyResult applyJson(String json, BooleanWriter booleanWriter, StringWriter stringWriter) {
+    public static ApplyResult applyJson(String json, Writer<Boolean> booleanWriter, Writer<String> stringWriter) {
         try {
             JSONObject root = new JSONObject(json);
             String format = root.optString(KEY_FORMAT);
@@ -143,18 +115,8 @@ public final class ConfigBackup {
         return false;
     }
     private static boolean defaultFor(String key) {
-        if (App.KEY_OPEN_SCREEN.equals(key)
-                || App.KEY_FEED_AD.equals(key)
-                || App.KEY_BUBBLE_AD.equals(key)
-                || App.KEY_CORNER_AD.equals(key)
-                || App.KEY_PROMOTE_AD.equals(key)
-                || App.KEY_COPY_POST.equals(key)
-                || App.KEY_SYSTEM_SHARE.equals(key)
-                || App.KEY_LIQUID_GLASS.equals(key)
-                || App.KEY_GLASS_ADAPTIVE.equals(key)) {
-            return true;
-        }
-        return false;
+        Boolean def = App.BOOLEAN_DEFAULTS.get(key);
+        return def != null ? def : false;
     }
     public static final class ApplyResult {
         public final int applied;

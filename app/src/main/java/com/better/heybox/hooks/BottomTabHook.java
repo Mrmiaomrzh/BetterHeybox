@@ -10,6 +10,7 @@ import java.lang.reflect.Method;
 
 import com.better.heybox.App;
 import com.better.heybox.MainModule;
+import com.better.heybox.ViewUtils;
 import com.better.heybox.liquidglass.LiquidGlassInstaller;
 
 /**
@@ -23,7 +24,6 @@ public final class BottomTabHook {
         this.module = module;
     }
 
-    /** 安装本模块的全部 Hook */
     public void install(ClassLoader cl) {
         hookBottomTabs(cl);
     }
@@ -33,7 +33,7 @@ public final class BottomTabHook {
             Class<?> clazz = Class.forName("com.max.xiaoheihe.MainActivity", false, cl);
             Method onCreate = clazz.getDeclaredMethod("onCreate", android.os.Bundle.class);
             module.hook(onCreate).intercept(chain -> {
-                Object result = chain.proceed(); // 先执行原 onCreate
+                Object result = chain.proceed();
                 try {
                     applyBottomTabSettings(chain.getThisObject());
                 } catch (Throwable t) {
@@ -60,28 +60,24 @@ public final class BottomTabHook {
                 module.logd(Log.WARN, module.TAG, "底栏 onResume Hook 失败: " + t);
             }
 
-            // 加号/底栏会被 MainActivity$j.b(Boolean) 生命周期回调重新 setVisibility(0) 显示，
-            // hook 该回调，显示后重新应用隐藏设置
+            // 底栏会被 MainActivity$j.b(Boolean) 回调重新显示，hook 该回调后重新应用隐藏
             try {
                 Class<?> observerCls = Class.forName("com.max.xiaoheihe.MainActivity$j", false, cl);
-                for (Method m : observerCls.getDeclaredMethods()) {
-                    if ("b".equals(m.getName()) && m.getParameterTypes().length == 1
-                            && m.getParameterTypes()[0] == Boolean.class) {
-                        module.hook(m).intercept(chain -> {
-                            Object result = chain.proceed();
-                            try {
-                                Object mainActivity = findOuterInstance(chain.getThisObject(), cl);
-                                if (mainActivity != null) {
-                                    applyBottomTabSettings(mainActivity);
-                                }
-                            } catch (Throwable t) {
-                                module.logd(Log.WARN, module.TAG, "底栏状态回调后重新隐藏失败: " + t);
+                Method b = ViewUtils.findMethod(observerCls, "b", Boolean.class);
+                if (b != null) {
+                    module.hook(b).intercept(chain -> {
+                        Object result = chain.proceed();
+                        try {
+                            Object mainActivity = ViewUtils.findOuter(chain.getThisObject(), clazz);
+                            if (mainActivity != null) {
+                                applyBottomTabSettings(mainActivity);
                             }
-                            return result;
-                        });
-                        module.logd(Log.INFO, module.TAG, "✔ 底栏状态回调 Hook 已安装");
-                        break;
-                    }
+                        } catch (Throwable t) {
+                            module.logd(Log.WARN, module.TAG, "底栏状态回调后重新隐藏失败: " + t);
+                        }
+                        return result;
+                    });
+                    module.logd(Log.INFO, module.TAG, "✔ 底栏状态回调 Hook 已安装");
                 }
             } catch (Throwable t) {
                 module.logd(Log.WARN, module.TAG, "底栏状态回调 Hook 安装失败: " + t);
@@ -91,22 +87,7 @@ public final class BottomTabHook {
         }
     }
 
-    private Object findOuterInstance(Object innerObj, ClassLoader cl) {
-        try {
-            Class<?> mainCls = Class.forName("com.max.xiaoheihe.MainActivity", false, cl);
-            for (Field f : innerObj.getClass().getDeclaredFields()) {
-                if (f.getType() == mainCls) {
-                    f.setAccessible(true);
-                    return f.get(innerObj);
-                }
-            }
-        } catch (Throwable t) {
-            module.logd(Log.WARN, module.TAG, "查找外部 MainActivity 实例失败: " + t);
-        }
-        return null;
-    }
-
-    /** 根据开关反射隐藏底部导航栏的 tab（首页/热点/游戏库）与加号 */
+    /** 隐藏 tab 与加号 */
     private void applyBottomTabSettings(Object activityObj) {
         try {
             Object binding = findViewBinding(activityObj);
@@ -114,11 +95,6 @@ public final class BottomTabHook {
                 module.logd(Log.WARN, module.TAG, "未找到 ViewBinding 字段（fi.i1 / hi.i1）");
                 return;
             }
-            // 诊断：打印 hook 侧读到的开关值
-            module.logd(Log.INFO, module.TAG, "开关值: home=" + module.isEnabled(App.KEY_HIDE_TAB_HOME, false)
-                    + " hot=" + module.isEnabled(App.KEY_HIDE_TAB_HOT, false)
-                    + " game=" + module.isEnabled(App.KEY_HIDE_TAB_GAME, false)
-                    + " add=" + module.isEnabled(App.KEY_HIDE_ADD, false));
             boolean anyTabHidden = false;
             // tab 名称按小黑盒资源动态解析（版本自适应：发现/游戏库/社区）
             String labelHome = MainModule.getHeyboxTabLabel(
@@ -150,10 +126,8 @@ public final class BottomTabHook {
             if (group != null) {
                 group.addOnLayoutChangeListener((v, left, top, right, bottom,
                         oldLeft, oldTop, oldRight, oldBottom) -> normalizeVisibleTabs(binding));
-                group.postDelayed(() -> normalizeVisibleTabs(binding), 100);
-                group.postDelayed(() -> normalizeVisibleTabs(binding), 500);
-                group.postDelayed(() -> normalizeVisibleTabs(binding), 1500);
-                group.postDelayed(() -> normalizeVisibleTabs(binding), 3000);
+                // 小黑盒会在启动/生命周期回调中延迟重新显示 tab，延迟多次重新应用以覆盖
+                retryDelayed(group, () -> normalizeVisibleTabs(binding), 100, 500, 1500, 3000);
             }
             ensureVisibleTabSelected(binding);
             LiquidGlassInstaller.syncTabVisibility();
@@ -162,13 +136,22 @@ public final class BottomTabHook {
         }
     }
 
+    /** 反射取绑定里的 tab 组字段 "o"（混淆名） */
+    private android.widget.RadioGroup tabGroup(Object binding) {
+        try {
+            Field f = binding.getClass().getDeclaredField("o");
+            f.setAccessible(true);
+            Object value = f.get(binding);
+            return value instanceof android.widget.RadioGroup ? (android.widget.RadioGroup) value : null;
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
     private void normalizeVisibleTabs(Object binding) {
         try {
-            Field groupField = binding.getClass().getDeclaredField("o");
-            groupField.setAccessible(true);
-            Object value = groupField.get(binding);
-            if (!(value instanceof android.widget.RadioGroup)) return;
-            android.widget.RadioGroup group = (android.widget.RadioGroup) value;
+            android.widget.RadioGroup group = tabGroup(binding);
+            if (group == null) return;
             int visible = 0;
             for (int i = 0; i < group.getChildCount(); i++) if (group.getChildAt(i).getVisibility() == View.VISIBLE) visible++;
             if (visible == 0) return;
@@ -186,11 +169,8 @@ public final class BottomTabHook {
 
     private void ensureVisibleTabSelected(Object binding) {
         try {
-            Field groupField = binding.getClass().getDeclaredField("o");
-            groupField.setAccessible(true);
-            Object value = groupField.get(binding);
-            if (!(value instanceof android.widget.RadioGroup)) return;
-            android.widget.RadioGroup group = (android.widget.RadioGroup) value;
+            android.widget.RadioGroup group = tabGroup(binding);
+            if (group == null) return;
             int checkedId = group.getCheckedRadioButtonId();
             if (checkedId != -1) {
                 View checked = group.findViewById(checkedId);
@@ -216,10 +196,13 @@ public final class BottomTabHook {
     }
 
     private ViewGroup findTabGroup(Object binding) {
-        try {
-            Field f = binding.getClass().getDeclaredField("o"); f.setAccessible(true);
-            Object value = f.get(binding); return value instanceof ViewGroup ? (ViewGroup) value : null;
-        } catch (Throwable ignored) { return null; }
+        return tabGroup(binding);
+    }
+
+    private void retryDelayed(View view, Runnable action, long... delays) {
+        for (long delay : delays) {
+            view.postDelayed(action, delay);
+        }
     }
 
     private Object findViewBinding(Object activity) {
@@ -254,26 +237,8 @@ public final class BottomTabHook {
             if (obj instanceof View) {
                 final View v = (View) obj;
                 v.setVisibility(View.GONE);
-                // 小黑盒会在启动/生命周期回调中延迟重新显示 tab/加号，
-                // 延迟多次重新隐藏以覆盖（否则出现 tab 与加号重合、布局错乱）
-                v.postDelayed(new Runnable() {
-                    @Override
-                    public void run() {
-                        v.setVisibility(View.GONE);
-                    }
-                }, 500);
-                v.postDelayed(new Runnable() {
-                    @Override
-                    public void run() {
-                        v.setVisibility(View.GONE);
-                    }
-                }, 1500);
-                v.postDelayed(new Runnable() {
-                    @Override
-                    public void run() {
-                        v.setVisibility(View.GONE);
-                    }
-                }, 3000);
+                // 小黑盒会延迟重新显示 tab/加号，延迟多次重新隐藏覆盖（否则 tab 与加号重合）
+                retryDelayed(v, () -> v.setVisibility(View.GONE), 500, 1500, 3000);
                 module.logd(Log.INFO, module.TAG, "隐藏 " + label + ": " + v.getVisibility());
             }
         } catch (Throwable t) {

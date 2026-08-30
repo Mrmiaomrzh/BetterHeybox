@@ -25,7 +25,6 @@ public final class GeneralHook {
         this.module = module;
     }
 
-    /** 安装本模块的全部 Hook */
     public void install(ClassLoader cl) {
         hookVersionNotice(cl);
         hookUpdateBlocking(cl);
@@ -33,14 +32,9 @@ public final class GeneralHook {
     }
 
     /**
-     * 伪装授予小黑盒通知权限：Hook 框架 {@code NotificationManager.areNotificationsEnabled()}
-     * 恒返回 true（开关开启时）。
-     *
-     * <p>小黑盒通过 {@code NotificationManagerCompat.from(ctx).areNotificationsEnabled()}
-     * （混淆类 androidx.core.app.m2）判断通知是否开启，签到/加成时给予额外奖励；
-     * compat 在 API 24+ 内部最终调用框架 {@code NotificationManager.areNotificationsEnabled()}，
-     * 故 hook 框架方法即可全局生效、跨版本稳定。</p>
-     */
+ * 伪装通知权限：Hook 框架 NotificationManager.areNotificationsEnabled() 恒返回 true（开关开启时）。
+ * 小黑盒经 NotificationManagerCompat（混淆 m2）判断，compat 内部最终调用框架方法，故 hook 框架方法全局生效
+ */
     private void hookFakeNotification(ClassLoader cl) {
         try {
             Class<?> nm = Class.forName("android.app.NotificationManager", false, cl);

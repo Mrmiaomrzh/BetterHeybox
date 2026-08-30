@@ -1,40 +1,25 @@
 package com.better.heybox;
 
 import android.content.Context;
-import android.content.res.ColorStateList;
 import android.content.res.Configuration;
-import android.content.res.TypedArray;
 import android.graphics.Color;
-import android.graphics.drawable.GradientDrawable;
-import android.graphics.drawable.RippleDrawable;
 import android.os.Build;
 import android.util.TypedValue;
-import android.view.View;
-import android.widget.TextView;
 
 /**
- * 让独立设置页和小黑盒内嵌设置页共享宿主主题与动态取色逻辑。
- *
- * <p>设计系统约定（视频下载 UI 与自绘文本选择共用）：</p>
- * <ul>
- *   <li>圆角：面板 28dp / 按钮与条目 16dp / 小件 12dp；</li>
- *   <li>动画：抽屉入场 220ms、scrim 150ms、按压反馈 80ms、状态切换 150ms，统一 Decelerate；</li>
- *   <li>取色：全部派生自系统 Monet 色板（accent1/2、neutral1/2），不支持 Monet 的旧版本
- *       回退宿主 colorAccent，再回退模块品牌蓝；深浅色自动适配。</li>
- * </ul>
+ * 共享宿主主题与动态取色逻辑（视频下载与自绘文本选择 UI 共用）。
+ * 取色：Monet → 宿主 colorAccent → 品牌蓝；圆角/动画见下方常量
  */
 public final class ThemeUtils {
 
     /** 模块品牌蓝（Monet 与宿主 colorAccent 均不可用时的最终兜底） */
     public static final int FALLBACK_ACCENT = 0xFF1677FF;
 
-    /* ---- 设计 token：圆角（dp） ---- */
     public static final int RADIUS_SHEET_DP = 28;
     public static final int RADIUS_BUTTON_DP = 16;
     public static final int RADIUS_ITEM_DP = 16;
     public static final int RADIUS_SMALL_DP = 12;
 
-    /* ---- 设计 token：动画（毫秒） ---- */
     public static final long ANIM_SHEET_IN_MS = 220;
     public static final long ANIM_SCRIM_IN_MS = 150;
     public static final long ANIM_PRESS_MS = 80;
@@ -43,37 +28,9 @@ public final class ThemeUtils {
     private ThemeUtils() {
     }
 
-    public static int resolveColor(Context context, int attr, int fallback) {
-        try {
-            TypedValue value = new TypedValue();
-            if (!context.getTheme().resolveAttribute(attr, value, true)) {
-                return fallback;
-            }
-            if (value.type >= TypedValue.TYPE_FIRST_COLOR_INT
-                    && value.type <= TypedValue.TYPE_LAST_COLOR_INT) {
-                return value.data;
-            }
-            if (value.resourceId != 0) {
-                return context.getResources().getColor(value.resourceId, context.getTheme());
-            }
-        } catch (Throwable ignored) {
-        }
-        return fallback;
-    }
-
-    public static int resolveTextColor(Context context, int attr, int fallback) {
-        try (TypedArray values = context.obtainStyledAttributes(new int[]{attr})) {
-            ColorStateList colors = values.getColorStateList(0);
-            return colors != null ? colors.getDefaultColor() : fallback;
-        } catch (Throwable ignored) {
-            return fallback;
-        }
-    }
-
     /**
-     * 强调色（accent1）：优先 Monet 动态取色（API 31+ 公开的 system_accent1_*，
-     * 深色取 600、浅色取 200），失败回退宿主 colorAccent，再回退模块品牌蓝。
-     */
+ * 强调色（accent1）：Monet → 宿主 colorAccent → 品牌蓝
+ */
     public static int resolveAccent(Context context) {
         return systemShade(context, "system_accent1_", FALLBACK_ACCENT);
     }
@@ -84,10 +41,8 @@ public final class ThemeUtils {
     }
 
     /**
-     * 强档位强调色（悬浮按钮/进度条专用）：浅色取 600（饱和）、深色取 200（亮泽），
-     * 保证叠在任意亮度的视频画面上都有足够对比度；{@link #resolveAccent} 则相反
-     * （深色 600/浅色 200，适合文字与小控件）。
-     */
+ * 强档位强调色（悬浮按钮/进度条）：档位与 resolveAccent 相反，保证画面上有足够对比度
+ */
     public static int resolveAccentStrong(Context context) {
         return systemShadeReversed(context, "system_accent1_", resolveAccent(context));
     }
@@ -115,14 +70,14 @@ public final class ThemeUtils {
         return fallback;
     }
 
-    /** 面板/页面背景（surface，neutral1）：深色取 900、浅色取 50。 */
+    /** surface（neutral1） */
     public static int surfaceColor(Context context) {
         return isDarkMode(context)
                 ? systemShade(context, "system_neutral1_900", 0xFF1C1C1E)
                 : systemShade(context, "system_neutral1_50", 0xFFFFFFFF);
     }
 
-    /** 次级表面（surfaceVariant，neutral2）：进度条轨道、chip、次级卡片底色。 */
+    /** surfaceVariant（neutral2） */
     public static int surfaceVariantColor(Context context) {
         return isDarkMode(context)
                 ? systemShade(context, "system_neutral2_800", 0xFF2C2C2E)
@@ -149,7 +104,7 @@ public final class ThemeUtils {
         return withAlpha(textPrimaryColor(context), 0x99);
     }
 
-    /** 读取系统 Monet 色板：深色 600 档 / 浅色 200 档，不可用时回退 fallback。 */
+    /** 不可用时回退 fallback */
     private static int systemShade(Context context, String family, int fallback) {
         try {
             if (Build.VERSION.SDK_INT >= 31) {
@@ -189,24 +144,7 @@ public final class ThemeUtils {
         return (int) (value * context.getResources().getDisplayMetrics().density + 0.5f);
     }
 
-    /** 使用系统 Monet accent 绘制按钮，并按实际背景亮度选择可读的前景文字色。 */
-    public static void applyFilledButton(View button, Context context, float radiusDp) {
-        int backgroundColor = resolveAccent(context);
-        int foregroundColor = readableForegroundOn(backgroundColor);
-        GradientDrawable shape = new GradientDrawable();
-        shape.setShape(GradientDrawable.RECTANGLE);
-        shape.setColor(backgroundColor);
-        shape.setCornerRadius(radiusDp * context.getResources().getDisplayMetrics().density);
-
-        int rippleColor = withAlpha(foregroundColor, 0x33);
-        button.setBackground(new RippleDrawable(
-                ColorStateList.valueOf(rippleColor), shape, null));
-        if (button instanceof TextView) {
-            ((TextView) button).setTextColor(foregroundColor);
-        }
-    }
-
-    /** 按背景亮度选择可读的前景文字色（白/黑），供自绘强调色按钮使用。 */
+    /** 供自绘强调色按钮使用 */
     public static int readableForegroundOn(int backgroundColor) {
         double luminance = (0.2126 * linear(Color.red(backgroundColor))
                 + 0.7152 * linear(Color.green(backgroundColor))
@@ -214,7 +152,7 @@ public final class ThemeUtils {
         return luminance > 0.45 ? Color.BLACK : Color.WHITE;
     }
 
-    /** 给颜色替换 alpha 通道（其余通道保留）。 */
+    /** 其余通道保留 */
     public static int withAlpha(int color, int alpha) {
         return Color.argb(alpha, Color.red(color), Color.green(color), Color.blue(color));
     }

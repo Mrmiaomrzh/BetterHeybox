@@ -27,7 +27,7 @@ public final class PromotePostHook {
     private void hookPromotePosts(ClassLoader cl) {
         try {
             Class<?> clazz = Class.forName("com.max.xiaoheihe.module.bbs.utils.b", false, cl);
-            // 遍历找渲染 BBS 帖子的静态方法
+            // 找渲染帖子的静态方法
             for (Method m : clazz.getDeclaredMethods()) {
                 if ("L".equals(m.getName()) && m.getParameterTypes().length == 5) {
                     module.hook(m).intercept(chain -> {

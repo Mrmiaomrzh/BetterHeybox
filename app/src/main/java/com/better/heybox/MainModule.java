@@ -28,28 +28,17 @@ import com.better.heybox.liquidglass.LiquidGlassHookBridge;
 import com.better.heybox.liquidglass.LiquidGlassInstaller;
 
 /**
- * BetterHeybox 模块入口（libxposed Modern API 102）。
- * 本类只保留：模块生命周期，Hook 安装编排
- *   {@link GeneralHook}    通用：版本检测 / 屏蔽更新
- *   {@link AdFilterHook}   广告过滤：开屏 / 信息流 / 气泡 / 角标
- *   {@link SettingsEntryHook} 设置页入口注入 + 内嵌设置面板
- *   {@link BottomTabHook}  底部导航栏隐藏
- *   {@link PromotePostHook} 推广贴屏蔽
- *   {@link TextSelectHook} 解除复制 / 标准文本选择 / 跨行选择修复
- *   {@link ImageShareHook} 图片系统分享
+ * 模块入口（libxposed Modern API 102）：只负责模块生命周期与 Hook 安装编排。
+ * 各 Hook 职责：通用、广告过滤、设置入口+内嵌面板、底部导航、推广贴、文本选择、图片分享
  */
 public class MainModule extends XposedModule {
 
-    /** 日志 TAG */
     public static final String TAG = "BetterHeybox";
 
-    /** 每日任务 Hook 实例 */
     private com.better.heybox.hooks.DailyTaskHook dailyTaskHook;
 
-    /** 目标应用包名 */
     public static final String TARGET_PKG = "com.max.xiaoheihe";
 
-    /** 目标小黑盒主版本 */
     public static final String TARGET_HEYBOX_VERSION = "1.3.393";
     public static final Set<String> SUPPORTED_HEYBOX_VERSIONS =
             Collections.unmodifiableSet(new LinkedHashSet<>(Arrays.asList(
@@ -68,7 +57,6 @@ public class MainModule extends XposedModule {
 
     @Override
     public boolean onHotReloading(HotReloadingParam param) {
-        // 允许热重载
         logd(Log.INFO, TAG, "允许热重载");
         return true;
     }
@@ -190,8 +178,8 @@ public class MainModule extends XposedModule {
     }
 
     public void logd(int level, String tag, String msg) {
-        if (!BuildFlags.DEBUG && level < Log.ERROR) {
-            return; // 正式版只保留 error 级日志
+        if (!Logs.shouldLog(level)) {
+            return;
         }
         try {
             boolean logEnabled = isEnabled(App.KEY_LOG, false);
@@ -204,8 +192,8 @@ public class MainModule extends XposedModule {
         log(level, tag, msg);
     }
     public void logd(int level, String tag, String msg, Throwable tr) {
-        if (!BuildFlags.DEBUG && level < Log.ERROR) {
-            return; // 正式版只保留 error 级日志
+        if (!Logs.shouldLog(level)) {
+            return;
         }
         try {
             boolean logEnabled = isEnabled(App.KEY_LOG, false);
@@ -218,11 +206,10 @@ public class MainModule extends XposedModule {
         log(level, tag, msg, tr);
     }
 
-    /** dp 换算（内嵌设置面板布局使用） */
     public int dp(Context context, float value) {
-        return (int) (value * context.getResources().getDisplayMetrics().density + 0.5f);
+        return ThemeUtils.dp(context, value);
     }
-    
+
     public void clearDailyTaskAndRetry(android.app.Activity activity) {
         if (dailyTaskHook != null) {
             dailyTaskHook.clearTodayAndRetry(activity);

@@ -8,15 +8,25 @@ import com.better.heybox.HeyboxPrefs;
 
 final class GlassConfig {
 
-    static volatile int darkColor = 0xFF000000;
-    static volatile int darkAlphaPct = 56;
-    static volatile int lightColor = 0xFFFFFFFF;
-    static volatile int lightAlphaPct = 64;
-    static volatile boolean adaptiveChrome = true;
-    static volatile boolean immersiveGestureNavigation = true;
-    static volatile boolean fitTabs = false;
-    static volatile int barHeightDp = 0;
-    static volatile int barOffsetDp = 16;
+    private static final int DEFAULT_DARK_COLOR = 0xFF000000;
+    private static final int DEFAULT_DARK_ALPHA = 56;
+    private static final int DEFAULT_LIGHT_COLOR = 0xFFFFFFFF;
+    private static final int DEFAULT_LIGHT_ALPHA = 64;
+    private static final boolean DEFAULT_ADAPTIVE = true;
+    private static final boolean DEFAULT_IMMERSIVE = true;
+    private static final boolean DEFAULT_FIT_TABS = false;
+    private static final int DEFAULT_BAR_HEIGHT = 0;
+    private static final int DEFAULT_BAR_OFFSET = 16;
+
+    static volatile int darkColor = DEFAULT_DARK_COLOR;
+    static volatile int darkAlphaPct = DEFAULT_DARK_ALPHA;
+    static volatile int lightColor = DEFAULT_LIGHT_COLOR;
+    static volatile int lightAlphaPct = DEFAULT_LIGHT_ALPHA;
+    static volatile boolean adaptiveChrome = DEFAULT_ADAPTIVE;
+    static volatile boolean immersiveGestureNavigation = DEFAULT_IMMERSIVE;
+    static volatile boolean fitTabs = DEFAULT_FIT_TABS;
+    static volatile int barHeightDp = DEFAULT_BAR_HEIGHT;
+    static volatile int barOffsetDp = DEFAULT_BAR_OFFSET;
 
     private GlassConfig() {
     }
@@ -70,15 +80,15 @@ final class GlassConfig {
     }
 
     static void resetDefaults() {
-        darkColor = 0xFF000000;
-        darkAlphaPct = 56;
-        lightColor = 0xFFFFFFFF;
-        lightAlphaPct = 64;
-        adaptiveChrome = true;
-        barHeightDp = 0;
-        barOffsetDp = 16;
-        immersiveGestureNavigation = true;
-        fitTabs = false;
+        darkColor = DEFAULT_DARK_COLOR;
+        darkAlphaPct = DEFAULT_DARK_ALPHA;
+        lightColor = DEFAULT_LIGHT_COLOR;
+        lightAlphaPct = DEFAULT_LIGHT_ALPHA;
+        adaptiveChrome = DEFAULT_ADAPTIVE;
+        barHeightDp = DEFAULT_BAR_HEIGHT;
+        barOffsetDp = DEFAULT_BAR_OFFSET;
+        immersiveGestureNavigation = DEFAULT_IMMERSIVE;
+        fitTabs = DEFAULT_FIT_TABS;
     }
 
     private static int parseColor(String raw, int fallback) {

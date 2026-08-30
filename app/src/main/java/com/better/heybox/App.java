@@ -14,17 +14,8 @@ import io.github.libxposed.service.XposedService;
 import io.github.libxposed.service.XposedServiceHelper;
 
 /**
- * 模块 App 基类：通过 libxposed service 与框架通信。
- * 核心作用：把功能开关写入 RemotePreferences（LSPosed 数据库），
- * 供注入到小黑盒进程的 Hook 代码跨进程读取。
- *
- * <p>开关写入策略（修复「模块进程未运行时切换无效」）：</p>
- * <ul>
- *   <li>框架服务已连接 → 直接写 RemotePreferences（即时跨进程生效）；</li>
- *   <li>框架服务未连接（冷启动/刚开机）→ 先写本地待提交缓存
- *       （{@link #PENDING_PREFS}，{@code commit()} 同步落盘），
- *       等服务绑定后由 {@link PreferenceReceiver#tryFlush} 统一补交。</li>
- * </ul>
+ * 模块 App 基类：经 libxposed service 与框架通信，把功能开关写入 RemotePreferences 供 Hook 侧跨进程读取。
+ * 写入策略：服务已连接直接写；未连接先写待提交缓存，服务绑定后由 tryFlush 补交。
  */
 public class App extends Application implements XposedServiceHelper.OnServiceListener {
 
@@ -36,7 +27,6 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     /** 本地待提交缓存（框架服务未连接时的开关写缓冲） */
     public static final String PENDING_PREFS = "betterheybox_pending";
 
-    /** 功能开关 key */
     public static final String KEY_OPEN_SCREEN = "open_screen";
     public static final String KEY_FEED_AD = "feed_ad";
     public static final String KEY_BUBBLE_AD = "bubble_ad";
@@ -69,7 +59,6 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     /** 每日任务：今日已完成日期（yyyy-MM-dd，跨天自动重置） */
     public static final String KEY_DAILY_TASK_DONE_DATE = "daily_task_done_date";
 
-    /** 每日任务：重置标志 */
     public static final String KEY_DAILY_TASK_RESET = "daily_task_reset";
 
     /** 每日任务：分享渠道（QQ=QQ/QQ空间，WECHAT=微信好友/朋友圈；默认 QQ） */
@@ -119,7 +108,39 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     /** 运行状态检查点（Debug 构建：小黑盒进程 Hook 安装完成后写入，设置页跨进程读取查看/导出） */
     public static final String KEY_RUNTIME_STATUS = "runtime_status";
 
-    /** 框架服务实例（volatile 保证跨线程可见） */
+    /** 布尔 key 单一来源：receiver 白名单与备份列表由此派生；LinkedHashMap 保证派生顺序稳定 */
+    public static final java.util.Map<String, Boolean> BOOLEAN_DEFAULTS = buildBooleanDefaults();
+
+    private static java.util.Map<String, Boolean> buildBooleanDefaults() {
+        java.util.Map<String, Boolean> m = new java.util.LinkedHashMap<>();
+        m.put(KEY_OPEN_SCREEN, true);
+        m.put(KEY_FEED_AD, true);
+        m.put(KEY_BUBBLE_AD, true);
+        m.put(KEY_CORNER_AD, true);
+        m.put(KEY_PROMOTE_AD, true);
+        m.put(KEY_HIDE_TAB_HOME, false);
+        m.put(KEY_HIDE_TAB_HOT, false);
+        m.put(KEY_HIDE_TAB_GAME, false);
+        m.put(KEY_HIDE_ADD, false);
+        m.put(KEY_COPY_POST, true);
+        m.put(KEY_CUSTOM_TEXT_SELECT, false);
+        m.put(KEY_SYSTEM_SHARE, true);
+        m.put(KEY_VIDEO_DOWNLOAD, true);
+        m.put(KEY_VIDEO_TO_MP4, true);
+        m.put(KEY_PURIFY_SHARE_LINK, true);
+        m.put(KEY_BLOCK_UPDATE, false);
+        m.put(KEY_DAILY_TASK_ENABLED, false);
+        m.put(KEY_FAKE_NOTIFICATION, false);
+        m.put(KEY_LOG, false);
+        m.put(KEY_WEBVIEW_DEVTOOLS, false);
+        m.put(KEY_LIQUID_GLASS, true);
+        m.put(KEY_GLASS_IMMERSIVE, true);
+        m.put(KEY_GLASS_ADAPTIVE, true);
+        m.put(KEY_GLASS_FIT_TABS, false);
+        return m;
+    }
+
+    /** volatile 保证跨线程可见 */
     private static volatile XposedService sService;
 
     private static volatile App sApp;
@@ -127,7 +148,7 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     /** 服务绑定监听（设置页等 UI 用于刷新开关状态） */
     private static final List<OnServiceBoundListener> sBoundListeners = new ArrayList<>();
 
-    /** 服务绑定回调接口（回调在主线程执行） */
+    /** 回调在主线程执行 */
     public interface OnServiceBoundListener {
         void onServiceBound();
     }
@@ -186,9 +207,8 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     }
 
     /**
-     * 读开关：优先待提交缓存（用户在服务未连接时刚切的值），其次 RemotePreferences，最后默认值。
-     * 保证 UI 显示与「最终会生效」的值一致。
-     */
+ * 读开关：待提交缓存 → RemotePreferences → 默认值（与最终生效值一致）
+ */
     public static boolean readBoolean(String key, boolean defaultValue) {
         App app = sApp;
         if (app != null) {
@@ -217,9 +237,8 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     }
 
     /**
-     * 写字符串：框架服务可用直接写 RemotePreferences；否则写入待提交缓存（同步落盘），
-     * 服务绑定后由 {@link PreferenceReceiver#tryFlush} 自动补交。
-     */
+ * 写字符串：服务可用直接写 RemotePreferences；否则写待提交缓存待补交
+ */
     public static void writeString(String key, String value) {
         App app = sApp;
         SharedPreferences remote = getPrefs();
@@ -237,9 +256,8 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     }
 
     /**
-     * 写开关：框架服务可用直接写 RemotePreferences；否则写入待提交缓存（同步落盘），
-     * 服务绑定后由 {@link PreferenceReceiver#tryFlush} 自动补交，任何情况下都不丢设置。
-     */
+ * 写开关：同 writeString，任何情况下不丢设置
+ */
     public static void writeBoolean(String key, boolean value) {
         App app = sApp;
         SharedPreferences remote = getPrefs();
@@ -257,7 +275,7 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
         }
     }
 
-    /** 注册服务绑定监听（回调在主线程执行） */
+    /** 回调在主线程执行 */
     public static void addOnServiceBoundListener(OnServiceBoundListener listener) {
         synchronized (sBoundListeners) {
             if (!sBoundListeners.contains(listener)) {
@@ -300,5 +318,27 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     /** 获取 App 实例（Application 创建后可用） */
     public static Context getAppContext() {
         return sApp;
+    }
+
+    /** 任意进程取 Application 上下文；模块进程用 {@link #getAppContext()} */
+    public static Context resolveAppContext() {
+        try {
+            Class<?> activityThread = Class.forName("android.app.ActivityThread");
+            Object app = activityThread.getMethod("currentApplication").invoke(null);
+            return app instanceof Context ? (Context) app : null;
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    /** 当前进程名（失败回退 pid） */
+    public static String currentProcessName() {
+        try {
+            Class<?> activityThread = Class.forName("android.app.ActivityThread");
+            Object name = activityThread.getMethod("currentProcessName").invoke(null);
+            return name != null ? name.toString() : String.valueOf(android.os.Process.myPid());
+        } catch (Throwable ignored) {
+            return String.valueOf(android.os.Process.myPid());
+        }
     }
 }

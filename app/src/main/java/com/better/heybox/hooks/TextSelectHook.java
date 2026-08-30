@@ -17,28 +17,14 @@ import com.better.heybox.SelectionSafeLinkMovementMethod;
 
 /**
  * 帖子正文/标题复制。
- *
- * 设计原则（默认「自绘制文本选择」关闭）：
- * 1. 只解除小黑盒 TextSelectHandler 对触摸事件的自定义拦截（防复制）。
- * 2. 正文 TextView 使用 Android 原生 textIsSelectable 文本选择。
- * 3. 正文挂透明 LinkMovementMethod（SelectionSafeLinkMovementMethod），
- *    保留正文内 @提及 / ClickableSpan 的点击跳转。
- * 4. 头部用户名 TextView（bbs_name 等）仅开启原生长按选择（textIsSelectable），
- *    不设 movement method，不修改点击行为。
- * 5. 不 Hook Selection.setSelection / removeSelection。
- * 6. 不拦截 TextView 的 DOWN / UP / MOVE。
- * 7. 不修改 NestedScrollView 的 onInterceptTouchEvent。
- *
- * 「自绘制文本选择」（{@link App#KEY_CUSTOM_TEXT_SELECT}）开启时：
- * 1. 不开启 textIsSelectable、不挂 LinkMovementMethod，彻底绕开系统选择 UI；
- * 2. 选区/高亮/复制/取消由 {@link CustomTextSelection} 自绘实现；
- * 3. 开关切换后通过 {@link #refresh()} 对已展示的帖子立即重放，无需重启。
+ * 默认模式：解除 TextSelectHandler 拦截 + 正文原生 textIsSelectable + 透明 LinkMovementMethod 保留 @提及点击；不碰 Selection、触摸、NestedScrollView。
+ * 自绘制模式：不开启系统选择，选区由 CustomTextSelection 自绘，切换后 refresh() 立即重放
  */
 public final class TextSelectHook {
 
     private final MainModule module;
 
-    /** 最近一次构造的实例（refresh 用） */
+    /** refresh 用 */
     private static volatile TextSelectHook sInstance;
 
     /** 已注入过文本选择的根 View（WeakReference，随 Fragment 回收自动清理） */
@@ -49,7 +35,7 @@ public final class TextSelectHook {
         sInstance = this;
     }
 
-    /** 开关切换/配置导入后，对已注册的帖子根 View 立即重放文本选择设置。 */
+    /** 对已注册根 View 重放文本选择 */
     public static void refresh() {
         TextSelectHook instance = sInstance;
         if (instance != null) {
@@ -115,24 +101,22 @@ public final class TextSelectHook {
             );
 
             Method target = null;
-
+            Method renamed = null;
             for (Method m : clazz.getDeclaredMethods()) {
-                if ("installViews".equals(m.getName())
-                        && m.getParameterCount() == 1
-                        && m.getParameterTypes()[0] == View.class) {
-                    target = m;
-                    break;
-                }
-            }
-            if (target == null) {
-                for (Method m : clazz.getDeclaredMethods()) {
-                    if (m.getName().startsWith("installViews")
-                            && m.getParameterCount() == 1
-                            && m.getParameterTypes()[0] == View.class) {
+                if (m.getParameterCount() == 1
+                        && m.getParameterTypes()[0] == View.class
+                        && m.getName().startsWith("installViews")) {
+                    if ("installViews".equals(m.getName())) {
                         target = m;
                         break;
                     }
+                    if (renamed == null) {
+                        renamed = m;
+                    }
                 }
+            }
+            if (target == null) {
+                target = renamed;
             }
 
             if (target == null) {
@@ -261,97 +245,50 @@ public final class TextSelectHook {
     }
 
     private void enablePostTextSelect(View root) {
-
         if (root == null) {
             return;
         }
-
         LogRecorder.setContext(root.getContext());
-
         if (!module.isEnabled(App.KEY_COPY_POST, true)) {
             return;
         }
-
         boolean customSelect = module.isEnabled(App.KEY_CUSTOM_TEXT_SELECT, false);
 
-        String[] idNames = {
-                "tv_title",
-                "tv_desc"
-        };
+        applyTextSelectByIds(root, customSelect,
+                new String[]{"tv_title", "tv_desc"}, true, "设置文本选择失败");
 
+        /*
+         * 头部用户名：原生仅长按选择，自绘制模式由模块接管，均不改点击行为
+         */
+        applyTextSelectByIds(root, customSelect,
+                new String[]{"bbs_name", "bbs_username", "bbs_user_name", "tv_post_author",
+                        "tv_author", "tv_username", "tv_nickname", "tv_user_name",
+                        "tv_userinfo", "tv_user_info", "author_name", "username",
+                        "tv_name", "tv_user", "tv_author_name"}, false, "设置用户名长按选择失败");
+    }
+
+    private void applyTextSelectByIds(View root, boolean customSelect,
+                                      String[] idNames, boolean body, String logLabel) {
         for (String idName : idNames) {
             try {
-                int id = root.getResources().getIdentifier(
-                        idName,
-                        "id",
-                        MainModule.TARGET_PKG
-                );
-
+                int id = root.getResources().getIdentifier(idName, "id", MainModule.TARGET_PKG);
                 if (id == 0) {
                     continue;
                 }
-
                 View v = root.findViewById(id);
-
                 if (!(v instanceof TextView)) {
                     continue;
                 }
-
-                applyTextSelect((TextView) v, idName, true, customSelect);
-
+                applyTextSelect((TextView) v, idName, body, customSelect);
             } catch (Throwable t) {
-                module.logd(
-                        Log.WARN,
-                        module.TAG,
-                        "设置文本选择失败 (" + idName + "): " + t
-                );
-            }
-        }
-
-        /*
-         * 头部用户名：默认仅开启原生长按选择（复制），
-         * 自绘制模式下由模块接管长按选择，均不修改点击行为。
-         */
-        String[] usernameIds = {
-                "bbs_name", "bbs_username", "bbs_user_name", "tv_post_author",
-                "tv_author", "tv_username", "tv_nickname", "tv_user_name",
-                "tv_userinfo", "tv_user_info", "author_name", "username",
-                "tv_name", "tv_user", "tv_author_name"
-        };
-
-        for (String idName : usernameIds) {
-            try {
-                int uid = root.getResources().getIdentifier(
-                        idName,
-                        "id",
-                        MainModule.TARGET_PKG
-                );
-                if (uid == 0) {
-                    continue;
-                }
-                View uv = root.findViewById(uid);
-                if (!(uv instanceof TextView)) {
-                    continue;
-                }
-                applyTextSelect((TextView) uv, idName, false, customSelect);
-            } catch (Throwable t) {
-                module.logd(
-                        Log.WARN,
-                        module.TAG,
-                        "设置用户名长按选择失败 (" + idName + "): " + t
-                );
+                module.logd(Log.WARN, module.TAG, logLabel + " (" + idName + "): " + t);
             }
         }
     }
 
     /**
-     * 对单个 TextView 应用文本选择：
-     * <ul>
-     *   <li>自定义模式（自绘制文本选择）：卸载旧的自绘制控制器后重新挂载，并关闭
-     *       textIsSelectable / movement method，保证系统选择 UI 不会与自绘制选区同时出现；</li>
-     *   <li>原生模式：恢复系统标准文本选择（正文另挂透明 LinkMovementMethod 保留 @提及点击）。</li>
-     * </ul>
-     */
+ * 对单个 TextView 应用选择：自绘制模式先卸载旧控制器再挂载并关闭系统选择；原生模式恢复标准选择（正文挂透明 LinkMovementMethod 保留 @提及点击）
+ */
     private void applyTextSelect(TextView tv, String idName, boolean body, boolean customSelect) {
         // 先卸载旧的自绘制控制器，避免刷新时新旧逻辑叠加
         CustomTextSelection.detach(tv);

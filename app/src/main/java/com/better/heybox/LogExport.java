@@ -14,12 +14,8 @@ import java.util.Date;
 import java.util.Locale;
 
 /**
- * 模块日志导出：把「运行状态检查点 + 模块日志文件」打包成一份便于反馈排查的文本。
- *
- * <p>说明：设置页运行在模块进程，只能读到模块进程自己的日志文件；小黑盒进程内的
- * Hook 日志写在其应用目录（沙箱隔离，模块进程无法读取），但小黑盒进程的运行状态
- * 检查点会在 Hook 安装完成后写入 RemotePreferences（{@link MainModule#stashRuntimeStatus()}），
- * 由本导出合并进同一份文件，覆盖完整运行链路。</p>
+ * 模块日志导出：把「运行状态检查点 + 日志文件」打包成排查文本。
+ * 小黑盒进程日志因沙箱不可读，但其检查点已写入 RemotePreferences，合并进同一份导出
  */
 public final class LogExport {
 
@@ -28,7 +24,6 @@ public final class LogExport {
     private LogExport() {
     }
 
-    /** 生成导出文本：头部信息 + 本进程检查点 + 日志文件内容（小黑盒进程导出时自带其侧完整链路） */
     public static String buildExportText(Context context) {
         StringBuilder sb = new StringBuilder(8192);
         String time = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date());
@@ -43,7 +38,6 @@ public final class LogExport {
         boolean moduleProcess = isModuleProcess();
         if (moduleProcess) {
             sb.append("框架服务: ").append(App.getService() == null ? "未连接" : "已连接").append('\n');
-            // 模块进程导出：额外带小黑盒进程运行状态快照（Hook 安装完成后写入 RemotePreferences）
             String heyboxStatus = App.readString(App.KEY_RUNTIME_STATUS, "");
             if (heyboxStatus != null && !heyboxStatus.isEmpty()) {
                 sb.append('\n').append("----- 小黑盒进程运行状态（跨进程检查点快照） -----\n")
@@ -60,22 +54,10 @@ public final class LogExport {
         return sb.toString();
     }
 
-    /** 当前是否运行在模块进程（com.better.heybox）；否则为小黑盒进程 */
+    /** 进程名是否以 com.better.heybox 开头 */
     private static boolean isModuleProcess() {
-        String name = currentProcessName();
+        String name = App.currentProcessName();
         return name != null && name.startsWith("com.better.heybox");
-    }
-
-    private static String currentProcessName() {
-        try {
-            Class<?> activityThread = Class.forName("android.app.ActivityThread");
-            Object name = activityThread.getMethod("currentProcessName").invoke(null);
-            if (name != null) {
-                return name.toString();
-            }
-        } catch (Throwable ignored) {
-        }
-        return null;
     }
 
     private static void appendFile(StringBuilder sb, String path, String title) {

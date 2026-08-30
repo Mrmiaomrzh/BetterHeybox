@@ -224,8 +224,8 @@ public final class ImageShareHook {
     }
 
     /**
-     * 读取 HBShareDialog 分享动作列表字段：393=f83135h / 394=f83116h（双版本自适应）。
-     */
+ * 读取 HBShareDialog 分享动作列表（393/394 双版本字段名）
+ */
     private Object readShareDialogActions(Object dialog) {
         if (dialog == null) {
             return null;
@@ -238,9 +238,8 @@ public final class ImageShareHook {
     }
 
     /**
-     * 本地分享处理器回调接口：393=un.a / 394=wn.a（Kotlin Function0，双版本自适应）。
-     * 两个都找不到时返回 null，由调用方决定是否跳过。
-     */
+ * 本地分享回调接口：393=un.a / 394=wn.a（双版本），都找不到返回 null
+ */
     private Class<?> findLocalHandlerCallback(ClassLoader cl) {
         try {
             return Class.forName("un.a", false, cl);
@@ -254,9 +253,8 @@ public final class ImageShareHook {
     }
 
     /**
-     * 系统分享动作图标：小黑盒分享面板同款转发箭头（bbs_sharebutton_forward_46x46）。
-     * 资源 ID 跨版本不稳定，运行时按名称解析，失败返回 0（使用默认图标）。
-     */
+ * 分享动作图标：按名称运行时解析（资源 ID 跨版本不稳定），失败返回 0 用默认
+ */
     private static int resolveShareArrowIcon(Context context) {
         if (context == null) {
             return 0;
@@ -264,7 +262,7 @@ public final class ImageShareHook {
         try {
             int id = context.getResources().getIdentifier(
                     "bbs_sharebutton_forward_46x46", "drawable", MainModule.TARGET_PKG);
-            return id != 0 ? id : 0;
+            return id;
         } catch (Throwable t) {
             return 0;
         }
@@ -317,59 +315,59 @@ public final class ImageShareHook {
             Context context = (Context) contextObject;
             LogRecorder.setContext(context);
             module.logd(Log.INFO, module.TAG, "图片分享开始下载: url=" + imageUrl);
-            Thread worker = new Thread(() -> {
-                File output = null;
-                try {
-                    output = downloadImage(context, imageUrl);
-                    String mime = guessMimeType(output.getName());
-                    // 优先写入系统相册（MediaStore）→ 图片可被相册真正查看、可被任意 App 分享；
-                    // 失败则回退 FileProvider（外部缓存目录，wbsdk_filepaths 的 external-cache-path 已覆盖）
-                    Uri uri = publishToGallery(context, output);
-                    if (uri != null) {
-                        output.delete(); // 已复制进相册，临时文件不再需要
-                        module.logd(Log.INFO, module.TAG, "图片已保存到系统相册: uri=" + uri);
-                    } else {
-                        uri = getTargetFileUri(context, output);
-                    }
-                    if (uri == null) {
-                        throw new IllegalStateException("无法生成图片分享 URI");
-                    }
-                    final Uri shareUri = uri;
-                    File finalOutput = output;
-                    context.getMainExecutor().execute(() -> {
-                        try {
-                            Intent share = new Intent(Intent.ACTION_SEND)
-                                    .setType(mime)
-                                    .putExtra(Intent.EXTRA_STREAM, shareUri)
-                                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                            Intent chooser = Intent.createChooser(share, "分享图片");
-                            if (!(context instanceof Activity)) {
-                                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                            }
-                            context.startActivity(chooser);
-                            module.logd(Log.INFO, module.TAG, "图片分享 chooser 已唤起: uri=" + shareUri + " mime=" + mime);
-                        } catch (Throwable t) {
-                            module.logd(Log.ERROR, module.TAG, "图片分享 chooser 启动失败", t);
-                            if (finalOutput != null) {
-                                finalOutput.delete();
-                            }
-                        }
-                    });
-                } catch (Throwable t) {
-                    module.logd(Log.WARN, module.TAG, "图片分享准备失败，回退原分享", t);
-                    if (output != null) {
-                        output.delete();
-                    }
-                    context.getMainExecutor().execute(() -> {
-                        Toast.makeText(context, "图片暂时无法分享", Toast.LENGTH_SHORT).show();
-                    });
-                }
-            }, "BetterHeybox-image-share");
-            worker.start();
+            new Thread(() -> shareDownloadedImage(context, imageUrl),
+                    "BetterHeybox-image-share").start();
             return true;
         } catch (Throwable t) {
             module.logd(Log.WARN, module.TAG, "图片分享接管失败，回退原分享", t);
             return false;
+        }
+    }
+
+    private void shareDownloadedImage(Context context, String imageUrl) {
+        File output = null;
+        try {
+            output = downloadImage(context, imageUrl);
+            String mime = guessMimeType(output.getName());
+            // 优先写系统相册（可被相册与任意 App 分享），失败回退 FileProvider
+            Uri uri = publishToGallery(context, output);
+            if (uri != null) {
+                output.delete(); // 已复制进相册，临时文件不再需要
+                module.logd(Log.INFO, module.TAG, "图片已保存到系统相册: uri=" + uri);
+            } else {
+                uri = getTargetFileUri(context, output);
+            }
+            if (uri == null) {
+                throw new IllegalStateException("无法生成图片分享 URI");
+            }
+            final Uri shareUri = uri;
+            final File finalOutput = output;
+            context.getMainExecutor().execute(() -> {
+                try {
+                    Intent share = new Intent(Intent.ACTION_SEND)
+                            .setType(mime)
+                            .putExtra(Intent.EXTRA_STREAM, shareUri)
+                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    Intent chooser = Intent.createChooser(share, "分享图片");
+                    if (!(context instanceof Activity)) {
+                        chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    }
+                    context.startActivity(chooser);
+                    module.logd(Log.INFO, module.TAG, "图片分享 chooser 已唤起: uri=" + shareUri + " mime=" + mime);
+                } catch (Throwable t) {
+                    module.logd(Log.ERROR, module.TAG, "图片分享 chooser 启动失败", t);
+                    if (finalOutput != null) {
+                        finalOutput.delete();
+                    }
+                }
+            });
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "图片分享准备失败，回退原分享", t);
+            if (output != null) {
+                output.delete();
+            }
+            context.getMainExecutor().execute(() ->
+                    Toast.makeText(context, "图片暂时无法分享", Toast.LENGTH_SHORT).show());
         }
     }
 
@@ -507,7 +505,6 @@ public final class ImageShareHook {
         return "jpg";
     }
 
-    /** 扩展名 → MIME */
     private static String guessMimeType(String name) {
         String n = name == null ? "" : name.toLowerCase();
         if (n.endsWith(".png")) {

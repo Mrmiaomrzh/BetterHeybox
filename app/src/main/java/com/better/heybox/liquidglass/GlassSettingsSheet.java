@@ -98,117 +98,15 @@ public final class GlassSettingsSheet {
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
             content.addView(sectionLabel(activity, "开关", textSecondary, density));
-            LinearLayout switchCard = card(activity, cardBg, density);
-            switchCard.addView(switchRow(activity, "启用液态玻璃", "关闭后需重启小黑盒生效",
-                    HeyboxPrefs.getBoolean(App.KEY_LIQUID_GLASS, true),
-                    textPrimary, textSecondary, accent, density,
-                    (buttonView, isChecked) -> {
-                        HeyboxPrefs.setBoolean(App.KEY_LIQUID_GLASS, isChecked);
-                        Toast.makeText(activity, "需重启小黑盒生效", Toast.LENGTH_SHORT).show();
-                    }));
-            switchCard.addView(divider(activity, divider, density));
-            switchCard.addView(switchRow(activity, "沉浸式小白条",
-                    "玻璃条贴合屏幕底部，内容延伸至手势区",
-                    GlassConfig.immersiveGestureNavigation, textPrimary, textSecondary, accent, density,
-                    (buttonView, isChecked) -> {
-                        GlassConfig.immersiveGestureNavigation = isChecked;
-                        GlassConfig.save(activity);
-                        LiquidGlassInstaller.refreshGlass();
-                    }));
-            switchCard.addView(divider(activity, divider, density));
-            switchCard.addView(switchRow(activity, "自适应反色",
-                    "标签文字随背景亮度切换黑白",
-                    GlassConfig.adaptiveChrome, textPrimary, textSecondary, accent, density,
-                    (buttonView, isChecked) -> {
-                        GlassConfig.adaptiveChrome = isChecked;
-                        GlassConfig.save(activity);
-                        LiquidGlassInstaller.refreshGlass();
-                    }));
-            switchCard.addView(divider(activity, divider, density));
-            switchCard.addView(switchRow(activity, "玻璃宽度自适应",
-                    "隐藏标签后底栏宽度随可见标签数收缩，选中项加长",
-                    GlassConfig.fitTabs, textPrimary, textSecondary, accent, density,
-                    (buttonView, isChecked) -> {
-                        GlassConfig.fitTabs = isChecked;
-                        GlassConfig.save(activity);
-                        LiquidGlassInstaller.syncTabVisibility();
-                    }));
-            content.addView(switchCard);
-
+            content.addView(buildSwitchCard(activity, textPrimary, textSecondary,
+                    accent, divider, cardBg, density));
             content.addView(sectionLabel(activity, "外观", textSecondary, density));
-            LinearLayout lookCard = card(activity, cardBg, density);
-            lookCard.addView(tintGroup(activity, "暗色模式底色", DARK_PRESETS, true,
-                    textPrimary, textSecondary, accent, density));
-            lookCard.addView(divider(activity, divider, density));
-            lookCard.addView(sliderRow(activity, "暗色模式不透明度",
-                    GlassConfig.darkAlphaPct + "%", textPrimary, textSecondary, accent,
-                    10, 95, GlassConfig.darkAlphaPct, density, value -> {
-                        GlassConfig.darkAlphaPct = value;
-                        GlassConfig.save(activity);
-                        LiquidGlassInstaller.refreshGlass();
-                        return value + "%";
-                    }));
-            lookCard.addView(divider(activity, divider, density));
-            lookCard.addView(tintGroup(activity, "亮色模式底色", LIGHT_PRESETS, false,
-                    textPrimary, textSecondary, accent, density));
-            lookCard.addView(divider(activity, divider, density));
-            lookCard.addView(sliderRow(activity, "亮色模式不透明度",
-                    GlassConfig.lightAlphaPct + "%", textPrimary, textSecondary, accent,
-                    10, 95, GlassConfig.lightAlphaPct, density, value -> {
-                        GlassConfig.lightAlphaPct = value;
-                        GlassConfig.save(activity);
-                        LiquidGlassInstaller.refreshGlass();
-                        return value + "%";
-                    }));
-            content.addView(lookCard);
-
+            content.addView(buildLookCard(activity, textPrimary, textSecondary,
+                    accent, divider, cardBg, density));
             content.addView(sectionLabel(activity, "布局", textSecondary, density));
-            LinearLayout layoutCard = card(activity, cardBg, density);
-            layoutCard.addView(sliderRow(activity, "玻璃条高度",
-                    heightLabel(GlassConfig.barHeightDp), textPrimary, textSecondary, accent,
-                    0, 48, GlassConfig.barHeightDp == 0 ? 0 : GlassConfig.barHeightDp - 51,
-                    density, value -> {
-                        GlassConfig.barHeightDp = value == 0 ? 0 : value + 51;
-                        GlassConfig.save(activity);
-                        LiquidGlassInstaller.applyBarGeometry();
-                        return heightLabel(GlassConfig.barHeightDp);
-                    }));
-            layoutCard.addView(divider(activity, divider, density));
-            layoutCard.addView(sliderRow(activity, "距屏幕底部",
-                    GlassConfig.barOffsetDp + "dp", textPrimary, textSecondary, accent,
-                    0, 40, GlassConfig.barOffsetDp, density, value -> {
-                        GlassConfig.barOffsetDp = value;
-                        GlassConfig.save(activity);
-                        LiquidGlassInstaller.applyBarGeometry();
-                        return value + "dp";
-                    }));
-            content.addView(layoutCard);
-
-            LinearLayout resetCard = card(activity, cardBg, density);
-            TextView reset = new TextView(activity);
-            reset.setText("恢复默认");
-            reset.setTextColor(0xFFE53935);
-            reset.setTextSize(15f);
-            reset.setGravity(Gravity.CENTER);
-            reset.setOnClickListener(v -> {
-                GlassConfig.resetDefaults();
-                HeyboxPrefs.setBoolean(App.KEY_GLASS_IMMERSIVE, true);
-                HeyboxPrefs.setBoolean(App.KEY_GLASS_ADAPTIVE, true);
-                HeyboxPrefs.setString(App.KEY_GLASS_DARK_COLOR, "#000000");
-                HeyboxPrefs.setString(App.KEY_GLASS_DARK_ALPHA, "56");
-                HeyboxPrefs.setString(App.KEY_GLASS_LIGHT_COLOR, "#FFFFFF");
-                HeyboxPrefs.setString(App.KEY_GLASS_LIGHT_ALPHA, "64");
-                HeyboxPrefs.setString(App.KEY_GLASS_BAR_HEIGHT, "0");
-                HeyboxPrefs.setString(App.KEY_GLASS_BAR_OFFSET, "16");
-                LiquidGlassInstaller.applyBarGeometry();
-                LiquidGlassInstaller.refreshGlass();
-                Toast.makeText(activity, "已恢复默认", Toast.LENGTH_SHORT).show();
-                dismiss(activity);
-                show(activity);
-            });
-            resetCard.addView(reset, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, (int) (44f * density)));
-            content.addView(resetCard);
+            content.addView(buildLayoutCard(activity, textPrimary, textSecondary,
+                    accent, divider, cardBg, density));
+            content.addView(buildResetCard(activity, cardBg, density));
 
             panel.addView(scroller, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -238,6 +136,120 @@ public final class GlassSettingsSheet {
         } catch (Throwable t) {
             LiquidGlassLog.logErr("glass settings sheet failed", t);
         }
+    }
+
+    private static LinearLayout buildSwitchCard(Activity activity, int textPrimary, int textSecondary,
+                                                int accent, int divider, int cardBg, float density) {
+        LinearLayout switchCard = card(activity, cardBg, density);
+        switchCard.addView(switchRow(activity, "启用液态玻璃", "关闭后需重启小黑盒生效",
+                HeyboxPrefs.getBoolean(App.KEY_LIQUID_GLASS, true),
+                textPrimary, textSecondary, accent, density,
+                (buttonView, isChecked) -> {
+                    HeyboxPrefs.setBoolean(App.KEY_LIQUID_GLASS, isChecked);
+                    Toast.makeText(activity, "需重启小黑盒生效", Toast.LENGTH_SHORT).show();
+                }));
+        switchCard.addView(divider(activity, divider, density));
+        switchCard.addView(switchRow(activity, "沉浸式小白条",
+                "玻璃条贴合屏幕底部，内容延伸至手势区",
+                GlassConfig.immersiveGestureNavigation, textPrimary, textSecondary, accent, density,
+                (buttonView, isChecked) -> {
+                    GlassConfig.immersiveGestureNavigation = isChecked;
+                    GlassConfig.save(activity);
+                    LiquidGlassInstaller.refreshGlass();
+                }));
+        switchCard.addView(divider(activity, divider, density));
+        switchCard.addView(switchRow(activity, "自适应反色",
+                "标签文字随背景亮度切换黑白",
+                GlassConfig.adaptiveChrome, textPrimary, textSecondary, accent, density,
+                (buttonView, isChecked) -> {
+                    GlassConfig.adaptiveChrome = isChecked;
+                    GlassConfig.save(activity);
+                    LiquidGlassInstaller.refreshGlass();
+                }));
+        switchCard.addView(divider(activity, divider, density));
+        switchCard.addView(switchRow(activity, "玻璃宽度自适应",
+                "隐藏标签后底栏宽度随可见标签数收缩，选中项加长",
+                GlassConfig.fitTabs, textPrimary, textSecondary, accent, density,
+                (buttonView, isChecked) -> {
+                    GlassConfig.fitTabs = isChecked;
+                    GlassConfig.save(activity);
+                    LiquidGlassInstaller.syncTabVisibility();
+                }));
+        return switchCard;
+    }
+
+    private static LinearLayout buildLookCard(Activity activity, int textPrimary, int textSecondary,
+                                              int accent, int divider, int cardBg, float density) {
+        LinearLayout lookCard = card(activity, cardBg, density);
+        lookCard.addView(tintGroup(activity, "暗色模式底色", DARK_PRESETS, true,
+                textPrimary, textSecondary, accent, density));
+        lookCard.addView(divider(activity, divider, density));
+        lookCard.addView(sliderRow(activity, "暗色模式不透明度",
+                GlassConfig.darkAlphaPct + "%", textPrimary, textSecondary, accent,
+                10, 95, GlassConfig.darkAlphaPct, density, value -> {
+                    GlassConfig.darkAlphaPct = value;
+                    GlassConfig.save(activity);
+                    LiquidGlassInstaller.refreshGlass();
+                    return value + "%";
+                }));
+        lookCard.addView(divider(activity, divider, density));
+        lookCard.addView(tintGroup(activity, "亮色模式底色", LIGHT_PRESETS, false,
+                textPrimary, textSecondary, accent, density));
+        lookCard.addView(divider(activity, divider, density));
+        lookCard.addView(sliderRow(activity, "亮色模式不透明度",
+                GlassConfig.lightAlphaPct + "%", textPrimary, textSecondary, accent,
+                10, 95, GlassConfig.lightAlphaPct, density, value -> {
+                    GlassConfig.lightAlphaPct = value;
+                    GlassConfig.save(activity);
+                    LiquidGlassInstaller.refreshGlass();
+                    return value + "%";
+                }));
+        return lookCard;
+    }
+
+    private static LinearLayout buildLayoutCard(Activity activity, int textPrimary, int textSecondary,
+                                                int accent, int divider, int cardBg, float density) {
+        LinearLayout layoutCard = card(activity, cardBg, density);
+        layoutCard.addView(sliderRow(activity, "玻璃条高度",
+                heightLabel(GlassConfig.barHeightDp), textPrimary, textSecondary, accent,
+                0, 48, GlassConfig.barHeightDp == 0 ? 0 : GlassConfig.barHeightDp - 51,
+                density, value -> {
+                    GlassConfig.barHeightDp = value == 0 ? 0 : value + 51;
+                    GlassConfig.save(activity);
+                    LiquidGlassInstaller.applyBarGeometry();
+                    return heightLabel(GlassConfig.barHeightDp);
+                }));
+        layoutCard.addView(divider(activity, divider, density));
+        layoutCard.addView(sliderRow(activity, "距屏幕底部",
+                GlassConfig.barOffsetDp + "dp", textPrimary, textSecondary, accent,
+                0, 40, GlassConfig.barOffsetDp, density, value -> {
+                    GlassConfig.barOffsetDp = value;
+                    GlassConfig.save(activity);
+                    LiquidGlassInstaller.applyBarGeometry();
+                    return value + "dp";
+                }));
+        return layoutCard;
+    }
+
+    private static LinearLayout buildResetCard(Activity activity, int cardBg, float density) {
+        LinearLayout resetCard = card(activity, cardBg, density);
+        TextView reset = new TextView(activity);
+        reset.setText("恢复默认");
+        reset.setTextColor(0xFFE53935);
+        reset.setTextSize(15f);
+        reset.setGravity(Gravity.CENTER);
+        reset.setOnClickListener(v -> {
+            GlassConfig.resetDefaults();
+            GlassConfig.save(activity);
+            LiquidGlassInstaller.applyBarGeometry();
+            LiquidGlassInstaller.refreshGlass();
+            Toast.makeText(activity, "已恢复默认", Toast.LENGTH_SHORT).show();
+            dismiss(activity);
+            show(activity);
+        });
+        resetCard.addView(reset, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, (int) (44f * density)));
+        return resetCard;
     }
 
     public static void dismiss(Activity activity) {
@@ -442,7 +454,6 @@ public final class GlassSettingsSheet {
         private int progress;
         private float thumbScale = 1f;
         private boolean dragging;
-        private boolean pressed;
         private OnProgressChangedListener listener;
 
         GlassSlider(android.content.Context context, int accent, float density,
@@ -507,7 +518,6 @@ public final class GlassSettingsSheet {
             switch (event.getActionMasked()) {
                 case android.view.MotionEvent.ACTION_DOWN:
                     dragging = true;
-                    pressed = true;
                     animateThumb(1.08f);
                     updateFromTouch(event.getX(), true);
                     return true;
@@ -522,7 +532,6 @@ public final class GlassSettingsSheet {
                         updateFromTouch(event.getX(), true);
                     }
                     dragging = false;
-                    pressed = false;
                     animateThumb(1f);
                     performClick();
                     return true;
@@ -555,8 +564,6 @@ public final class GlassSettingsSheet {
         }
 
         private void animateThumb(float target) {
-            animate().setDuration(120L).setInterpolator(
-                    new android.view.animation.DecelerateInterpolator()).start();
             thumbScale = target;
             invalidate();
         }
@@ -580,7 +587,7 @@ public final class GlassSettingsSheet {
         for (int i = 0; i < presets.length; i++) {
             final int index = i;
             View swatch = new View(activity);
-            boolean selected = (presets[i] & 0xFFFFFF) == (current & 0xFFFFFF);
+            boolean selected = sameColor(presets[i], current);
             swatch.setBackground(swatchDrawable(presets[i], selected, accent, density));
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                     (int) (30f * density), (int) (30f * density));
@@ -607,8 +614,12 @@ public final class GlassSettingsSheet {
         int now = dark ? GlassConfig.darkColor : GlassConfig.lightColor;
         for (int i = 0; i < row.getChildCount() && i < presets.length; i++) {
             row.getChildAt(i).setBackground(swatchDrawable(presets[i],
-                    (presets[i] & 0xFFFFFF) == (now & 0xFFFFFF), accent, density));
+                    sameColor(presets[i], now), accent, density));
         }
+    }
+
+    private static boolean sameColor(int a, int b) {
+        return (a & 0xFFFFFF) == (b & 0xFFFFFF);
     }
 
     private static GradientDrawable swatchDrawable(int color, boolean selected,

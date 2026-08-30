@@ -125,12 +125,9 @@ final class WindowImmersiveController {
     }
 
     /**
-     * Zeroes the navigation-bar inset only, so content reaches the physical
-     * bottom while the status-bar inset still reaches the host's title bars.
-     * Replacing this with Window.setDecorFitsSystemWindows(false) also drops
-     * the top inset, which collapsed the search and message page headers
-     * behind the status bar.
-     */
+ * 仅清零导航栏 inset，保留状态栏 inset 供标题栏使用。
+ * 不能用 setDecorFitsSystemWindows(false)：会连顶部一起丢，导致搜索/消息页标题栏塌陷
+ */
     private static final View.OnApplyWindowInsetsListener DROP_NAV_INSET =
             new View.OnApplyWindowInsetsListener() {
                 @Override
@@ -178,7 +175,7 @@ final class WindowImmersiveController {
                     ? window.getNavigationBarDividerColor() : Color.TRANSPARENT;
             navigationBarContrastEnforced = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
                     && window.isNavigationBarContrastEnforced();
-            int flags = window.getAttributes() == null ? 0 : window.getAttributes().flags;
+            int flags = window.getAttributes().flags;
             drawsSystemBarBackgrounds = (flags & WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS) != 0;
             translucentNavigation = (flags & WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION) != 0;
         }

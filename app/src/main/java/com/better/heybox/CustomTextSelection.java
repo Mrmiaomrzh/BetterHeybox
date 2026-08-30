@@ -4,10 +4,8 @@ import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
-import android.content.ContextWrapper;
 import android.content.Intent;
 import android.content.res.ColorStateList;
-import android.content.res.Configuration;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -38,36 +36,8 @@ import java.util.Map;
 import java.util.WeakHashMap;
 
 /**
- * 自绘制文本选择（开关「自绘制文本选择」开启后启用）。
- *
- * <p>与现有复制功能解耦：仅当 {@link TextSelectHook} 在自定义模式下挂载到具体 TextView
- * 时才生效，其余逻辑完全不受影响。开启后：</p>
- * <ul>
- *   <li>不调用系统文本选择 / 选区 / 高亮 UI，不触发 Selection Action Mode；</li>
- *   <li>不触发小黑盒 TextSelectHandler 的自绘选择 UI（该拦截由 TextSelectHook 统一负责）；</li>
- *   <li>长按选中（按词扩展）、拖动调整范围、选区高亮、两侧手柄、全选 / 复制 / 分享、
- *       取消全部由本类实现，视觉与交互对齐 Android 原生文本选择。</li>
- * </ul>
- *
- * <p>实现要点：</p>
- * <ul>
- *   <li>取色：优先解析系统动态取色（Monet，API 31+ systemAccentColor），回退主题
- *       colorAccent，最后回退默认品牌蓝；菜单为原生风格的浅/深色中性浮层；</li>
- *   <li>高亮：{@link HighlightOverlay} 按 Layout 逐行绘制圆角矩形并做 UNION 合并，
- *       多行选区无生硬直角、无接缝，不依赖文本是否为可变 Spannable；</li>
- *   <li>手柄：{@link SelectionHandle} 首尾两个水滴形可拖动手柄（带阴影、拖动微放大），
- *       视觉尺寸克制、触摸区域放大；</li>
- *   <li>菜单：透明遮罩 + 原生风格圆角浮层（全选 / 分享 / 复制）叠加在窗口 Decor 上，
- *       点击遮罩/返回键取消；出现缩放淡入，位置变化平滑移动；</li>
- *   <li>全选：完全由模块自身实现（选区设为 0..length 并同步高亮/手柄/菜单），
- *       不调用任何系统原生文本选择 API；文本为空或已全选时不提供无效的「全选」；</li>
- *   <li>分享：标准 ACTION_SEND + createChooser 唤起系统分享面板，内容为当前实际选区，
- *       分享不破坏选择状态，失败时 Toast 提示；</li>
- *   <li>触摸：长按用 OnLongClickListener 触发（返回 true 阻止系统长按行为），
- *       拖动用 OnTouchListener 消费 MOVE/UP 并请求父容器不拦截；</li>
- *   <li>挂载时通过反射读取并链式调用 TextView 原有的 OnTouchListener / OnLongClickListener，
- *       普通点击、滚动等交互不受影响；布局/滚动变化时同步高亮、手柄与菜单位置。</li>
- * </ul>
+ * 自绘制文本选择：长按选中、拖动手柄、高亮、菜单全由本类实现，不触发系统与小黑盒的选择 UI。
+ * 要点：Monet 取色回退链；逐行圆角高亮 UNION 合并；菜单浮层挂 Decor；反射链式调用原有 Touch/长按监听
  */
 public final class CustomTextSelection {
 
@@ -112,18 +82,6 @@ public final class CustomTextSelection {
                 }
             }
         }
-    }
-
-    private static int dp(Context context, float value) {
-        return (int) (value * context.getResources().getDisplayMetrics().density + 0.5f);
-    }
-    private static int resolveAccent(Context context) {
-        return ThemeUtils.resolveAccent(context);
-    }
-
-    private static boolean isDarkTheme(Context context) {
-        int mode = context.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
-        return mode == Configuration.UI_MODE_NIGHT_YES;
     }
 
     private static final class Controller implements View.OnTouchListener, View.OnLongClickListener {
@@ -174,7 +132,7 @@ public final class CustomTextSelection {
             this.tv = tv;
             this.prevTouch = readListener(tv, "mOnTouchListener");
             this.prevLongClick = readListener(tv, "mOnLongClickListener");
-            this.accentColor = resolveAccent(tv.getContext());
+            this.accentColor = ThemeUtils.resolveAccent(tv.getContext());
             this.density = tv.getResources().getDisplayMetrics().density;
         }
 
@@ -346,7 +304,7 @@ public final class CustomTextSelection {
             if (overlay != null) {
                 return;
             }
-            ViewGroup decor = findDecor(tv);
+            ViewGroup decor = ViewUtils.findDecor(tv);
             if (decor == null) {
                 return;
             }
@@ -427,11 +385,11 @@ public final class CustomTextSelection {
                 return;
             }
             if (startHandle == null || endHandle == null) {
-                ViewGroup decor = findDecor(tv);
+                ViewGroup decor = ViewUtils.findDecor(tv);
                 if (decor == null) {
                     return;
                 }
-                int size = dp(tv.getContext(), 38);
+                int size = ThemeUtils.dp(tv.getContext(), 38);
                 startHandle = new SelectionHandle(tv.getContext(), tv, accentColor);
                 endHandle = new SelectionHandle(tv.getContext(), tv, accentColor);
                 startHandle.setOnTouchListener(handleTouch);
@@ -547,7 +505,7 @@ public final class CustomTextSelection {
                 return;
             }
             removeMenu();
-            ViewGroup decor = findDecor(tv);
+            ViewGroup decor = ViewUtils.findDecor(tv);
             if (decor == null) {
                 cancel();
                 return;
@@ -616,7 +574,7 @@ public final class CustomTextSelection {
             int padTop = parent.getPaddingTop();
             int availRight = padLeft + parent.getWidth() - parent.getPaddingRight();
             int availBottom = padTop + parent.getHeight() - parent.getPaddingBottom();
-            int margin = dp(context, 4);
+            int margin = ThemeUtils.dp(context, 4);
             int topLimit = padTop + margin;
             int leftLimit = padLeft + margin;
 
@@ -635,8 +593,8 @@ public final class CustomTextSelection {
 
             int px = (int) (selCenterX - w / 2f);
             int py;
-            int above = selTop - h - dp(context, 6);
-            int below = selBottom + dp(context, 6);
+            int above = selTop - h - ThemeUtils.dp(context, 6);
+            int below = selBottom + ThemeUtils.dp(context, 6);
             if (above >= topLimit) {
                 py = above;
                 menuAbove = true;
@@ -739,7 +697,7 @@ public final class CustomTextSelection {
         }
 
         private LinearLayout buildMenuBar(Context context) {
-            boolean dark = isDarkTheme(context);
+            boolean dark = ThemeUtils.isDarkMode(context);
             int bgColor = dark ? 0xFF2A2A2E : 0xFFFFFFFF;
             int textColor = dark ? 0xDEFFFFFF : 0xDD000000;
             int dividerColor = dark ? 0x24FFFFFF : 0x1F000000;
@@ -749,11 +707,11 @@ public final class CustomTextSelection {
             bar.setOrientation(LinearLayout.HORIZONTAL);
             bar.setGravity(Gravity.CENTER_VERTICAL);
             bar.setClickable(true);
-            bar.setElevation(dp(context, 8));
+            bar.setElevation(ThemeUtils.dp(context, 8));
 
             GradientDrawable bg = new GradientDrawable();
             bg.setColor(bgColor);
-            bg.setCornerRadius(dp(context, 16));
+            bg.setCornerRadius(ThemeUtils.dp(context, 16));
             bar.setBackground(bg);
 
             TextView selectAll = menuItem(context, "全选", textColor, rippleColor, dark);
@@ -792,7 +750,7 @@ public final class CustomTextSelection {
             View divider = new View(context);
             divider.setBackgroundColor(color);
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                    dp(context, 1), dp(context, 20));
+                    ThemeUtils.dp(context, 1), ThemeUtils.dp(context, 20));
             lp.gravity = Gravity.CENTER_VERTICAL;
             divider.setLayoutParams(lp);
             bar.addView(divider);
@@ -806,14 +764,14 @@ public final class CustomTextSelection {
             item.setTextSize(14);
             item.setTextColor(textColor);
             item.setGravity(Gravity.CENTER);
-            item.setMinWidth(dp(context, 56));
-            item.setMinHeight(dp(context, 44));
-            item.setPadding(dp(context, 14), 0, dp(context, 14), 0);
+            item.setMinWidth(ThemeUtils.dp(context, 56));
+            item.setMinHeight(ThemeUtils.dp(context, 44));
+            item.setPadding(ThemeUtils.dp(context, 14), 0, ThemeUtils.dp(context, 14), 0);
             item.setClickable(true);
             item.setFocusable(true);
             GradientDrawable mask = new GradientDrawable();
             mask.setColor(Color.WHITE);
-            mask.setCornerRadius(dp(context, 12));
+            mask.setCornerRadius(ThemeUtils.dp(context, 12));
             item.setForeground(new RippleDrawable(ColorStateList.valueOf(rippleColor), null, mask));
             return item;
         }
@@ -863,7 +821,7 @@ public final class CustomTextSelection {
                 send.setType("text/plain");
                 send.putExtra(Intent.EXTRA_TEXT, text.subSequence(selStart, selEnd).toString());
                 Intent chooser = Intent.createChooser(send, null);
-                Activity activity = findActivity(context);
+                Activity activity = ViewUtils.findActivity(context);
                 if (activity != null) {
                     activity.startActivity(chooser);
                 } else {
@@ -876,15 +834,6 @@ public final class CustomTextSelection {
             }
         }
 
-        private static Activity findActivity(Context context) {
-            while (context instanceof ContextWrapper) {
-                if (context instanceof Activity) {
-                    return (Activity) context;
-                }
-                context = ((ContextWrapper) context).getBaseContext();
-            }
-            return null;
-        }
         void cancel() {
             if (tv.getParent() != null) {
                 tv.getParent().requestDisallowInterceptTouchEvent(false);
@@ -903,19 +852,6 @@ public final class CustomTextSelection {
             removeMenu();
         }
 
-        private static ViewGroup findDecor(View v) {
-            Context context = v.getContext();
-            while (context instanceof ContextWrapper) {
-                if (context instanceof Activity) {
-                    View decor = ((Activity) context).getWindow().getDecorView();
-                    if (decor instanceof ViewGroup) {
-                        return (ViewGroup) decor;
-                    }
-                }
-                context = ((ContextWrapper) context).getBaseContext();
-            }
-            return null;
-        }
         private int[] wordBoundary(int offset) {
             CharSequence text = tv.getText();
             int len = text == null ? 0 : text.length();
@@ -1078,7 +1014,6 @@ public final class CustomTextSelection {
             paint.setColor(accentColor);
             setLayerType(LAYER_TYPE_SOFTWARE, null);
             paint.setShadowLayer(1.5f * density, 0f, density, 0x30000000);
-            setPivotX(getWidth() / 2f);
         }
 
         @Override

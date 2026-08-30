@@ -6,7 +6,6 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.util.Log;
 
-import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
@@ -14,17 +13,8 @@ import java.util.Set;
 import io.github.libxposed.service.XposedService;
 
 /**
- * 接收小黑盒进程（内嵌设置面板）发来的开关写请求，并在模块进程中写入 RemotePreferences。
- *
- * <p>修复「模块进程未运行时切换开关无效」：</p>
- * <ul>
- *   <li>发送方（{@link MainModule#writeEmbeddedBoolean}）给广播加
- *       {@link Intent#FLAG_INCLUDE_STOPPED_PACKAGES}，保证模块 App 处于刚安装/停止态时
- *       广播仍能唤醒其进程；</li>
- *   <li>本接收器用 {@link #goAsync()} 挂起广播，在后台线程等待框架服务绑定（冷启动时
- *       服务绑定是异步的，最多等 6 秒），绑定后立即补交，避免「服务还没绑上进程就被回收」丢设置；</li>
- *   <li>待提交缓存改用 {@code commit()} 同步落盘，进程被杀也不丢，下次服务绑定自动补交。</li>
- * </ul>
+ * 接收小黑盒进程（内嵌设置面板）的开关写请求，写入模块进程 RemotePreferences。
+ * 修复「模块进程未运行时切换无效」：广播带 FLAG_INCLUDE_STOPPED_PACKAGES 唤醒进程；goAsync() 等待服务绑定（最多 6 秒）后补交；待提交缓存 commit() 同步落盘
  */
 public class PreferenceReceiver extends BroadcastReceiver {
 
@@ -34,28 +24,8 @@ public class PreferenceReceiver extends BroadcastReceiver {
     private static final String PENDING_PREFS = App.PENDING_PREFS;
     private static final long WAIT_SERVICE_BIND_MS = 6000;
 
-    /** 可写开关 key 白名单（新增开关时同步在 App 中登记） */
-    private static final Set<String> ALLOWED_KEYS = new HashSet<>(Arrays.asList(
-            App.KEY_OPEN_SCREEN,
-            App.KEY_FEED_AD,
-            App.KEY_BUBBLE_AD,
-            App.KEY_CORNER_AD,
-            App.KEY_PROMOTE_AD,
-            App.KEY_HIDE_TAB_HOME,
-            App.KEY_HIDE_TAB_HOT,
-            App.KEY_HIDE_TAB_GAME,
-            App.KEY_HIDE_ADD,
-            App.KEY_COPY_POST,
-            App.KEY_CUSTOM_TEXT_SELECT,
-            App.KEY_BLOCK_UPDATE,
-            App.KEY_SYSTEM_SHARE,
-            App.KEY_LOG,
-            App.KEY_WEBVIEW_DEVTOOLS,
-            App.KEY_LIQUID_GLASS,
-            App.KEY_GLASS_IMMERSIVE,
-            App.KEY_GLASS_ADAPTIVE,
-            App.KEY_GLASS_FIT_TABS
-    ));
+    /** 派生自 {@link App#BOOLEAN_DEFAULTS} */
+    private static final Set<String> ALLOWED_KEYS = new HashSet<>(App.BOOLEAN_DEFAULTS.keySet());
 
     @Override
     public void onReceive(Context context, Intent intent) {
@@ -78,7 +48,6 @@ public class PreferenceReceiver extends BroadcastReceiver {
             return;
         }
 
-        // 挂起广播：onReceive 先返回，进程由 goAsync 保活，后台线程完成「落盘 + 等待服务绑定 + 补交」
         final PendingResult result = goAsync();
         new Thread(new Runnable() {
             @Override

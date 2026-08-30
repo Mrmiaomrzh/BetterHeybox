@@ -9,18 +9,8 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * 运行时检查点（仅 Debug 构建生效，见 {@link BuildFlags#DEBUG}）。
- *
- * <p>「Debug 版检查运行情况」的核心设施：在模块生命周期与 Hook 安装等关键节点打点，
- * 记录相对启动耗时（elapsedRealtime）、pid、线程名，同时输出到 logcat（tag=BHX-CKPT）
- * 与文件日志（{@link LogRecorder}，开关开启时），并保留最近 {@link #MAX} 条内存快照，
- * 供设置页「运行状态」弹窗查看、随「导出日志」一并导出。</p>
- *
- * <p>小黑盒进程（Hook 侧）的检查点会在安装完成后写入 RemotePreferences
- * （见 {@link MainModule#stashRuntimeStatus()}），模块设置页跨进程读取，
- * 从而在设置页直接看到小黑盒进程内 Hook 到底装到哪一步、各模块耗时多少。</p>
- *
- * <p>Release 构建下所有方法均为空操作 / 返回提示文本，不产生任何日志噪音。</p>
+ * 运行时检查点（Debug 构建）：在生命周期/Hook 安装关键节点打点，记录相对耗时、pid、线程名，输出到 logcat 与文件日志并保留最近快照供设置页查看/导出。
+ * 小黑盒进程检查点在安装后写入 RemotePreferences 供设置页跨进程读取；Release 构建全部空操作
  */
 public final class Checkpoint {
 
@@ -34,12 +24,10 @@ public final class Checkpoint {
     private Checkpoint() {
     }
 
-    /** 打点：记录一条检查点（Debug 构建生效，Release 为空操作） */
     public static void mark(String msg) {
         mark("%s", msg);
     }
 
-    /** 打点：格式化消息（Debug 构建生效，Release 为空操作） */
     public static void mark(String fmt, Object... args) {
         if (!BuildFlags.DEBUG) {
             return;
@@ -61,12 +49,10 @@ public final class Checkpoint {
         LogRecorder.recordEvent("检查点: " + msg);
     }
 
-    /** 导出全部检查点文本（Release 构建返回提示） */
     public static String dump() {
         return dump(Integer.MAX_VALUE);
     }
 
-    /** 导出最近 maxLines 条检查点文本（Release 构建返回提示） */
     public static String dump(int maxLines) {
         if (!BuildFlags.DEBUG) {
             return "（Release 构建未启用检查点）";
@@ -88,18 +74,6 @@ public final class Checkpoint {
                 BuildFlags.DEBUG ? "debug" : "release",
                 Build.VERSION.SDK_INT,
                 Build.MANUFACTURER, Build.MODEL,
-                processName());
-    }
-
-    private static String processName() {
-        try {
-            Class<?> activityThread = Class.forName("android.app.ActivityThread");
-            Object name = activityThread.getMethod("currentProcessName").invoke(null);
-            if (name != null) {
-                return name.toString();
-            }
-        } catch (Throwable ignored) {
-        }
-        return String.valueOf(android.os.Process.myPid());
+                App.currentProcessName());
     }
 }

@@ -12,13 +12,8 @@ import com.better.heybox.App;
 import com.better.heybox.MainModule;
 
 /**
- * 净化分享链接：复制链接 / 系统分享到 QQ、微信等渠道时，
- * 去掉小黑盒链接里 sid、share_app_id、h_src 等追踪参数，只保留内容本身。
- *
- * <p>拦截点：小黑盒所有分享出口统一从分享 model 的 {@code getShareUrl()} 取链接
- * （复制链接把它塞进 CopyAction，社交分享经 ShareHelper 用它构建 UMWeb），
- * 因此 Hook 各 model 的 getter 即可覆盖全部出口；IAction$CopyAction.getUrl()
- * 与 HBShareProtocolData.getShare_url() 作为兜底。</p>
+ * 净化分享链接：去掉 sid、share_app_id 等追踪参数。
+ * 拦截点：所有分享出口统一经 model 的 getShareUrl() 取链接，Hook 各 model getter 全覆盖（CopyAction.getUrl / HBShareProtocolData.getShare_url 兜底）
  */
 public final class ShareLinkPurifyHook {
 
@@ -117,11 +112,10 @@ public final class ShareLinkPurifyHook {
     }
 
     /**
-     * 去掉小黑盒链接上的追踪参数。仅在真正删掉参数时重建 URL，
-     * 其余情况原样返回，避免重新编码破坏未识别参数。
-     */
+ * 去掉追踪参数；仅当确实删除参数时重建 URL（避免重新编码破坏未识别参数）
+ */
     String purify(String url) {
-        if (url == null || url.length() < 8) {
+        if (url == null) {
             return url;
         }
         if (!url.startsWith("http://") && !url.startsWith("https://")) {

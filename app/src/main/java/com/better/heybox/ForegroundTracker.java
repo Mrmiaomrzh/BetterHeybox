@@ -8,12 +8,7 @@ import android.os.Bundle;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 前台跟踪（仅 Debug 构建生效）：每次小黑盒打开到前台记录一条检查点，
- * 划到后台不记录。
- *
- * <p>通过 {@link Application.ActivityLifecycleCallbacks} 统计活跃 Activity 数量：
- * 数量 0→1 即为一次「打开应用」（冷启动 / 从后台回到前台），此时打点；
- * 数量 1→0 即划到后台，只减计数、不产生记录。应用内页面跳转（数量始终 ≥1）不重复记录。</p>
+ * 前台跟踪（Debug 构建）：统计活跃 Activity 数，0→1 记一次「打开应用」，1→0 不记录
  */
 public final class ForegroundTracker {
 
@@ -68,8 +63,7 @@ public final class ForegroundTracker {
 
                 @Override
                 public void onActivityStopped(Activity activity) {
-                    // 划到后台：只减计数，不记录
-                    if (sActiveCount > 0) {
+                            if (sActiveCount > 0) {
                         sActiveCount--;
                     }
                 }

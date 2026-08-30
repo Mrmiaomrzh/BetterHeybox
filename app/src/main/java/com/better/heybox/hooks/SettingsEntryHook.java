@@ -61,13 +61,6 @@ public final class SettingsEntryHook {
         sInstance = this;
     }
 
-    /** 供液态玻璃长按设置入口复用现有小黑盒风格内嵌面板。 */
-    public static void openEmbeddedSettings(Activity activity) {
-        SettingsEntryHook instance = sInstance;
-        if (instance != null && activity != null) {
-            instance.showEmbeddedSettings(activity);
-        }
-    }
     public void install(ClassLoader cl) {
         hookSettingsEntry(cl);
     }
@@ -75,24 +68,23 @@ public final class SettingsEntryHook {
     private static final String ENTRY_TAG = "betterheybox_entry";
     private static final String EMBEDDED_SETTINGS_TAG = "betterheybox_embedded_settings";
 
-    /** 内嵌面板配置导出*/
     private static final int REQUEST_EMBEDDED_EXPORT = 0x4248;
-    /** 内嵌面板配置导入 */
     private static final int REQUEST_EMBEDDED_IMPORT = 0x4249;
-    /** 内嵌面板日志导出*/
     private static final int REQUEST_EMBEDDED_LOG_EXPORT = 0x424A;
-    /** 视频保存位置选择（系统文件夹选择器） */
     private static final int REQUEST_PICK_SAVE_DIR = 0x424B;
 
-    /** 文件选择结果回调 */
     private interface PickCallback {
         void onResult(Uri uri);
     }
 
-    /** 等待中的文件选择回调 */
     private static PickCallback sPendingPick;
 
     private WeakReference<View> mSettingsPanel;
+
+    enum Action {
+        NONE, EDIT_LINK, CLEAR_DAILY, CHANNEL, EXPORT, IMPORT,
+        EXPORT_LOG, RUNTIME_STATUS, OPEN_WEB, PICK_DIR, RESET_GLASS
+    }
 
     private static class SwitchDef {
         final String title;
@@ -101,59 +93,20 @@ public final class SettingsEntryHook {
         final boolean def;
         final boolean restart;
         final boolean clickRow;
-        final String editKey; // clickRow 时编辑的字符串配置 key
-        final boolean actionClearDaily; // clickRow 动作：清除每日打卡状态并重试
-        final boolean actionChannel; // clickRow 动作：选择分享渠道
-        final boolean actionExport; // clickRow 动作：导出配置
-        final boolean actionImport; // clickRow 动作：导入配置
-        final boolean actionExportLog; // clickRow 动作：导出日志
-        final boolean actionRuntimeStatus; // clickRow 动作：查看运行状态（仅 Debug 构建显示）
-        final boolean actionPickDir; // clickRow 动作：选择视频保存文件夹（系统 SAF 选择器）
-        boolean actionOpenWeb; // clickRow 动作：编辑并打开小黑盒内置网页
-        final boolean actionDownloadManager; // clickRow 动作：打开下载管理页
-        SwitchDef(String title, String desc, String key, boolean def, boolean restart,
-                  boolean clickRow, String editKey, boolean actionOpenWeb, int marker) {
-            this(title, desc, key, def, restart, clickRow, editKey);
-            this.actionOpenWeb = actionOpenWeb;
-        }
+        final String editKey; // EDIT_LINK 时编辑的字符串配置 key
+        final Action action;
+
         SwitchDef(String title, String desc, String key, boolean def, boolean restart) {
-            this(title, desc, key, def, restart, false, null, false, false, false, false, false, false, false, false);
+            this(title, desc, key, def, restart, false, null, Action.NONE);
         }
-        SwitchDef(String title, String desc, String key, boolean def, boolean restart, boolean clickRow) {
-            this(title, desc, key, def, restart, clickRow, null, false, false, false, false, false, false, false, false);
-        }
-        SwitchDef(String title, String desc, String key, boolean def, boolean restart, boolean clickRow, String editKey) {
-            this(title, desc, key, def, restart, clickRow, editKey, false, false, false, false, false, false, false, false);
-        }
+
         SwitchDef(String title, String desc, String key, boolean def, boolean restart,
-                  boolean clickRow, String editKey, boolean actionClearDaily) {
-            this(title, desc, key, def, restart, clickRow, editKey, actionClearDaily, false, false, false, false, false, false, false);
+                  boolean clickRow, String editKey) {
+            this(title, desc, key, def, restart, clickRow, editKey, Action.EDIT_LINK);
         }
+
         SwitchDef(String title, String desc, String key, boolean def, boolean restart,
-                  boolean clickRow, String editKey, boolean actionClearDaily, boolean actionChannel) {
-            this(title, desc, key, def, restart, clickRow, editKey, actionClearDaily, actionChannel, false, false, false, false, false, false);
-        }
-        SwitchDef(String title, String desc, String key, boolean def, boolean restart,
-                  boolean clickRow, boolean actionExport, boolean actionImport) {
-            this(title, desc, key, def, restart, clickRow, null, false, false, actionExport, actionImport, false, false, false, false);
-        }
-        SwitchDef(String title, String desc, String key, boolean def, boolean restart,
-                  boolean clickRow, String editKey, boolean actionClearDaily, boolean actionChannel,
-                  boolean actionExport, boolean actionImport, boolean actionExportLog, boolean actionRuntimeStatus) {
-            this(title, desc, key, def, restart, clickRow, editKey, actionClearDaily, actionChannel,
-                    actionExport, actionImport, actionExportLog, actionRuntimeStatus, false, false);
-        }
-        SwitchDef(String title, String desc, String key, boolean def, boolean restart,
-                  boolean clickRow, String editKey, boolean actionClearDaily, boolean actionChannel,
-                  boolean actionExport, boolean actionImport, boolean actionExportLog,
-                  boolean actionRuntimeStatus, boolean actionPickDir) {
-            this(title, desc, key, def, restart, clickRow, editKey, actionClearDaily, actionChannel,
-                    actionExport, actionImport, actionExportLog, actionRuntimeStatus, actionPickDir, false);
-        }
-        SwitchDef(String title, String desc, String key, boolean def, boolean restart,
-                  boolean clickRow, String editKey, boolean actionClearDaily, boolean actionChannel,
-                  boolean actionExport, boolean actionImport, boolean actionExportLog,
-                  boolean actionRuntimeStatus, boolean actionPickDir, boolean actionDownloadManager) {
+                  boolean clickRow, String editKey, Action action) {
             this.title = title;
             this.desc = desc;
             this.key = key;
@@ -161,15 +114,7 @@ public final class SettingsEntryHook {
             this.restart = restart;
             this.clickRow = clickRow;
             this.editKey = editKey;
-            this.actionClearDaily = actionClearDaily;
-            this.actionChannel = actionChannel;
-            this.actionExport = actionExport;
-            this.actionImport = actionImport;
-            this.actionExportLog = actionExportLog;
-            this.actionRuntimeStatus = actionRuntimeStatus;
-            this.actionPickDir = actionPickDir;
-            this.actionOpenWeb = false;
-            this.actionDownloadManager = actionDownloadManager;
+            this.action = action;
         }
     }
 
@@ -192,7 +137,7 @@ public final class SettingsEntryHook {
             }),
             new SettingsGroup("视频下载", new SwitchDef[]{
                     new SwitchDef("下载视频", "在支持的视频上显示下载入口", App.KEY_VIDEO_DOWNLOAD, true, false),
-                    new SwitchDef("保存位置", "点击选择保存文件夹", null, false, false, true, null, false, false, false, false, false, false, true),
+                    new SwitchDef("保存位置", "点击选择保存文件夹", null, false, false, true, null, Action.PICK_DIR),
                     new SwitchDef("转存 MP4", "下载合并后自动转封装为 MP4", App.KEY_VIDEO_TO_MP4, true, false),
             }),
             new SettingsGroup("解除复制", new SwitchDef[]{
@@ -208,8 +153,8 @@ public final class SettingsEntryHook {
                     new SwitchDef("帖子链接", "任务一：分享任意帖子", null, false, false, true, App.KEY_DAILY_TASK_PICTURE),
                     new SwitchDef("游戏详情链接", "任务二：分享游戏详情", null, false, false, true, App.KEY_DAILY_TASK_NORMAL),
                     new SwitchDef("游戏评价链接", "任务三：分享游戏评价", null, false, false, true, App.KEY_DAILY_TASK_CHANNEL),
-                    new SwitchDef("分享渠道", null, App.KEY_SHARE_CHANNEL, false, false, true, null, false, true),
-                    new SwitchDef("清除今日打卡", null, null, false, false, true, null, true),
+                    new SwitchDef("分享渠道", null, App.KEY_SHARE_CHANNEL, false, false, true, null, Action.CHANNEL),
+                    new SwitchDef("清除今日打卡", null, null, false, false, true, null, Action.CLEAR_DAILY),
             }),
             new SettingsGroup("液态玻璃", new SwitchDef[]{
                     new SwitchDef("液态玻璃底栏", "在底部导航显示液态玻璃效果（需重启小黑盒）", App.KEY_LIQUID_GLASS, true, true),
@@ -222,7 +167,7 @@ public final class SettingsEntryHook {
                     new SwitchDef("亮色模式不透明度", "输入 5-98 的百分比", null, false, false, true, App.KEY_GLASS_LIGHT_ALPHA),
                     new SwitchDef("玻璃条高度", "输入 0 为自动，或 51-99 dp", null, false, false, true, App.KEY_GLASS_BAR_HEIGHT),
                     new SwitchDef("距屏幕底部", "输入 0-40 dp", null, false, false, true, App.KEY_GLASS_BAR_OFFSET),
-                    new SwitchDef("恢复液态玻璃默认设置", "恢复参考项目的默认外观与布局参数", null, false, false, true, null, false, false, false, false, false, false, false),
+                    new SwitchDef("恢复液态玻璃默认设置", "恢复参考项目的默认外观与布局参数", null, false, false, true, null, Action.RESET_GLASS),
             }),
             new SettingsGroup("通用", new SwitchDef[]{
                     new SwitchDef("伪装通知权限", "让小黑盒认为通知已开启，获得签到加成", App.KEY_FAKE_NOTIFICATION, false, false),
@@ -230,12 +175,12 @@ public final class SettingsEntryHook {
                     new SwitchDef("记录日志", null, App.KEY_LOG, false, false),
                     new SwitchDef("网页 DevTools", "为小黑盒内置网页开启 Chrome 远程调试", App.KEY_WEBVIEW_DEVTOOLS, false, false),
                     new SwitchDef("打开网页", "使用小黑盒内置浏览器打开指定网页", null, false, false,
-                            true, App.KEY_WEBVIEW_ENTRY_URL, true, 0),
-                    new SwitchDef("导出日志", null, null, false, false, true, null, false, false, false, false, true, false),
+                            true, App.KEY_WEBVIEW_ENTRY_URL, Action.OPEN_WEB),
+                    new SwitchDef("导出日志", null, null, false, false, true, null, Action.EXPORT_LOG),
             }),
             new SettingsGroup("配置备份", new SwitchDef[]{
-                    new SwitchDef("导出配置", null, null, false, false, true, true, false),
-                    new SwitchDef("导入配置", null, null, false, false, true, false, true),
+                    new SwitchDef("导出配置", null, null, false, false, true, null, Action.EXPORT),
+                    new SwitchDef("导入配置", null, null, false, false, true, null, Action.IMPORT),
             }),
     };
     private static SettingsGroup buildBottomTabGroup(Activity activity) {
@@ -250,7 +195,6 @@ public final class SettingsEntryHook {
         });
     }
 
-    /** 完整分组列表*/
     private static SettingsGroup[] getSettingsGroups(Activity activity) {
         SettingsGroup[] base = BASE_GROUPS;
         if (BuildFlags.DEBUG) {
@@ -262,7 +206,6 @@ public final class SettingsEntryHook {
         return all;
     }
 
-    /** Debug 构建：往「通用」分组追加「运行状态」行 */
     private static SettingsGroup[] withRuntimeStatusGroup(SettingsGroup[] groups) {
         SettingsGroup[] out = new SettingsGroup[groups.length];
         for (int i = 0; i < groups.length; i++) {
@@ -272,7 +215,7 @@ public final class SettingsEntryHook {
                 System.arraycopy(g.items, 0, items, 0, g.items.length);
                 items[g.items.length] = new SwitchDef(
                         "运行状态", "查看模块运行检查点", null, false, false,
-                        true, null, false, false, false, false, false, true);
+                        true, null, Action.RUNTIME_STATUS);
                 out[i] = new SettingsGroup(g.title, items);
             } else {
                 out[i] = g;
@@ -454,30 +397,39 @@ public final class SettingsEntryHook {
         return null;
     }
 
-    /** 「保存位置」行点击：已设置时给「换目录 / 恢复默认」（小黑盒原生弹窗），否则直接打开系统文件夹选择器 */
-    private void showSaveDirDialog(final Activity activity) {
-        String current = HeyboxPrefs.getString(App.KEY_VIDEO_DIR, null);
-        if (current == null || !current.startsWith("content:")) {
-            startDirPicker(activity);
-            return;
-        }
+    private void withHeyboxDialog(Activity activity, NativeDialogCall nativeCall, Runnable fallback) {
         DexKitResolver.getHeyboxDialogSpec(module, activity, new DexKitResolver.SpecCallback() {
             @Override
             public void onReady(DexKitResolver.HeyboxDialogSpec spec) {
                 try {
-                    showSaveDirDialogNative(activity, current, spec);
+                    nativeCall.call(spec);
                 } catch (Throwable t) {
                     module.logd(Log.WARN, module.TAG, "小黑盒原生弹窗不可用，回退系统弹窗: " + t);
-                    showSaveDirDialogFallback(activity, current);
+                    fallback.run();
                 }
             }
 
             @Override
             public void onFailed(String reason) {
                 module.logd(Log.WARN, module.TAG, "小黑盒原生弹窗解析失败(" + reason + ")，回退系统弹窗");
-                showSaveDirDialogFallback(activity, current);
+                fallback.run();
             }
         });
+    }
+
+    private interface NativeDialogCall {
+        void call(DexKitResolver.HeyboxDialogSpec spec) throws Throwable;
+    }
+
+    /** 未设置时直接打开选择器，已设置时给换目录/恢复默认选项 */
+    private void showSaveDirDialog(final Activity activity) {
+        String current = HeyboxPrefs.getString(App.KEY_VIDEO_DIR, null);
+        if (current == null || !current.startsWith("content:")) {
+            startDirPicker(activity);
+            return;
+        }
+        withHeyboxDialog(activity, spec -> showSaveDirDialogNative(activity, current, spec),
+                () -> showSaveDirDialogFallback(activity, current));
     }
 
     private void showSaveDirDialogNative(final Activity activity, final String current,
@@ -492,13 +444,9 @@ public final class SettingsEntryHook {
         message.setText("当前：" + describeSaveDir(activity, current)
                 + "\n\n默认位置为相册 Movies/BetterHeybox");
         message.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        try {
-            int colorId = activity.getResources().getIdentifier(
-                    "color_text_primary_day_night", "color", MainModule.TARGET_PKG);
-            if (colorId != 0) {
-                message.setTextColor(activity.getResources().getColor(colorId));
-            }
-        } catch (Throwable ignored) {
+        int textColor = hostColor(activity, "color_text_primary_day_night", 0);
+        if (textColor != 0) {
+            message.setTextColor(textColor);
         }
         DialogInterface.OnClickListener pick = (d, w) -> {
             d.dismiss();
@@ -634,13 +582,6 @@ public final class SettingsEntryHook {
     private Object getGeneralSettingsBinding(Activity activity) {
         try {
             for (Field f : activity.getClass().getDeclaredFields()) {
-                String typeName = f.getType().getName();
-                if ("fi.r0".equals(typeName) || "hi.r0".equals(typeName)) {
-                    f.setAccessible(true);
-                    return f.get(activity);
-                }
-            }
-            for (Field f : activity.getClass().getDeclaredFields()) {
                 if (!isViewBindingShape(f.getType())) {
                     continue;
                 }
@@ -717,14 +658,14 @@ public final class SettingsEntryHook {
             HeyboxPrefs.init(activity);
             int appbarBg = 0xFFFFFFFF;
             int pageBg = 0xFFFFFFFF;
-            int appbarBgId = resId(activity, "appbar_bg_color", "color", 0);
+            int appbarBgId = hostResId(activity, "appbar_bg_color", "color", 0);
             if (appbarBgId != 0) {
                 try {
                     appbarBg = activity.getResources().getColor(appbarBgId);
                 } catch (Throwable ignored) {
                 }
             }
-            int pageBgId = resId(activity, "color_bg_subtle_day_night", "color", 0);
+            int pageBgId = hostResId(activity, "color_bg_subtle_day_night", "color", 0);
             if (pageBgId != 0) {
                 try {
                     pageBg = activity.getResources().getColor(pageBgId);
@@ -762,23 +703,7 @@ public final class SettingsEntryHook {
                     ViewGroup.LayoutParams.MATCH_PARENT, statusBarH));
             page.addView(statusSpacer);
             ClassLoader cl = activity.getClassLoader();
-            Class<?> titleBarCls = Class.forName("com.max.hbcommon.component.TitleBar", false, cl);
-            Object titleBar = titleBarCls.getConstructor(Context.class).newInstance(activity);
-            ((View) titleBar).setBackgroundColor(appbarBg);
-            titleBarCls.getMethod("setTitle", CharSequence.class).invoke(titleBar, "BetterHeybox 设置");
-            titleBarCls.getMethod("setNavigationIcon", int.class)
-                    .invoke(titleBar, resId(activity, "appbar_back", "drawable", 0));
-            Class<?> ocl = Class.forName("android.view.View$OnClickListener", false, cl);
-            Object backListener = new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    dismissEmbeddedSettings();
-                }
-            };
-            titleBarCls.getMethod("setNavigationOnClickListener", ocl).invoke(titleBar, backListener);
-            ((View) titleBar).setLayoutParams(new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, module.dp(activity, 44)));
-            page.addView((View) titleBar);
+            page.addView(buildEmbeddedTitleBar(activity, cl, appbarBg));
             ScrollView scroller = new ScrollView(activity);
             scroller.setLayoutParams(new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
@@ -796,65 +721,92 @@ public final class SettingsEntryHook {
                     box.addView(card);
                 }
             }
-            try {
-                TextView footer = new TextView(activity);
-                String moduleVersion = null;
-                try {
-                    android.content.pm.ApplicationInfo moduleInfo = module.getModuleApplicationInfo();
-                    android.content.pm.PackageInfo pkgInfo = activity.getPackageManager()
-                            .getPackageArchiveInfo(moduleInfo.sourceDir, 0);
-                    if (pkgInfo != null) {
-                        moduleVersion = pkgInfo.versionName;
-                    }
-                } catch (Throwable ignored) {
-                }
-                String displayVersion = moduleVersion;
-                if (displayVersion != null && displayVersion.startsWith("v")) {
-                    displayVersion = displayVersion.substring(1);
-                }
-                footer.setText("BetterHeybox v"
-                        + (displayVersion == null ? "unknown" : displayVersion));
-                footer.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12);
-                footer.setGravity(android.view.Gravity.CENTER);
-                int footerColor = 0xFF8A8A8A;
-                int footerColorId = resId(activity, "color_text_tertiary_day_night", "color", 0);
-                if (footerColorId != 0) {
-                    try {
-                        footerColor = activity.getResources().getColor(footerColorId);
-                    } catch (Throwable ignored) {
-                    }
-                }
-                footer.setTextColor(footerColor);
-                LinearLayout.LayoutParams footerLp = new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                int fm = module.dp(activity, 16);
-                footerLp.setMargins(fm, module.dp(activity, 12), fm, module.dp(activity, 24));
-                footer.setLayoutParams(footerLp);
-                box.addView(footer);
-                module.logd(Log.INFO, module.TAG, "✔ 内嵌面板底部版本号已添加: "
-                        + (displayVersion == null ? "unknown" : displayVersion));
-            } catch (Throwable t) {
-                module.logd(Log.WARN, module.TAG, "内嵌面板版本号页脚渲染失败: " + t);
-            }
-            overlay.setOnKeyListener(new View.OnKeyListener() {
-                @Override
-                public boolean onKey(View v, int keyCode, KeyEvent event) {
-                    if (keyCode == KeyEvent.KEYCODE_BACK && event.getAction() == KeyEvent.ACTION_DOWN) {
-                        dismissEmbeddedSettings();
-                        return true;
-                    }
-                    return false;
-                }
-            });
-
-            ViewGroup decor = (ViewGroup) activity.getWindow().getDecorView();
-            decor.addView(overlay);
-            overlay.requestFocus();
-            mSettingsPanel = new WeakReference<View>(overlay);
-            module.logd(Log.INFO, module.TAG, "✔ 原生子页面设置面板已叠加到小黑盒窗口");
+            appendEmbeddedFooter(activity, box);
+            attachEmbeddedPanel(activity, overlay);
         } catch (Throwable t) {
             module.logd(Log.ERROR, module.TAG, "渲染原生设置面板失败", t);
         }
+    }
+
+    private View buildEmbeddedTitleBar(Activity activity, ClassLoader cl, int appbarBg) throws Throwable {
+        Class<?> titleBarCls = Class.forName("com.max.hbcommon.component.TitleBar", false, cl);
+        Object titleBar = titleBarCls.getConstructor(Context.class).newInstance(activity);
+        ((View) titleBar).setBackgroundColor(appbarBg);
+        titleBarCls.getMethod("setTitle", CharSequence.class).invoke(titleBar, "BetterHeybox 设置");
+        titleBarCls.getMethod("setNavigationIcon", int.class)
+                .invoke(titleBar, hostResId(activity, "appbar_back", "drawable", 0));
+        Class<?> ocl = Class.forName("android.view.View$OnClickListener", false, cl);
+        Object backListener = new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dismissEmbeddedSettings();
+            }
+        };
+        titleBarCls.getMethod("setNavigationOnClickListener", ocl).invoke(titleBar, backListener);
+        ((View) titleBar).setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, module.dp(activity, 44)));
+        return (View) titleBar;
+    }
+
+    private void appendEmbeddedFooter(Activity activity, LinearLayout box) {
+        try {
+            TextView footer = new TextView(activity);
+            String moduleVersion = null;
+            try {
+                android.content.pm.ApplicationInfo moduleInfo = module.getModuleApplicationInfo();
+                android.content.pm.PackageInfo pkgInfo = activity.getPackageManager()
+                        .getPackageArchiveInfo(moduleInfo.sourceDir, 0);
+                if (pkgInfo != null) {
+                    moduleVersion = pkgInfo.versionName;
+                }
+            } catch (Throwable ignored) {
+            }
+            String displayVersion = moduleVersion;
+            if (displayVersion != null && displayVersion.startsWith("v")) {
+                displayVersion = displayVersion.substring(1);
+            }
+            footer.setText("BetterHeybox v"
+                    + (displayVersion == null ? "unknown" : displayVersion));
+            footer.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12);
+            footer.setGravity(android.view.Gravity.CENTER);
+            int footerColor = 0xFF8A8A8A;
+            int footerColorId = hostResId(activity, "color_text_tertiary_day_night", "color", 0);
+            if (footerColorId != 0) {
+                try {
+                    footerColor = activity.getResources().getColor(footerColorId);
+                } catch (Throwable ignored) {
+                }
+            }
+            footer.setTextColor(footerColor);
+            LinearLayout.LayoutParams footerLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            int fm = module.dp(activity, 16);
+            footerLp.setMargins(fm, module.dp(activity, 12), fm, module.dp(activity, 24));
+            footer.setLayoutParams(footerLp);
+            box.addView(footer);
+            module.logd(Log.INFO, module.TAG, "✔ 内嵌面板底部版本号已添加: "
+                    + (displayVersion == null ? "unknown" : displayVersion));
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "内嵌面板版本号页脚渲染失败: " + t);
+        }
+    }
+
+    private void attachEmbeddedPanel(Activity activity, FrameLayout overlay) {
+        overlay.setOnKeyListener(new View.OnKeyListener() {
+            @Override
+            public boolean onKey(View v, int keyCode, KeyEvent event) {
+                if (keyCode == KeyEvent.KEYCODE_BACK && event.getAction() == KeyEvent.ACTION_DOWN) {
+                    dismissEmbeddedSettings();
+                    return true;
+                }
+                return false;
+            }
+        });
+        ViewGroup decor = (ViewGroup) activity.getWindow().getDecorView();
+        decor.addView(overlay);
+        overlay.requestFocus();
+        mSettingsPanel = new WeakReference<View>(overlay);
+        module.logd(Log.INFO, module.TAG, "✔ 原生子页面设置面板已叠加到小黑盒窗口");
     }
 
     private void dismissEmbeddedSettings() {
@@ -879,7 +831,7 @@ public final class SettingsEntryHook {
             int titleSize = module.dp(activity, 13);
             groupTitle.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, titleSize);
             int titleColor = 0xFF8A8A8A;
-            int titleColorId = resId(activity, "color_text_tertiary_day_night", "color", 0);
+            int titleColorId = hostResId(activity, "color_text_tertiary_day_night", "color", 0);
             if (titleColorId != 0) {
                 try {
                     titleColor = activity.getResources().getColor(titleColorId);
@@ -894,25 +846,9 @@ public final class SettingsEntryHook {
             titleLp.setMargins(tm, module.dp(activity, 16), tm, 0);
             groupTitle.setLayoutParams(titleLp);
             groupRoot.addView(groupTitle);
-            Class<?> cardCls = Class.forName("androidx.cardview.widget.CardView", false, cl);
-            Object card = cardCls.getConstructor(Context.class).newInstance(activity);
-            float density = activity.getResources().getDisplayMetrics().density;
-            cardCls.getMethod("setRadius", float.class).invoke(card, 8f * density);
-            cardCls.getMethod("setCardElevation", float.class).invoke(card, 0f);
-            try {
-                cardCls.getMethod("setMaxCardElevation", float.class).invoke(card, 0f);
-            } catch (Throwable ignored) {
-            }
-            LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            int m = module.dp(activity, 12);
-            cardLp.setMargins(m, module.dp(activity, 8), m, 0);
-            ((View) card).setLayoutParams(cardLp);
-            LinearLayout content = new LinearLayout(activity);
-            content.setOrientation(LinearLayout.VERTICAL);
-            content.setLayoutParams(new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            ((ViewGroup) card).addView(content);
+            Object[] cardPair = buildHostCard(activity, cl);
+            Object card = cardPair[0];
+            LinearLayout content = (LinearLayout) cardPair[1];
             for (int i = 0; i < group.items.length; i++) {
                 View item = createSettingSwitch(activity, cl, group.items[i]);
                 if (item == null) {
@@ -936,6 +872,11 @@ public final class SettingsEntryHook {
         }
     }
 
+    private static void setRowClick(Class<?> itemCls, Object item, View.OnClickListener l)
+            throws Throwable {
+        itemCls.getMethod("setOnClickListener", View.OnClickListener.class).invoke(item, l);
+    }
+
     private View createSettingSwitch(Activity activity, ClassLoader cl, SwitchDef def) {
         try {
             Class<?> itemCls = Class.forName(
@@ -944,8 +885,7 @@ public final class SettingsEntryHook {
 
             itemCls.getMethod("setTitle", String.class).invoke(item, def.title);
             if (def.desc != null) {
-                // 标题下方灰色小字介绍：setTitleDesc 只写文本，tvTitleDesc 默认 GONE，
-                // 还需打开可见性开关（f(boolean)，混淆名跨版本会变，用探针自动解析）
+                // setTitleDesc 只写文本且默认 GONE，还需用探针解析出的方法打开可见性开关
                 itemCls.getMethod("setTitleDesc", String.class).invoke(item, def.desc);
                 Method descToggle = resolveDescToggle(itemCls, activity);
                 if (descToggle != null) {
@@ -962,45 +902,46 @@ public final class SettingsEntryHook {
                 } catch (Throwable ignored) {
                 }
                 final String editKey = def.editKey;
-                if (def.actionClearDaily) {
-                    itemCls.getMethod("setOnClickListener", View.OnClickListener.class)
-                            .invoke(item, (View.OnClickListener) v -> {
-                                try {
-                                    module.clearDailyTaskAndRetry(activity);
-                                    Toast.makeText(activity, "已清除今日打卡状态，重新尝试中…",
-                                            Toast.LENGTH_SHORT).show();
-                                } catch (Throwable t) {
-                                    module.logd(Log.ERROR, module.TAG, "清除今日打卡失败", t);
-                                }
-                            });
-                } else if (def.actionChannel) {
-                    itemCls.getMethod("setOnClickListener", View.OnClickListener.class)
-                            .invoke(item, (View.OnClickListener) v -> showChannelDialog(activity, def));
-                } else if (def.actionExport) {
-                    itemCls.getMethod("setOnClickListener", View.OnClickListener.class)
-                            .invoke(item, (View.OnClickListener) v -> startEmbeddedExport(activity));
-                } else if (def.actionImport) {
-                    itemCls.getMethod("setOnClickListener", View.OnClickListener.class)
-                            .invoke(item, (View.OnClickListener) v -> startEmbeddedImport(activity));
-                } else if (def.actionExportLog) {
-                    itemCls.getMethod("setOnClickListener", View.OnClickListener.class)
-                            .invoke(item, (View.OnClickListener) v -> startEmbeddedLogExport(activity));
-                } else if (def.actionPickDir) {
-                    itemCls.getMethod("setOnClickListener", View.OnClickListener.class)
-                            .invoke(item, (View.OnClickListener) v -> showSaveDirDialog(activity));
-
-                } else if (def.actionRuntimeStatus) {
-                    itemCls.getMethod("setOnClickListener", View.OnClickListener.class)
-                            .invoke(item, (View.OnClickListener) v -> showEmbeddedRuntimeStatus(activity));
-                } else if (def.actionOpenWeb) {
-                    itemCls.getMethod("setOnClickListener", View.OnClickListener.class)
-                            .invoke(item, (View.OnClickListener) v -> showOpenWebDialog(activity));
-                } else if ("恢复液态玻璃默认设置".equals(def.title)) {
-                    itemCls.getMethod("setOnClickListener", View.OnClickListener.class)
-                            .invoke(item, (View.OnClickListener) v -> resetLiquidGlassSettings(activity));
-                } else {
-                    itemCls.getMethod("setOnClickListener", View.OnClickListener.class)
-                            .invoke(item, (View.OnClickListener) v -> showEditLinkDialog(activity, def.title, editKey));
+                switch (def.action) {
+                    case CLEAR_DAILY:
+                        setRowClick(itemCls, item, v -> {
+                            try {
+                                module.clearDailyTaskAndRetry(activity);
+                                Toast.makeText(activity, "已清除今日打卡状态，重新尝试中…",
+                                        Toast.LENGTH_SHORT).show();
+                            } catch (Throwable t) {
+                                module.logd(Log.ERROR, module.TAG, "清除今日打卡失败", t);
+                            }
+                        });
+                        break;
+                    case CHANNEL:
+                        setRowClick(itemCls, item, v -> showChannelDialog(activity));
+                        break;
+                    case EXPORT:
+                        setRowClick(itemCls, item, v -> startEmbeddedExport(activity));
+                        break;
+                    case IMPORT:
+                        setRowClick(itemCls, item, v -> startEmbeddedImport(activity));
+                        break;
+                    case EXPORT_LOG:
+                        setRowClick(itemCls, item, v -> startEmbeddedLogExport(activity));
+                        break;
+                    case PICK_DIR:
+                        setRowClick(itemCls, item, v -> showSaveDirDialog(activity));
+                        break;
+                    case RUNTIME_STATUS:
+                        setRowClick(itemCls, item, v -> showEmbeddedRuntimeStatus(activity));
+                        break;
+                    case OPEN_WEB:
+                        setRowClick(itemCls, item, v -> showOpenWebDialog(activity));
+                        break;
+                    case RESET_GLASS:
+                        setRowClick(itemCls, item, v -> resetLiquidGlassSettings(activity));
+                        break;
+                    case EDIT_LINK:
+                    default:
+                        setRowClick(itemCls, item, v -> showEditLinkDialog(activity, def.title, editKey));
+                        break;
                 }
                 int itemH = module.dp(activity, 48);
                 ((View) item).setLayoutParams(new LinearLayout.LayoutParams(
@@ -1049,9 +990,8 @@ public final class SettingsEntryHook {
     private static final String DESC_PROBE_TEXT = "BH_DESC_PROBE";
 
     /**
-     * 解析描述可见性开关方法：用一个不挂到窗口的一次性 SettingItemView，
-     * 逐个尝试 boolean 单参方法，能把 {@code setTitleDesc} 写入的探针 TextView 点亮的就是它。
-     */
+ * 解析描述可见性开关：探针试出能把 setTitleDesc 文本点亮的 boolean 单参方法
+ */
     private Method resolveDescToggle(Class<?> itemCls, Activity activity) {
         if (sDescToggle != null) {
             return sDescToggle;
@@ -1083,7 +1023,7 @@ public final class SettingsEntryHook {
         return null;
     }
 
-    /** 在（未挂载的）视图树中查找探针文本 TextView 是否可见 */
+    /** 查找探针文本是否可见 */
     private static boolean isProbeDescVisible(Object root) {
         if (!(root instanceof View)) {
             return false;
@@ -1103,39 +1043,15 @@ public final class SettingsEntryHook {
         return false;
     }
 
-    private int resId(Activity activity, String name, String type, int fallback) {
-        try {
-            int id = activity.getResources().getIdentifier(name, type, MainModule.TARGET_PKG);
-            return id != 0 ? id : fallback;
-        } catch (Throwable t) {
-            return fallback;
-        }
-    }
-
-    private void showChannelDialog(final Activity activity, final SwitchDef def) {
-        DexKitResolver.getHeyboxDialogSpec(module, activity, new DexKitResolver.SpecCallback() {
-            @Override
-            public void onReady(DexKitResolver.HeyboxDialogSpec spec) {
-                try {
-                    showChannelDialogNative(activity, spec);
-                } catch (Throwable t) {
-                    module.logd(Log.WARN, module.TAG, "小黑盒原生弹窗不可用，回退系统弹窗: " + t);
-                    showChannelDialogFallback(activity, def);
-                }
-            }
-
-            @Override
-            public void onFailed(String reason) {
-                module.logd(Log.WARN, module.TAG, "小黑盒原生弹窗解析失败(" + reason + ")，回退系统弹窗");
-                showChannelDialogFallback(activity, def);
-            }
-        });
+    private void showChannelDialog(final Activity activity) {
+        withHeyboxDialog(activity, spec -> showChannelDialogNative(activity, spec),
+                () -> showChannelDialogFallback(activity));
     }
 
     private void showChannelDialogNative(final Activity activity, DexKitResolver.HeyboxDialogSpec spec)
             throws Exception {
-        final String[] channels = {"QQ", "WECHAT", "WEIBO"};
-        final String[] labels = {"QQ / QQ空间", "微信 / 朋友圈", "微博"};
+        final String[] channels = SHARE_CHANNELS;
+        final String[] labels = SHARE_CHANNEL_LABELS;
         String cur = module.getString(App.KEY_SHARE_CHANNEL, "QQ");
         final int checked = "WECHAT".equals(cur) ? 1 : ("WEIBO".equals(cur) ? 2 : 0);
         LinearLayout list = new LinearLayout(activity);
@@ -1149,16 +1065,9 @@ public final class SettingsEntryHook {
             row.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
             row.setGravity(Gravity.CENTER_VERTICAL);
             row.setPadding(pad, module.dp(activity, 14), pad, module.dp(activity, 14));
-            int rowColor = index == checked ? 0xFF1677FF : 0xFF333333;
-            try {
-                int colorId = activity.getResources().getIdentifier(
-                        index == checked ? "color_text_link_day_night" : "color_text_primary_day_night",
-                        "color", MainModule.TARGET_PKG);
-                if (colorId != 0) {
-                    rowColor = activity.getResources().getColor(colorId);
-                }
-            } catch (Throwable ignored) {
-            }
+            int rowColor = hostColor(activity,
+                    index == checked ? "color_text_link_day_night" : "color_text_primary_day_night",
+                    index == checked ? 0xFF1677FF : 0xFF333333);
             row.setTextColor(rowColor);
             row.setClickable(true);
             row.setFocusable(true);
@@ -1188,9 +1097,9 @@ public final class SettingsEntryHook {
         }
         module.logd(Log.INFO, module.TAG, "✔ 使用小黑盒原生弹窗选择分享渠道");
     }
-    private void showChannelDialogFallback(final Activity activity, final SwitchDef def) {
-        final String[] channels = {"QQ", "WECHAT", "WEIBO"};
-        final String[] labels = {"QQ / QQ空间", "微信 / 朋友圈", "微博"};
+    private void showChannelDialogFallback(final Activity activity) {
+        final String[] channels = SHARE_CHANNELS;
+        final String[] labels = SHARE_CHANNEL_LABELS;
         String cur = module.getString(App.KEY_SHARE_CHANNEL, "QQ");
         int checked = "WECHAT".equals(cur) ? 1 : ("WEIBO".equals(cur) ? 2 : 0);
         try {
@@ -1217,17 +1126,12 @@ public final class SettingsEntryHook {
 
     private static final String DEFAULT_WEBVIEW_ENTRY_URL = "https://github.com/Mrmiaomrzh/BetterHeybox";
 
+    private static final String[] SHARE_CHANNELS = {"QQ", "WECHAT", "WEIBO"};
+    private static final String[] SHARE_CHANNEL_LABELS = {"QQ / QQ空间", "微信 / 朋友圈", "微博"};
+
     private void showOpenWebDialog(final Activity activity) {
-        DexKitResolver.getHeyboxDialogSpec(module, activity, new DexKitResolver.SpecCallback() {
-            @Override public void onReady(DexKitResolver.HeyboxDialogSpec spec) {
-                try { showOpenWebDialogNative(activity, spec); }
-                catch (Throwable t) { module.logd(Log.WARN, module.TAG, "小黑盒原生网页弹窗失败", t); showOpenWebDialogFallback(activity); }
-            }
-            @Override public void onFailed(String reason) {
-                module.logd(Log.WARN, module.TAG, "小黑盒原生网页弹窗解析失败: " + reason);
-                showOpenWebDialogFallback(activity);
-            }
-        });
+        withHeyboxDialog(activity, spec -> showOpenWebDialogNative(activity, spec),
+                () -> showOpenWebDialogFallback(activity));
     }
 
     private EditText createWebUrlInput(Activity activity) {
@@ -1308,23 +1212,8 @@ public final class SettingsEntryHook {
         if (panel != null && panel.getParent() != null) showEmbeddedSettings(activity);
     }
     private void showEditLinkDialog(final Activity activity, final String title, final String key) {
-        DexKitResolver.getHeyboxDialogSpec(module, activity, new DexKitResolver.SpecCallback() {
-            @Override
-            public void onReady(DexKitResolver.HeyboxDialogSpec spec) {
-                try {
-                    showEditLinkDialogNative(activity, title, key, spec);
-                } catch (Throwable t) {
-                    module.logd(Log.WARN, module.TAG, "小黑盒原生弹窗不可用，回退系统弹窗: " + t);
-                    showEditLinkDialogFallback(activity, title, key);
-                }
-            }
-
-            @Override
-            public void onFailed(String reason) {
-                module.logd(Log.WARN, module.TAG, "小黑盒原生弹窗解析失败(" + reason + ")，回退系统弹窗");
-                showEditLinkDialogFallback(activity, title, key);
-            }
-        });
+        withHeyboxDialog(activity, spec -> showEditLinkDialogNative(activity, title, key, spec),
+                () -> showEditLinkDialogFallback(activity, title, key));
     }
 
     private void showEditLinkDialogNative(final Activity activity, final String title, final String key,
@@ -1345,13 +1234,9 @@ public final class SettingsEntryHook {
             }
         } catch (Throwable ignored) {
         }
-        try {
-            int colorId = activity.getResources().getIdentifier(
-                    "color_text_primary_day_night", "color", MainModule.TARGET_PKG);
-            if (colorId != 0) {
-                input.setTextColor(activity.getResources().getColor(colorId));
-            }
-        } catch (Throwable ignored) {
+        int textColor = hostColor(activity, "color_text_primary_day_night", 0);
+        if (textColor != 0) {
+            input.setTextColor(textColor);
         }
         input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         input.setSingleLine(true);
@@ -1524,23 +1409,8 @@ public final class SettingsEntryHook {
         }
     }
     private void startEmbeddedImport(final Activity activity) {
-        DexKitResolver.getHeyboxDialogSpec(module, activity, new DexKitResolver.SpecCallback() {
-            @Override
-            public void onReady(DexKitResolver.HeyboxDialogSpec spec) {
-                try {
-                    startEmbeddedImportNative(activity, spec);
-                } catch (Throwable t) {
-                    module.logd(Log.WARN, module.TAG, "小黑盒原生弹窗不可用，回退系统弹窗: " + t);
-                    showEmbeddedImportConfirmFallback(activity);
-                }
-            }
-
-            @Override
-            public void onFailed(String reason) {
-                module.logd(Log.WARN, module.TAG, "小黑盒原生弹窗解析失败(" + reason + ")，回退系统弹窗");
-                showEmbeddedImportConfirmFallback(activity);
-            }
-        });
+        withHeyboxDialog(activity, spec -> startEmbeddedImportNative(activity, spec),
+                () -> showEmbeddedImportConfirmFallback(activity));
     }
 
     private void startEmbeddedImportNative(final Activity activity, DexKitResolver.HeyboxDialogSpec spec)
@@ -1554,13 +1424,9 @@ public final class SettingsEntryHook {
         message.setPadding(pad, pad, pad, pad);
         message.setText("导入将覆盖当前所有设置（开关、分享链接、分享渠道等），确定继续？");
         message.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        try {
-            int colorId = activity.getResources().getIdentifier(
-                    "color_text_primary_day_night", "color", MainModule.TARGET_PKG);
-            if (colorId != 0) {
-                message.setTextColor(activity.getResources().getColor(colorId));
-            }
-        } catch (Throwable ignored) {
+        int textColor = hostColor(activity, "color_text_primary_day_night", 0);
+        if (textColor != 0) {
+            message.setTextColor(textColor);
         }
         DialogInterface.OnClickListener importListener = (d, w) -> {
             try {
@@ -1677,9 +1543,7 @@ public final class SettingsEntryHook {
         return localOk;
     }
 
-    /* ==== 下载管理页复用的宿主组件工厂（包内可见） ==== */
 
-    /** 解析宿主资源 id */
     public static int hostResId(Context context, String name, String type, int fallback) {
         try {
             int id = context.getResources().getIdentifier(name, type, MainModule.TARGET_PKG);
@@ -1689,7 +1553,7 @@ public final class SettingsEntryHook {
         }
     }
 
-    /** 解析宿主 day_night 颜色资源（跟随深浅色） */
+    /** 解析 day_night 颜色资源 */
     public static int hostColor(Context context, String name, int fallback) {
         int id = hostResId(context, name, "color", 0);
         if (id != 0) {
@@ -1701,153 +1565,36 @@ public final class SettingsEntryHook {
         return fallback;
     }
 
-    /**
-     * 创建宿主卡片（8dp 圆角、无阴影），返回卡片本体；行内容通过
-     * {@code ((ViewGroup) card.getTag())} 取出后 add 进去（content 已挂进卡片，
-     * 直接返回 content 会让调用方二次挂载时触发 child already has a parent）。
-     */
-    public static ViewGroup hostCard(Context context) {
+    /** 返回 {card, content} */
+    private static Object[] buildHostCard(Activity activity, ClassLoader cl) throws Throwable {
+        Class<?> cardCls = Class.forName("androidx.cardview.widget.CardView", false, cl);
+        Object card = cardCls.getConstructor(Context.class).newInstance(activity);
+        float density = activity.getResources().getDisplayMetrics().density;
+        cardCls.getMethod("setRadius", float.class).invoke(card, 8f * density);
+        cardCls.getMethod("setCardElevation", float.class).invoke(card, 0f);
         try {
-            ClassLoader cl = context.getClassLoader();
-            Class<?> cardCls = Class.forName("androidx.cardview.widget.CardView", false, cl);
-            Object card = cardCls.getConstructor(Context.class).newInstance(context);
-            float density = context.getResources().getDisplayMetrics().density;
-            cardCls.getMethod("setRadius", float.class).invoke(card, 8f * density);
-            cardCls.getMethod("setCardElevation", float.class).invoke(card, 0f);
-            try {
-                cardCls.getMethod("setMaxCardElevation", float.class).invoke(card, 0f);
-            } catch (Throwable ignored) {
-            }
-            LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            int m = ThemeUtils.dp(context, 12);
-            cardLp.setMargins(m, ThemeUtils.dp(context, 8), m, 0);
-            ((View) card).setLayoutParams(cardLp);
-            LinearLayout content = new LinearLayout(context);
-            content.setOrientation(LinearLayout.VERTICAL);
-            content.setLayoutParams(new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            ((ViewGroup) card).addView(content);
-            content.setTag(card);
-            return (ViewGroup) card;
-        } catch (Throwable t) {
-            // 宿主组件不可用：退化为普通容器（自挂载，行为与上面一致）
-            LinearLayout fallback = new LinearLayout(context);
-            fallback.setOrientation(LinearLayout.VERTICAL);
-            fallback.setLayoutParams(new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            fallback.setTag(fallback);
-            return fallback;
-        }
-    }
-
-    /** 创建宿主设置行（Text 型：标题 + 描述 + 右侧状态文本） */
-    static View hostTextItem(Context context, String title, String titleDesc,
-                             String rightDesc, boolean divider) throws Throwable {
-        ClassLoader cl = context.getClassLoader();
-        Class<?> itemCls = Class.forName(
-                "com.max.xiaoheihe.module.account.component.SettingItemView", false, cl);
-        Object item = itemCls.getConstructor(Context.class).newInstance(context);
-        itemCls.getMethod("setTitle", String.class).invoke(item, title);
-        if (titleDesc != null) {
-            itemCls.getMethod("setTitleDesc", String.class).invoke(item, titleDesc);
-        }
-        Class<?> typeEnum = Class.forName(
-                "com.max.xiaoheihe.module.account.component.SettingItemView$Type", false, cl);
-        itemCls.getMethod("setRightType", typeEnum)
-                .invoke(item, Enum.valueOf((Class) typeEnum, "Text"));
-        if (rightDesc != null) {
-            try {
-                itemCls.getMethod("setRightDesc", String.class).invoke(item, rightDesc);
-            } catch (Throwable ignored) {
-            }
-        }
-        itemCls.getMethod("setShowBottomDivider", boolean.class).invoke(item, divider);
-        int itemH = ThemeUtils.dp(context, titleDesc != null ? 58 : 48);
-        ((View) item).setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, itemH));
-        return (View) item;
-    }
-
-    /** 原地更新 Text 型行（不重建 View，保证点击不因列表刷新而丢失） */
-    static void updateTextItem(View row, String title, String titleDesc, String rightDesc) {
-        try {
-            Class<?> cls = row.getClass();
-            cls.getMethod("setTitle", String.class).invoke(row, title);
-            if (titleDesc != null) {
-                cls.getMethod("setTitleDesc", String.class).invoke(row, titleDesc);
-            }
-            if (rightDesc != null) {
-                try {
-                    cls.getMethod("setRightDesc", String.class).invoke(row, rightDesc);
-                } catch (Throwable ignored) {
-                }
-            }
+            cardCls.getMethod("setMaxCardElevation", float.class).invoke(card, 0f);
         } catch (Throwable ignored) {
         }
-    }
-
-    /** 原地更新 CheckBox 型行的勾选态 */
-    static void updateCheckItem(View row, boolean checked) {
-        try {
-            row.getClass()
-                    .getMethod("setCheckBoxChecked", boolean.class, boolean.class)
-                    .invoke(row, checked, false);
-        } catch (Throwable ignored) {
-        }
-    }
-
-    /** 创建宿主多选行（CheckBox 型），checked 为当前勾选态 */
-    static View hostCheckItem(Context context, String title, String titleDesc, boolean checked,
-                              CompoundButton.OnCheckedChangeListener listener, boolean divider)
-            throws Throwable {
-        ClassLoader cl = context.getClassLoader();
-        Class<?> itemCls = Class.forName(
-                "com.max.xiaoheihe.module.account.component.SettingItemView", false, cl);
-        Object item = itemCls.getConstructor(Context.class).newInstance(context);
-        itemCls.getMethod("setTitle", String.class).invoke(item, title);
-        if (titleDesc != null) {
-            itemCls.getMethod("setTitleDesc", String.class).invoke(item, titleDesc);
-        }
-        Class<?> typeEnum = Class.forName(
-                "com.max.xiaoheihe.module.account.component.SettingItemView$Type", false, cl);
-        itemCls.getMethod("setRightType", typeEnum)
-                .invoke(item, Enum.valueOf((Class) typeEnum, "CheckBox"));
-        itemCls.getMethod("setCheckBoxChecked", boolean.class, boolean.class)
-                .invoke(item, checked, false);
-        Class<?> listenerCls = Class.forName(
-                "android.widget.CompoundButton$OnCheckedChangeListener", false, cl);
-        itemCls.getMethod("setOnCheckButtonCheckedChangeListener", listenerCls)
-                .invoke(item, listener);
-        itemCls.getMethod("setShowBottomDivider", boolean.class).invoke(item, divider);
-        int itemH = ThemeUtils.dp(context, titleDesc != null ? 58 : 48);
-        ((View) item).setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, itemH));
-        return (View) item;
+        LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        int m = ThemeUtils.dp(activity, 12);
+        cardLp.setMargins(m, ThemeUtils.dp(activity, 8), m, 0);
+        ((View) card).setLayoutParams(cardLp);
+        LinearLayout content = new LinearLayout(activity);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setLayoutParams(new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        ((ViewGroup) card).addView(content);
+        return new Object[]{card, content};
     }
 
     private View buildEntryCard(final Activity activity) {
         try {
             ClassLoader cl = activity.getClassLoader();
-            Class<?> cardCls = Class.forName("androidx.cardview.widget.CardView", false, cl);
-            Object card = cardCls.getConstructor(Context.class).newInstance(activity);
-            float density = activity.getResources().getDisplayMetrics().density;
-            cardCls.getMethod("setRadius", float.class).invoke(card, 8f * density);
-            cardCls.getMethod("setCardElevation", float.class).invoke(card, 0f);
-            try {
-                cardCls.getMethod("setMaxCardElevation", float.class).invoke(card, 0f);
-            } catch (Throwable ignored) {
-            }
-            LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            int m = module.dp(activity, 12);
-            cardLp.setMargins(m, module.dp(activity, 8), m, 0);
-            ((View) card).setLayoutParams(cardLp);
-            LinearLayout content = new LinearLayout(activity);
-            content.setOrientation(LinearLayout.VERTICAL);
-            content.setLayoutParams(new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            ((ViewGroup) card).addView(content);
+            Object[] cardPair = buildHostCard(activity, cl);
+            Object card = cardPair[0];
+            LinearLayout content = (LinearLayout) cardPair[1];
             Class<?> itemCls = Class.forName(
                     "com.max.xiaoheihe.module.account.component.SettingItemView", false, cl);
             Object item = itemCls.getConstructor(Context.class).newInstance(activity);

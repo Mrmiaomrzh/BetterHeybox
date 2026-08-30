@@ -6,10 +6,7 @@ import android.view.MotionEvent;
 import android.widget.TextView;
 
 /**
- * 透明 LinkMovementMethod：不干预任何事件与 Selection。
- *
- * 用途：正文 TextView 保留 ClickableSpan（@提及）点击跳转的同时，
- * 长按文本选择 Android 原生处理。
+ * 透明 LinkMovementMethod：不干预事件与 Selection。正文保留 @提及点击跳转，长按选择交给系统原生处理
  */
 public final class SelectionSafeLinkMovementMethod extends LinkMovementMethod {
 

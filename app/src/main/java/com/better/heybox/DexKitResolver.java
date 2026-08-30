@@ -35,17 +35,8 @@ import org.luckypray.dexkit.result.ClassData;
 import org.luckypray.dexkit.result.ClassDataList;
 
 /**
- * DexKit 字节码特征解析：在小黑盒更新导致混淆名变化后，自动重新定位原生弹窗（HeyBoxDialog）。
- *
- * 定位分三层，逐层降级：
- *   1. RemotePreferences 缓存（按宿主 versionCode 键控）：同版本直接用上次的反射成员名，零扫描；
- *   2. DexKit 锚点：HeyBoxDialog 类内含品牌字符串 "HeyBoxDialog.RainbowPositiveButtonLine"，
- *      以它定位对话框类，再按结构特征（构造器 + 流式 setter 签名族）挑出 Builder 内部类；
- *   3. 隐形探针：Builder 的标题/正文、顶/中/底 View 槽位、正/负按钮全部是同签名混淆方法，
- *      无法靠签名区分——构造一个 alpha=0 的探针对话框，给每个候选塞唯一标记，
- *      渲染后按实际位置分类（标记在标题上方=顶槽、下方=中槽、按钮在左=正向），并写回缓存。
- *
- * 任一层失败即返回 null，由调用方回退系统 AlertDialog。
+ * DexKit 字节码特征解析：宿主更新致混淆名变化后自动重新定位 HeyBoxDialog。
+ * 定位三层降级：版本缓存 → DexKit 锚点（品牌字符串+结构特征）→ 隐形探针按渲染位置分类并写回缓存。任一层失败返回 null，调用方回退系统弹窗
  */
 public final class DexKitResolver {
 
@@ -145,9 +136,8 @@ public final class DexKitResolver {
                     cb.onFailed("DexKit 未定位到 HeyBoxDialog");
                     return;
                 }
-                currentCacheKey = key;
                 try {
-                    probeAndClassify(module, activity, analysis, cb);
+                    probeAndClassify(module, activity, analysis, key, cb);
                 } catch (Throwable t) {
                     module.logd(Log.WARN, TAG, "HeyBoxDialog 探针异常: " + t);
                     cb.onFailed("探针异常: " + t);
@@ -194,18 +184,12 @@ public final class DexKitResolver {
             if (!Modifier.isPublic(m.getModifiers())) {
                 continue;
             }
-            Class<?>[] ps = m.getParameterTypes();
-            if (m.getReturnType() == builderClass) {
-                if (ps.length == 1 && ps[0] == CharSequence.class) {
-                    a.charSeqCands.add(m);
-                } else if (ps.length == 1 && ps[0] == View.class) {
-                    a.viewCands.add(m);
-                } else if (ps.length == 2 && ps[0] == CharSequence.class
-                        && ps[1] == DialogInterface.OnClickListener.class) {
-                    a.buttonCands.add(m);
-                }
-            } else if (ps.length == 0 && m.getReturnType() == dialogClass) {
-                a.buildCands.add(m);
+            switch (classifyBuilderMethod(m, builderClass, dialogClass)) {
+                case 1: a.charSeqCands.add(m); break;
+                case 2: a.viewCands.add(m); break;
+                case 3: a.buttonCands.add(m); break;
+                case 4: a.buildCands.add(m); break;
+                default: break;
             }
         }
         if (a.charSeqCands.isEmpty() || a.viewCands.isEmpty()
@@ -252,6 +236,28 @@ public final class DexKitResolver {
         return null;
     }
 
+    /**
+ * Builder 流式方法分类：1=CharSequence、2=View、3=按钮、4=build、0=其它
+ */
+    private static int classifyBuilderMethod(Method m, Class<?> builderClass, Class<?> dialogClass) {
+        Class<?>[] ps = m.getParameterTypes();
+        if (m.getReturnType() == builderClass) {
+            if (ps.length == 1 && ps[0] == CharSequence.class) {
+                return 1;
+            }
+            if (ps.length == 1 && ps[0] == View.class) {
+                return 2;
+            }
+            if (ps.length == 2 && ps[0] == CharSequence.class
+                    && ps[1] == DialogInterface.OnClickListener.class) {
+                return 3;
+            }
+        } else if (ps.length == 0 && m.getReturnType() == dialogClass) {
+            return 4;
+        }
+        return 0;
+    }
+
     private static Class<?> findBuilderClass(Class<?> dialogClass) {
         for (Class<?> inner : dialogClass.getDeclaredClasses()) {
             if (!Modifier.isStatic(inner.getModifiers()) || Modifier.isInterface(inner.getModifiers())) {
@@ -264,18 +270,12 @@ public final class DexKitResolver {
             }
             int charSeq = 0, view = 0, button = 0, build = 0;
             for (Method m : inner.getDeclaredMethods()) {
-                Class<?>[] ps = m.getParameterTypes();
-                if (m.getReturnType() == inner) {
-                    if (ps.length == 1 && ps[0] == CharSequence.class) {
-                        charSeq++;
-                    } else if (ps.length == 1 && ps[0] == View.class) {
-                        view++;
-                    } else if (ps.length == 2 && ps[0] == CharSequence.class
-                            && ps[1] == DialogInterface.OnClickListener.class) {
-                        button++;
-                    }
-                } else if (ps.length == 0 && m.getReturnType() == dialogClass) {
-                    build++;
+                switch (classifyBuilderMethod(m, inner, dialogClass)) {
+                    case 1: charSeq++; break;
+                    case 2: view++; break;
+                    case 3: button++; break;
+                    case 4: build++; break;
+                    default: break;
                 }
             }
             if (charSeq >= 2 && view >= 2 && button >= 2 && build >= 1) {
@@ -290,77 +290,36 @@ public final class DexKitResolver {
         Method center;
         Method positive;
         Method negative;
-        Method replacer;
         Method buildUsed;
     }
 
-    private static void probeAndClassify(MainModule module, Activity activity, Analysis a, SpecCallback cb) {
-        probeRound(module, activity, a,
+    private static void probeAndClassify(MainModule module, Activity activity, Analysis a,
+                                         String key, SpecCallback cb) {
+        probeOnce(activity, a,
                 new ArrayList<>(a.charSeqCands), new ArrayList<>(a.viewCands),
-                new ArrayList<>(a.buttonCands), new Method[5], 0, cb);
-    }
-
-    private static final int IDX_TITLE = 0;
-    private static final int IDX_CENTER = 1;
-    private static final int IDX_POS = 2;
-    private static final int IDX_NEG = 3;
-    private static final int IDX_BUILD = 4;
-
-    private static void probeRound(final MainModule module, final Activity activity, final Analysis a,
-                                   final List<Method> charSeq, final List<Method> view,
-                                   final List<Method> button, final Method[] acc, final int round,
-                                   final SpecCallback cb) {
-        if (round >= 3) {
-            cb.onFailed("探针超过最大轮数仍未分类完成");
-            return;
-        }
-        probeOnce(activity, a, charSeq, view, button, r -> {
-            module.logd(Log.INFO, TAG, "探针第" + round + "轮: title=" + name(r.title)
-                    + " center=" + name(r.center) + " pos=" + name(r.positive)
-                    + " neg=" + name(r.negative) + " replacer=" + name(r.replacer)
-                    + " build=" + name(r.buildUsed));
-            if (r.title != null && acc[IDX_TITLE] == null) {
-                acc[IDX_TITLE] = r.title;
-            }
-            if (r.center != null && acc[IDX_CENTER] == null) {
-                acc[IDX_CENTER] = r.center;
-            }
-            if (r.positive != null && acc[IDX_POS] == null) {
-                acc[IDX_POS] = r.positive;
-            }
-            if (r.negative != null && acc[IDX_NEG] == null) {
-                acc[IDX_NEG] = r.negative;
-            }
-            if (r.buildUsed != null && acc[IDX_BUILD] == null) {
-                acc[IDX_BUILD] = r.buildUsed;
-            }
-            if (r.replacer != null) {
-                view.remove(r.replacer);
-            }
-            boolean done = acc[IDX_TITLE] != null && acc[IDX_CENTER] != null
-                    && acc[IDX_POS] != null && acc[IDX_NEG] != null && acc[IDX_BUILD] != null;
-            if (done) {
-                HeyboxDialogSpec spec = new HeyboxDialogSpec(a.builderCtor,
-                        acc[IDX_TITLE], acc[IDX_CENTER], acc[IDX_POS], acc[IDX_NEG], acc[IDX_BUILD]);
-                writeCache(activity, currentCacheKey, a, spec);
-                module.logd(Log.INFO, TAG, "✔ HeyBoxDialog 自动解析完成: dialog="
-                        + a.dialogClass.getName() + " builder=" + a.builderClass.getName()
-                        + " title=" + name(spec.setTitle) + " view=" + name(spec.setCenterView)
-                        + " pos=" + name(spec.setPositiveButton) + " neg=" + name(spec.setNegativeButton)
-                        + " build=" + name(spec.buildMethod));
-                cb.onReady(spec);
-                return;
-            }
-            if (r.replacer == null) {
-                cb.onFailed("探针未能分类 Builder 方法（"
-                        + (acc[IDX_TITLE] == null ? "title " : "")
-                        + (acc[IDX_CENTER] == null ? "center " : "")
-                        + (acc[IDX_POS] == null ? "pos " : "")
-                        + (acc[IDX_NEG] == null ? "neg" : "") + "缺位）");
-                return;
-            }
-            probeRound(module, activity, a, charSeq, view, button, acc, round + 1, cb);
-        });
+                new ArrayList<>(a.buttonCands), r -> {
+                    module.logd(Log.INFO, TAG, "探针: title=" + name(r.title)
+                            + " center=" + name(r.center) + " pos=" + name(r.positive)
+                            + " neg=" + name(r.negative) + " build=" + name(r.buildUsed));
+                    if (r.title == null || r.center == null || r.positive == null
+                            || r.negative == null || r.buildUsed == null) {
+                        cb.onFailed("探针未能分类 Builder 方法（"
+                                + (r.title == null ? "title " : "")
+                                + (r.center == null ? "center " : "")
+                                + (r.positive == null ? "pos " : "")
+                                + (r.negative == null ? "neg" : "") + "缺位）");
+                        return;
+                    }
+                    HeyboxDialogSpec spec = new HeyboxDialogSpec(a.builderCtor,
+                            r.title, r.center, r.positive, r.negative, r.buildUsed);
+                    writeCache(activity, key, a, spec);
+                    module.logd(Log.INFO, TAG, "✔ HeyBoxDialog 自动解析完成: dialog="
+                            + a.dialogClass.getName() + " builder=" + a.builderClass.getName()
+                            + " title=" + name(spec.setTitle) + " view=" + name(spec.setCenterView)
+                            + " pos=" + name(spec.setPositiveButton) + " neg=" + name(spec.setNegativeButton)
+                            + " build=" + name(spec.buildMethod));
+                    cb.onReady(spec);
+                });
     }
 
     private static String name(Method m) {
@@ -369,7 +328,7 @@ public final class DexKitResolver {
     private interface RoundCallback {
         void onRound(RoundResult r);
     }
-    private static String currentCacheKey;
+
     private static void probeOnce(Activity activity, Analysis a,
                                   List<Method> charSeq, List<Method> view, List<Method> button,
                                   final RoundCallback done) {
@@ -456,18 +415,6 @@ public final class DexKitResolver {
                                  Map<String, Method> buttonByText, RoundResult r) {
         List<TextView> all = new ArrayList<>();
         collectTextViews(decor, all);
-        StringBuilder found = new StringBuilder();
-        for (TextView tv : all) {
-            CharSequence cs = tv.getText();
-            if (cs != null && cs.length() > 0) {
-                int[] loc = new int[2];
-                tv.getLocationOnScreen(loc);
-                found.append(cs).append("@").append(loc[0]).append(",").append(loc[1]).append(" ");
-            }
-        }
-        if (BuildFlags.DEBUG) {
-            Log.i(TAG, "探针渲染: " + found);
-        }
         Map<String, TextView> rendered = new HashMap<>();
         for (TextView tv : all) {
             CharSequence cs = tv.getText();
@@ -501,9 +448,7 @@ public final class DexKitResolver {
                 continue;
             }
             Method cand = viewCands.get(idx);
-            if (titleView == null) {
-                r.replacer = cand;
-            } else if (screenY(tv) > screenY(titleView)) {
+            if (titleView != null && screenY(tv) > screenY(titleView)) {
                 r.center = cand;
             }
         }
@@ -566,9 +511,15 @@ public final class DexKitResolver {
                     + s.setTitle.getName() + ";" + s.setCenterView.getName() + ";"
                     + s.setPositiveButton.getName() + ";" + s.setNegativeButton.getName() + ";"
                     + s.buildMethod.getName();
+            java.util.Map<String, String> entries = readCacheEntries(ctx);
+            entries.put(key, v);
+            StringBuilder sb = new StringBuilder();
+            for (java.util.Map.Entry<String, String> e : entries.entrySet()) {
+                sb.append(e.getKey()).append('\n').append(e.getValue()).append('\n');
+            }
             File f = cacheFile(ctx);
             try (FileOutputStream fos = new FileOutputStream(f)) {
-                fos.write((key + "\n" + v).getBytes(StandardCharsets.UTF_8));
+                fos.write(sb.toString().getBytes(StandardCharsets.UTF_8));
             }
         } catch (Throwable t) {
             Log.w(TAG, "HeyBoxDialog 缓存写入失败: " + t);
@@ -579,11 +530,13 @@ public final class DexKitResolver {
         return new File(ctx.getFilesDir(), "bh_dexkit_dialog_cache.txt");
     }
 
-    private static HeyboxDialogSpec readCache(Context ctx, ClassLoader cl, String key) {
+    /** key\nvalue 成对存储（兼容旧的单条目 key\nvalue 格式） */
+    private static java.util.Map<String, String> readCacheEntries(Context ctx) {
+        java.util.Map<String, String> entries = new java.util.LinkedHashMap<>();
         try {
             File f = cacheFile(ctx);
             if (!f.exists()) {
-                return null;
+                return entries;
             }
             ByteArrayOutputStream bos = new ByteArrayOutputStream();
             try (FileInputStream fis = new FileInputStream(f)) {
@@ -593,12 +546,26 @@ public final class DexKitResolver {
                     bos.write(buf, 0, n);
                 }
             }
-            String content = new String(bos.toByteArray(), StandardCharsets.UTF_8).trim();
-            int sep = content.indexOf('\n');
-            if (sep <= 0 || !key.equals(content.substring(0, sep))) {
+            String[] lines = new String(bos.toByteArray(), StandardCharsets.UTF_8).split("\n");
+            for (int i = 0; i + 1 < lines.length; i += 2) {
+                String k = lines[i].trim();
+                String v = lines[i + 1].trim();
+                if (!k.isEmpty() && !v.isEmpty()) {
+                    entries.put(k, v);
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return entries;
+    }
+
+    private static HeyboxDialogSpec readCache(Context ctx, ClassLoader cl, String key) {
+        try {
+            String v = readCacheEntries(ctx).get(key);
+            if (v == null) {
                 return null;
             }
-            String[] p = content.substring(sep + 1).split(";");
+            String[] p = v.split(";");
             if (p.length != 7) {
                 return null;
             }
