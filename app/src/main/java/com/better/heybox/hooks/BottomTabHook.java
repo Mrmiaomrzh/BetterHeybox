@@ -118,7 +118,7 @@ public final class BottomTabHook {
             // 加号：独立开关，或隐藏了任意 tab 时联动隐藏（保持底栏布局对称）
             if (module.isEnabled(App.KEY_HIDE_ADD, false) || anyTabHidden) {
                 hideTabField(binding, "r", "加号");
-                // 同时去掉「推荐」占位（rb_3 默认 INVISIBLE 占位），让剩余 tab 完全等分
+                // 同时去掉「推荐」占位（rb_3 在部分版本为 INVISIBLE，隐藏加号后去掉其槽位让剩余 tab 等分）
                 hideTabField(binding, "l", "推荐占位");
             }
             normalizeVisibleTabs(binding);
@@ -155,13 +155,12 @@ public final class BottomTabHook {
             int visible = 0;
             for (int i = 0; i < group.getChildCount(); i++) if (group.getChildAt(i).getVisibility() == View.VISIBLE) visible++;
             if (visible == 0) return;
-            float weight = 1f / visible;
             for (int i = 0; i < group.getChildCount(); i++) {
                 View child = group.getChildAt(i);
                 if (child.getVisibility() != View.VISIBLE) continue;
                 android.widget.LinearLayout.LayoutParams lp = child.getLayoutParams() instanceof android.widget.LinearLayout.LayoutParams
                         ? (android.widget.LinearLayout.LayoutParams) child.getLayoutParams() : null;
-                if (lp != null) { lp.width = 0; lp.weight = weight; child.setLayoutParams(lp); }
+                if (lp != null && (lp.width != 0 || lp.weight != 1f)) { lp.width = 0; lp.weight = 1f; child.setLayoutParams(lp); }
             }
             group.requestLayout();
         } catch (Throwable ignored) { }

@@ -45,12 +45,37 @@ public final class LiquidGlassInstaller {
                     com.better.heybox.App.KEY_HIDE_ADD, false)) {
                 return true;
             }
+            return anyTabHidden(context);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** 是否隐藏了任一底部 tab（发现/游戏库/社区），加号联动隐藏不计入 */
+    private static boolean anyTabHidden(Context context) {
+        try {
+            com.better.heybox.HeyboxPrefs.init(context);
             return com.better.heybox.HeyboxPrefs.getBoolean(
                     com.better.heybox.App.KEY_HIDE_TAB_HOME, false)
                     || com.better.heybox.HeyboxPrefs.getBoolean(
                     com.better.heybox.App.KEY_HIDE_TAB_HOT, false)
                     || com.better.heybox.HeyboxPrefs.getBoolean(
                     com.better.heybox.App.KEY_HIDE_TAB_GAME, false);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** 玻璃宽度自适应生效条件：玻璃开启且加号已隐藏（加号可见时保持全宽等分，不做收窄/选中加长） */
+    private static boolean fitEffective(Context context) {
+        try {
+            if (!GlassConfig.fitTabs) {
+                return false;
+            }
+            com.better.heybox.HeyboxPrefs.init(context);
+            return com.better.heybox.HeyboxPrefs.getBoolean(
+                    com.better.heybox.App.KEY_LIQUID_GLASS, true)
+                    && isPublishHidden(context);
         } catch (Throwable t) {
             return false;
         }
@@ -217,10 +242,8 @@ public final class LiquidGlassInstaller {
  * QWEA0 模式：用 LiquidGlassTabBar 替换可见 RadioGroup（自带水滴选中动画）
  */
     private static final boolean USE_QWEA0_TABBAR = true;
-    /**
- * 发布按钮占位空列的权重（普通 tab 为 1）
- */
-    private static final float CENTER_GAP_WEIGHT = 1.3f;
+    /** 中央加号槽位的权重：与普通 tab 等权（原生底栏 5 等分，加号占 1/5） */
+    private static final float CENTER_GAP_WEIGHT = 1.0f;
     private static volatile boolean sTabBarActive;
 
     /**
@@ -388,8 +411,20 @@ public final class LiquidGlassInstaller {
             final View centerRef = mountCenterButton(activity, host, midTab, tips);
             sCenterRefStatic = centerRef;
 
-            // 布局完成后把发布按钮定位到 spacer 列上方
+            // 布局完成后把发布按钮定位到 tab 行正中（居中悬浮）
             placeCenterNow(host, tabBar, centerRef, 0);
+            // 每次布局后跟随底栏几何（高度/偏移变化等），变化检测防止死循环
+            if (centerRef != null) {
+                final ViewGroup hL = host, tL = tabBar;
+                final View cL = centerRef;
+                tabBar.getViewTreeObserver().addOnGlobalLayoutListener(
+                        new ViewTreeObserver.OnGlobalLayoutListener() {
+                            @Override
+                            public void onGlobalLayout() {
+                                placeCenterNow(hL, tL, cL, 0);
+                            }
+                        });
+            }
             applyBarGeometry();
 
             startBackdropMeter(tabBar);
@@ -436,7 +471,7 @@ public final class LiquidGlassInstaller {
 
             final FrameLayout center = new FrameLayout(activity);
             center.setClickable(true);
-            // CardView 保持自然尺寸；透明中心容器覆盖整个缺口，点击任意处触发发布
+            // 加号保持自然尺寸，垂直居中于 tab 行（随底栏高度变化跟随移动；5 等分中央槽内不与 tab 相贴）
             center.addView(midTab, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -552,6 +587,7 @@ public final class LiquidGlassInstaller {
             }
             GlassConfig.load(tabBar.getContext());
             boolean publishHidden = isPublishHidden(tabBar.getContext());
+            boolean fit = fitEffective(tabBar.getContext());
             java.util.List<com.example.liquidglass.LiquidGlassTabBar.TabItem> items =
                     new java.util.ArrayList<>();
             java.lang.StringBuilder sig = new java.lang.StringBuilder();
@@ -574,7 +610,7 @@ public final class LiquidGlassInstaller {
                     sRepeatRefreshTabs.add(isRepeatRefreshTab(title));
                 }
             }
-            sig.append(GlassConfig.fitTabs ? 'F' : 'f')
+            sig.append(fit ? 'F' : 'f')
                     .append(publishHidden ? 'P' : 'p');
             String nextSig = sig.toString();
             if (nextSig.equals(sBuildSig)) {
@@ -586,14 +622,14 @@ public final class LiquidGlassInstaller {
                 return;
             }
             sBuildSig = nextSig;
-            // 中心缺口（权重 1.3）仅为发布按钮存在；隐藏加号/任 tab 时不再插入缺口，避免挤压剩余 tab
             sSyncing = true;
             try {
                 tabBar.setTabs(items);
+                // 加号可见时补中央等权槽（原生 5 等分形态）；隐藏加号/任 tab 时不插，剩余 tab 等分
                 if (!publishHidden) {
                     insertCenterGap(tabBar.getContext(), tabBar);
                 }
-                applyFitWidth(tabBar, items.size(), publishHidden);
+                applyFitWidth(tabBar, items.size(), fit);
                 int checked = bar.getCheckedRadioButtonId();
                 for (int i = 0; i < sVisibleButtons.size(); i++) {
                     if (sVisibleButtons.get(i).getId() == checked) {
@@ -610,8 +646,8 @@ public final class LiquidGlassInstaller {
             host.post(() -> placeCenterNow(h2, t2, sCenterRefStatic, 0));
             LiquidGlassLog.log(android.util.Log.INFO,
                     "glass tab bar rebuilt: tabs=" + items.size()
-                            + " fit=" + GlassConfig.fitTabs
-                            + " centerGap=" + !publishHidden);
+                            + " fit=" + fit
+                            + " publishHidden=" + publishHidden);
         } catch (Throwable t) {
             LiquidGlassLog.logErr("glass tab bar rebuild failed", t);
         }
@@ -619,7 +655,7 @@ public final class LiquidGlassInstaller {
 
     private static void applyFitWidth(
             com.example.liquidglass.LiquidGlassTabBar tabBar,
-            int visibleCount, boolean publishHidden) {
+            int visibleCount, boolean fit) {
         try {
             FrameLayout.LayoutParams lp = tabBar.getLayoutParams()
                     instanceof FrameLayout.LayoutParams
@@ -627,7 +663,7 @@ public final class LiquidGlassInstaller {
             if (lp == null) {
                 return;
             }
-            if (!GlassConfig.fitTabs) {
+            if (!fit) {
                 lp.width = ViewGroup.LayoutParams.MATCH_PARENT;
                 lp.gravity = android.view.Gravity.TOP
                         | android.view.Gravity.FILL_HORIZONTAL;
@@ -641,8 +677,7 @@ public final class LiquidGlassInstaller {
                 return;
             }
             float weightTotal = OTHER_TAB_WEIGHT * visibleCount
-                    + (SELECTED_TAB_WEIGHT - OTHER_TAB_WEIGHT)
-                    + (publishHidden ? 0f : CENTER_GAP_WEIGHT);
+                    + (SELECTED_TAB_WEIGHT - OTHER_TAB_WEIGHT);
             int perTab = Math.min(
                     Math.round(FIT_TAB_MAX_WIDTH_DP * density),
                     Math.round(avail / weightTotal));
@@ -670,6 +705,7 @@ public final class LiquidGlassInstaller {
                 return false;
             }
             android.widget.LinearLayout ll = (android.widget.LinearLayout) row;
+            boolean fit = fitEffective(tabBar.getContext());
             int selected = selectedIndex;
             int tabIndex = 0;
             for (int i = 0; i < ll.getChildCount(); i++) {
@@ -677,7 +713,7 @@ public final class LiquidGlassInstaller {
                 if (!(child instanceof android.widget.LinearLayout)) {
                     continue;
                 }
-                float weight = !GlassConfig.fitTabs
+                float weight = !fit
                         ? 1f
                         : (tabIndex == selected
                         ? SELECTED_TAB_WEIGHT : OTHER_TAB_WEIGHT);
@@ -858,6 +894,7 @@ public final class LiquidGlassInstaller {
         return mode == android.content.res.Configuration.UI_MODE_NIGHT_YES;
     }
 
+    /** 中央加号槽：与原生底栏 5 等分一致，加号可见时插入一个等权空槽 */
     private static void insertCenterGap(Context context, ViewGroup tabBar) {
         try {
             if (tabBar.getChildCount() == 0) {
@@ -893,25 +930,35 @@ public final class LiquidGlassInstaller {
                 return;
             }
             android.widget.LinearLayout ll = (android.widget.LinearLayout) row;
-            int n = ll.getChildCount();
-            if (n < 3) {
-                return;
-            }
-            View spacer = ll.getChildAt(n / 2);
-            if (spacer.getWidth() == 0) {
+            int rowW = ll.getWidth();
+            if (rowW <= 0) {
                 final ViewGroup h2 = host, t2 = tabBar;
                 final View c2 = center;
                 final int a2 = attempt + 1;
                 center.post(() -> placeCenterNow(h2, t2, c2, a2));
                 return;
             }
-            int left = tabBar.getLeft() + row.getLeft() + spacer.getLeft();
-            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                    spacer.getWidth(), tabBar.getHeight(),
-                    android.view.Gravity.TOP | android.view.Gravity.START);
-            lp.leftMargin = left;
-            lp.topMargin = tabBar.getTop();
-            center.setLayoutParams(lp);
+            // center 以默认 MATCH_PARENT 加入 host，宿主测量后 getMeasuredWidth 会是全宽，必须重测取加号本体宽
+            center.measure(View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+            int cw = center.getMeasuredWidth();
+            // 加号本体偏小，点击区保底 44dp
+            int minCw = Math.round(tabBar.getResources().getDisplayMetrics().density * 44f);
+            cw = Math.max(cw, minCw);
+            int left = tabBar.getLeft() + row.getLeft() + (rowW - cw) / 2;
+            int top = tabBar.getTop();
+            int h = tabBar.getHeight();
+            FrameLayout.LayoutParams lp = center.getLayoutParams()
+                    instanceof FrameLayout.LayoutParams
+                    ? (FrameLayout.LayoutParams) center.getLayoutParams() : null;
+            if (lp == null || lp.width != cw || lp.height != h
+                    || lp.leftMargin != left || lp.topMargin != top) {
+                FrameLayout.LayoutParams nlp = new FrameLayout.LayoutParams(
+                        cw, h, android.view.Gravity.TOP | android.view.Gravity.START);
+                nlp.leftMargin = left;
+                nlp.topMargin = top;
+                center.setLayoutParams(nlp);
+            }
         } catch (Throwable ignored) {
         }
     }
