@@ -41,6 +41,7 @@ import com.better.heybox.App;
 import com.better.heybox.MainModule;
 import com.better.heybox.ThemeUtils;
 import com.better.heybox.VideoDownloadManager;
+import com.better.heybox.ViewUtils;
 
 /**
  * 视频下载入口：捕获 AbsVideoView URL 设置（setVideoRes/W），在窗口 Decor 挂圆形下载按钮，点击弹底部抽屉。
@@ -136,6 +137,17 @@ public final class VideoDownloadHook {
         return url.substring(0, 117) + "...";
     }
 
+    /** 专职视频播放页白名单：仅这些宿主页面挂下载入口（首页信息流/我的/游戏页等一律不挂） */
+    private static final java.util.Set<String> VIDEO_PAGE_HOSTS =
+            new java.util.HashSet<>(java.util.Arrays.asList(
+                    "com.max.xiaoheihe.module.video.VideoActivity",
+                    "com.max.xiaoheihe.module.story.StoryActivity"));
+
+    private static boolean isVideoPageHost(View videoView) {
+        Activity activity = ViewUtils.findActivity(videoView);
+        return activity != null && VIDEO_PAGE_HOSTS.contains(activity.getClass().getName());
+    }
+
     private void onVideoUrl(Object viewObject, String url, Map<String, String> headers) {
         boolean enabled;
         try {
@@ -147,6 +159,10 @@ public final class VideoDownloadHook {
             return;
         }
         View videoView = (View) viewObject;
+        // 非专职播放页（信息流/我的等）不初始化下载管理器、不注册候选
+        if (!isVideoPageHost(videoView)) {
+            return;
+        }
         // 惰性初始化下载管理器（宿主进程内拿到 Context 后注册通知广播/恢复任务历史）
         VideoDownloadManager.get().init(videoView.getContext());
         ViewGroup decor = EntryController.findDecor(videoView);
