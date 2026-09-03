@@ -31,8 +31,10 @@ keystore.properties
 *.hprof
 .DS_Store
 Thumbs.db
+.zcode/
+.opensuilla/
 
-# 编辑器锁/备份残留（本机编辑源码时产生，勿提交）
+# 编辑器锁/备份残留
 .LCK*
 *~
 .#*
