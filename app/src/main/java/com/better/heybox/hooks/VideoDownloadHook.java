@@ -316,7 +316,8 @@ public final class VideoDownloadHook {
                 View anchor = anchorOf(v);
                 if (chosen == null && anchor.isShown() && anchor.getWidth() > 0
                         && anchor.getWindowToken() != null
-                        && intersectsDecor(anchor, decorH)) {
+                        && intersectsDecor(anchor, decorH)
+                        && !coveredBySiblingLayer(anchor, decor)) {
                     chosen = c;
                     chosenAnchor = anchor;
                 }
@@ -392,6 +393,63 @@ public final class VideoDownloadHook {
             int bottom = top + v.getHeight();
             int visible = Math.min(bottom, decorH) - Math.max(top, 0);
             return visible >= ThemeUtils.dp(v.getContext(), 64);
+        }
+
+        /** 被后绘制且不透明的兄弟页面层盖住时判为遮挡（叠层下 isShown 恒真） */
+        private static boolean coveredBySiblingLayer(View anchor, ViewGroup decor) {
+            float px = anchor.getWidth() / 2f;
+            float py = anchor.getHeight() / 2f;
+            View cur = anchor;
+            ViewParent par = anchor.getParent();
+            while (par instanceof ViewGroup) {
+                ViewGroup parent = (ViewGroup) par;
+                if (parent == decor) {
+                    break;
+                }
+                px += cur.getLeft() + cur.getTranslationX();
+                py += cur.getTop() + cur.getTranslationY();
+                int index = parent.indexOfChild(cur);
+                for (int j = parent.getChildCount() - 1; j > index; j--) {
+                    View sib = parent.getChildAt(j);
+                    if (sib.getVisibility() != View.VISIBLE) {
+                        continue;
+                    }
+                    float sx = px - sib.getLeft() - sib.getTranslationX();
+                    float sy = py - sib.getTop() - sib.getTranslationY();
+                    if (sx >= 0 && sy >= 0 && sx < sib.getWidth() && sy < sib.getHeight()
+                            && occludesAt(sib, sx, sy)) {
+                        return true;
+                    }
+                }
+                cur = parent;
+                par = parent.getParent();
+            }
+            return false;
+        }
+
+        /** 探测点处最上层内容是否不透明 */
+        private static boolean occludesAt(View v, float px, float py) {
+            if (v.isOpaque()) {
+                return true;
+            }
+            if (!(v instanceof ViewGroup)) {
+                return false;
+            }
+            ViewGroup vg = (ViewGroup) v;
+            for (int i = vg.getChildCount() - 1; i >= 0; i--) {
+                View child = vg.getChildAt(i);
+                if (child.getVisibility() != View.VISIBLE) {
+                    continue;
+                }
+                float cx = px - child.getLeft() - child.getTranslationX();
+                float cy = py - child.getTop() - child.getTranslationY();
+                if (cx >= 0 && cy >= 0 && cx < child.getWidth() && cy < child.getHeight()) {
+                    if (occludesAt(child, cx, cy)) {
+                        return true;
+                    }
+                }
+            }
+            return false;
         }
 
         private void ensureEntry() {
