@@ -17,6 +17,7 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
@@ -30,7 +31,7 @@ import com.better.heybox.MainModule;
 import com.better.heybox.LogRecorder;
 
 /**
- * 图片系统分享：在小黑盒图片长按菜单末尾追加「系统分享」，下载图片后唤起系统分享界面。
+ * 图片系统分享：图片查看流程的分享面板追加「系统分享」，下载图片后唤起系统分享界面,仅图片查看器生效
  */
 public final class ImageShareHook {
 
@@ -76,12 +77,16 @@ public final class ImageShareHook {
                     "com.max.xiaoheihe.accelworld.HBShareDialog$a", false, cl);
             Method addHandlers = dialogBuilder.getDeclaredMethod("c", List.class);
             module.hook(addHandlers).intercept(chain -> {
+                Object pending = pendingImageShareMediaData;
+                if (pending == null) {
+                    return chain.proceed();
+                }
+                pendingImageShareMediaData = null;
                 Object handlers = chain.getArg(0);
                 if (handlers instanceof List) {
-                    module.logd(Log.INFO, module.TAG, "HBShareDialog 处理器列表命中: count="
+                    module.logd(Log.INFO, module.TAG, "HBShareDialog 处理器列表命中（图片会话）: count="
                             + ((List<?>) handlers).size());
-                    appendSystemShareHandler((List<?>) handlers,
-                            pendingImageShareMediaData, cl);
+                    appendSystemShareHandler((List<?>) handlers, pending, cl);
                 }
                 return chain.proceed();
             });
@@ -91,6 +96,9 @@ public final class ImageShareHook {
             Method showDialog = shareDialog.getDeclaredMethod("g");
             module.hook(showDialog).intercept(chain -> {
                 Object dialog = chain.getThisObject();
+                if (!isImageForward(readForwardModel(dialog, cl), cl)) {
+                    return chain.proceed();
+                }
                 Object actions = readShareDialogActions(dialog);
                 if (actions instanceof List) {
                     appendSystemShareAction((List<?>) actions, cl, findDialogContext(dialog));
@@ -107,7 +115,7 @@ public final class ImageShareHook {
             module.hook(buildForwardActions).intercept(chain -> {
                 Object result = chain.proceed();
                 Object actions = chain.getArg(2);
-                if (actions instanceof List) {
+                if (actions instanceof List && isImageForward(chain.getArg(1), cl)) {
                     Object ctxArg = chain.getArg(0);
                     appendSystemShareAction((List<?>) actions, cl,
                             ctxArg instanceof Context ? (Context) ctxArg : null);
@@ -177,10 +185,9 @@ public final class ImageShareHook {
 
             Class<?> localHandler = Class.forName(
                     "com.max.common.common.share.local.c", false, cl);
-            // 本地分享处理器回调接口：393=un.a / 394=wn.a（双版本自适应）
             Class<?> callbackType = findLocalHandlerCallback(cl);
             if (callbackType == null) {
-                module.logd(Log.WARN, module.TAG, "未找到本地分享回调接口 (un.a/wn.a)，跳过系统分享处理器");
+                module.logd(Log.WARN, module.TAG, "未找到本地分享回调接口，跳过系统分享处理器");
                 return;
             }
             InvocationHandler callback = (proxy, method, args) -> {
@@ -209,7 +216,6 @@ public final class ImageShareHook {
     private Object readKotlinUnit(ClassLoader cl) {
         try {
             Class<?> unit = Class.forName("kotlin.b2", false, cl);
-            // 393=f140421a / 394=f140881a（双版本自适应）
             Field instance = null;
             try {
                 instance = unit.getDeclaredField("f140421a");
@@ -223,9 +229,6 @@ public final class ImageShareHook {
         }
     }
 
-    /**
- * 读取 HBShareDialog 分享动作列表（393/394 双版本字段名）
- */
     private Object readShareDialogActions(Object dialog) {
         if (dialog == null) {
             return null;
@@ -237,23 +240,24 @@ public final class ImageShareHook {
         return actions;
     }
 
-    /**
- * 本地分享回调接口：393=un.a / 394=wn.a（双版本），都找不到返回 null
- */
     private Class<?> findLocalHandlerCallback(ClassLoader cl) {
         try {
-            return Class.forName("un.a", false, cl);
-        } catch (ClassNotFoundException ignored) {
-        }
-        try {
-            return Class.forName("wn.a", false, cl);
-        } catch (ClassNotFoundException ignored) {
+            Class<?> localHandler = Class.forName(
+                    "com.max.common.common.share.local.c", false, cl);
+            for (Constructor<?> ctor : localHandler.getDeclaredConstructors()) {
+                Class<?>[] params = ctor.getParameterTypes();
+                if (params.length == 2 && params[0] == String.class && params[1].isInterface()) {
+                    return params[1];
+                }
+            }
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "解析本地分享回调接口失败", t);
         }
         return null;
     }
 
     /**
- * 分享动作图标：按名称运行时解析（资源 ID 跨版本不稳定），失败返回 0 用默认
+ * 分享动作图标：按名称运行时解析
  */
     private static int resolveShareArrowIcon(Context context) {
         if (context == null) {
@@ -268,7 +272,7 @@ public final class ImageShareHook {
         }
     }
 
-    /** 从 HBShareDialog 对象反射取 Context 字段（393/394 字段名可能不同，按类型匹配） */
+    /** 从 HBShareDialog 对象反射取 Context 字段 */
     private Context findDialogContext(Object dialog) {
         if (dialog == null) {
             return null;
@@ -298,6 +302,39 @@ public final class ImageShareHook {
             return null;
         }
     }
+
+    /** 面板门禁：ImageForwardModel 全 app 仅图片查看器构造，命中即视为图片分享面板 */
+    private static boolean isImageForward(Object forward, ClassLoader cl) {
+        if (forward == null) {
+            return false;
+        }
+        try {
+            return Class.forName("com.max.data.model.common.ImageForwardModel", false, cl)
+                    .isInstance(forward);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** 按类型取 dialog 的 forward 字段*/
+    private static Object readForwardModel(Object dialog, ClassLoader cl) {
+        if (dialog == null) {
+            return null;
+        }
+        try {
+            Class<?> forwardType = Class.forName(
+                    "com.max.data.model.share.IForwardModel", false, cl);
+            for (Field f : dialog.getClass().getDeclaredFields()) {
+                if (f.getType() == forwardType) {
+                    f.setAccessible(true);
+                    return f.get(dialog);
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
     private boolean shareImageWithSystemChooser(Object mediaData) {
         if (mediaData == null) {
             return false;
@@ -329,7 +366,7 @@ public final class ImageShareHook {
         try {
             output = downloadImage(context, imageUrl);
             String mime = guessMimeType(output.getName());
-            // 优先写系统相册（可被相册与任意 App 分享），失败回退 FileProvider
+            // 优先写系统相册，失败回退 FileProvider
             Uri uri = publishToGallery(context, output);
             if (uri != null) {
                 output.delete(); // 已复制进相册，临时文件不再需要
@@ -376,7 +413,6 @@ public final class ImageShareHook {
         connection.setConnectTimeout(10000);
         connection.setReadTimeout(20000);
         connection.setInstanceFollowRedirects(true);
-        // CDN 可能做防盗链/UA 校验，带上基础请求头更稳妥
         connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36 heybox");
         connection.setRequestProperty("Referer", "https://api.xiaoheihe.cn/");
         connection.connect();
@@ -410,16 +446,16 @@ public final class ImageShareHook {
         }
         File output = new File(shareDir, "image-" + System.currentTimeMillis() + "." + ext);
         if (!tmp.renameTo(output)) {
-            output = tmp; // 重命名失败则沿用 tmp（扩展名可能不准，但可分享）
+            output = tmp; // 重命名失败则沿用 tmp
         }
         return output;
     }
 
-    /** 写入系统相册（Pictures/BetterHeybox），返回 content URI；失败返回 null（由调用方回退 FileProvider） */
+    /** 写入系统相册，返回 content URI；失败返回 null */
     private Uri publishToGallery(Context context, File file) {
         try {
             if (Build.VERSION.SDK_INT < 29) {
-                // Android 8~9 写入公共相册需要存储权限（小黑盒已声明 WRITE_EXTERNAL_STORAGE，需已授予）
+                // Android 8~9 写入公共相册需要存储权限
                 if (context.checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
                         != PackageManager.PERMISSION_GRANTED) {
                     module.logd(Log.WARN, module.TAG, "无 WRITE_EXTERNAL_STORAGE 权限，回退 FileProvider");
@@ -463,7 +499,6 @@ public final class ImageShareHook {
         }
     }
 
-    /** 读取文件头识别真实图片格式；无法识别返回 null */
     private static String sniffImageExtension(File file) {
         try (FileInputStream in = new FileInputStream(file)) {
             byte[] head = new byte[12];
@@ -489,7 +524,7 @@ public final class ImageShareHook {
         return null;
     }
 
-    /** 从 URL 路径猜测图片扩展名（magic bytes 识别失败时的兜底） */
+    /** 从 URL 路径猜测图片扩展名 */
     private static String guessExtensionFromUrl(String imageUrl) {
         try {
             String path = new URL(imageUrl).getPath();
