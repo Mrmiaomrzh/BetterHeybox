@@ -13,10 +13,8 @@ import android.graphics.Path;
 import android.graphics.RectF;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
-import android.os.Build;
 import android.text.Layout;
 import android.util.Log;
-import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -48,6 +46,24 @@ public final class CustomTextSelection {
 
     private CustomTextSelection() {
     }
+
+    /**
+     * 选中终点锚点（手柄与高亮共用）：end 落在行首时回退上一行取行右，
+     * 前字符为换行符时同样取行右，避免锚点悬到下一行行首；outLine[0] 回填实际所在行
+     */
+    private static float endAnchor(Layout layout, CharSequence text, int end, int[] outLine) {
+        int line = layout.getLineForOffset(end);
+        float x = layout.getPrimaryHorizontal(end);
+        if (line > 0 && end == layout.getLineStart(line)) {
+            line = line - 1;
+            x = layout.getLineRight(line);
+        } else if (end > 0 && end <= text.length()
+                && (text.charAt(end - 1) == '\n' || text.charAt(end - 1) == '\r')) {
+            x = layout.getLineRight(line);
+        }
+        outLine[0] = line;
+        return x;
+    }
     public static void attach(TextView tv) {
         if (tv == null) {
             return;
@@ -73,7 +89,7 @@ public final class CustomTextSelection {
             controller.detach();
         }
     }
-        public static void cancelAll() {
+    static void cancelAll() {
         synchronized (CONTROLLERS) {
             for (Controller controller : CONTROLLERS.values()) {
                 try {
@@ -415,17 +431,7 @@ public final class CustomTextSelection {
         }
 
         private float endAnchorX(Layout layout, CharSequence text, int end, int[] outLine) {
-            int line = layout.getLineForOffset(end);
-            float x = layout.getPrimaryHorizontal(end);
-            if (line > 0 && end == layout.getLineStart(line)) {
-                line = line - 1;
-                x = layout.getLineRight(line);
-            } else if (end > 0 && end <= text.length()
-                    && (text.charAt(end - 1) == '\n' || text.charAt(end - 1) == '\r')) {
-                x = layout.getLineRight(line);
-            }
-            outLine[0] = line;
-            return x;
+            return endAnchor(layout, text, end, outLine);
         }
 
         private void positionHandle(SelectionHandle handle, int[] tvLoc, Layout layout,
@@ -958,14 +964,9 @@ public final class CustomTextSelection {
                 return;
             }
             int first = layout.getLineForOffset(start);
-            int last = layout.getLineForOffset(end);
-            float lastRight = layout.getPrimaryHorizontal(end);
-            if (last > 0 && end == layout.getLineStart(last)) {
-                last--;
-                lastRight = layout.getLineRight(last);
-            } else if (end > 0 && (text.charAt(end - 1) == '\n' || text.charAt(end - 1) == '\r')) {
-                lastRight = layout.getLineRight(last);
-            }
+            int[] lastLine = new int[1];
+            float lastRight = endAnchor(layout, text, end, lastLine);
+            int last = lastLine[0];
             path.rewind();
             for (int i = first; i <= last; i++) {
                 float left = (i == first) ? layout.getPrimaryHorizontal(start) : layout.getLineLeft(i);

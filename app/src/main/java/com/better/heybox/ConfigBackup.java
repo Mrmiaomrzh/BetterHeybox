@@ -20,6 +20,7 @@ public final class ConfigBackup {
             App.KEY_DAILY_TASK_NORMAL,
             App.KEY_DAILY_TASK_CHANNEL,
             App.KEY_SHARE_CHANNEL,
+            App.KEY_GLASS_PROVIDER,
             App.KEY_GLASS_DARK_COLOR,
             App.KEY_GLASS_DARK_ALPHA,
             App.KEY_GLASS_LIGHT_COLOR,

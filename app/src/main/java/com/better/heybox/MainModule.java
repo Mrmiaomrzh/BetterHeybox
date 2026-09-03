@@ -21,6 +21,7 @@ import com.better.heybox.hooks.ImageShareHook;
 import com.better.heybox.hooks.PromotePostHook;
 import com.better.heybox.hooks.SettingsEntryHook;
 import com.better.heybox.hooks.ShareLinkPurifyHook;
+import com.better.heybox.hooks.SingleColumnFeedHook;
 import com.better.heybox.hooks.TextSelectHook;
 import com.better.heybox.hooks.VideoDownloadHook;
 import com.better.heybox.hooks.WebViewDevToolsHook;
@@ -39,7 +40,6 @@ public class MainModule extends XposedModule {
 
     public static final String TARGET_PKG = "com.max.xiaoheihe";
 
-    public static final String TARGET_HEYBOX_VERSION = "1.3.393";
     public static final Set<String> SUPPORTED_HEYBOX_VERSIONS =
             Collections.unmodifiableSet(new LinkedHashSet<>(Arrays.asList(
                     "1.3.393",
@@ -82,8 +82,11 @@ public class MainModule extends XposedModule {
         installHook("广告过滤", new AdFilterHook(this)::install, cl);
         installHook("设置入口", new SettingsEntryHook(this)::install, cl);
         installHook("底部导航", new BottomTabHook(this)::install, cl);
+        // 玻璃提供方选择存在宿主本地配置，安装期（Application 未创建）读不到；
+        // 由运行时挂载点（scheduleInstall / 玻璃长按入口）按选择门控
         installHook("液态玻璃底栏", new LiquidGlassBottomBarHook(this)::install, cl);
         installHook("推广贴", new PromotePostHook(this)::install, cl);
+        installHook("单列信息流", new SingleColumnFeedHook(this)::install, cl);
         installHook("文本选择", new TextSelectHook(this)::install, cl);
         installHook("图片分享", new ImageShareHook(this)::install, cl);
         installHook("分享链接净化", new ShareLinkPurifyHook(this)::install, cl);

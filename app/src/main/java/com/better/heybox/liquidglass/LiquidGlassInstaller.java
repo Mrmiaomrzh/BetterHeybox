@@ -14,9 +14,9 @@ import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.widget.RelativeLayout;
 
-public final class LiquidGlassInstaller {
+import com.better.heybox.GlassProvider;
 
-    private static final String TAG = "HeyBoxLiquidGlass";
+public final class LiquidGlassInstaller {
 
     private static final String ID_ROOT = "vg_main_root";
     private static final String ID_BAR = "rg_main";
@@ -38,51 +38,34 @@ public final class LiquidGlassInstaller {
         }
     }
 
-    private static boolean isPublishHidden(Context context) {
+    /**
+     * 一次读齐底栏相关开关（[0]=加号/tab 隐藏导致发布钮隐藏，[1]=宽度自适应生效）。
+     * 同帧内值一致，避免嵌套调用对同批 key 重复读 prefs
+     */
+    private static boolean[] readTabState(Context context) {
+        boolean publishHidden = false;
+        boolean fit = false;
         try {
             com.better.heybox.HeyboxPrefs.init(context);
-            if (com.better.heybox.HeyboxPrefs.getBoolean(
-                    com.better.heybox.App.KEY_HIDE_ADD, false)) {
-                return true;
-            }
-            return anyTabHidden(context);
-        } catch (Throwable t) {
-            return false;
-        }
-    }
-
-    /** 是否隐藏了任一底部 tab（发现/游戏库/社区），加号联动隐藏不计入 */
-    private static boolean anyTabHidden(Context context) {
-        try {
-            com.better.heybox.HeyboxPrefs.init(context);
-            return com.better.heybox.HeyboxPrefs.getBoolean(
+            boolean glass = com.better.heybox.HeyboxPrefs.getBoolean(
+                    com.better.heybox.App.KEY_LIQUID_GLASS, true);
+            publishHidden = com.better.heybox.HeyboxPrefs.getBoolean(
+                    com.better.heybox.App.KEY_HIDE_ADD, false)
+                    || com.better.heybox.HeyboxPrefs.getBoolean(
                     com.better.heybox.App.KEY_HIDE_TAB_HOME, false)
                     || com.better.heybox.HeyboxPrefs.getBoolean(
                     com.better.heybox.App.KEY_HIDE_TAB_HOT, false)
                     || com.better.heybox.HeyboxPrefs.getBoolean(
                     com.better.heybox.App.KEY_HIDE_TAB_GAME, false);
-        } catch (Throwable t) {
-            return false;
+            fit = glass && GlassConfig.fitTabs && publishHidden;
+        } catch (Throwable ignored) {
         }
-    }
-
-    /** 玻璃宽度自适应生效条件：玻璃开启且加号已隐藏（加号可见时保持全宽等分，不做收窄/选中加长） */
-    private static boolean fitEffective(Context context) {
-        try {
-            if (!GlassConfig.fitTabs) {
-                return false;
-            }
-            com.better.heybox.HeyboxPrefs.init(context);
-            return com.better.heybox.HeyboxPrefs.getBoolean(
-                    com.better.heybox.App.KEY_LIQUID_GLASS, true)
-                    && isPublishHidden(context);
-        } catch (Throwable t) {
-            return false;
-        }
+        return new boolean[]{publishHidden, fit};
     }
 
     public static void scheduleInstall(Activity activity) {
-        if (!isGlassEnabled(activity)) {
+        // 用户选择由独立液态玻璃模块提供时，自带玻璃（底栏+长按入口）全面让位
+        if (!isGlassEnabled(activity) || GlassProvider.prefersHbmod(activity)) {
             return;
         }
         View decor = activity.getWindow().getDecorView();
@@ -238,34 +221,26 @@ public final class LiquidGlassInstaller {
                 });
     }
 
-    /**
- * QWEA0 模式：用 LiquidGlassTabBar 替换可见 RadioGroup（自带水滴选中动画）
- */
-    private static final boolean USE_QWEA0_TABBAR = true;
     /** 中央加号槽位的权重：与普通 tab 等权（原生底栏 5 等分，加号占 1/5） */
     private static final float CENTER_GAP_WEIGHT = 1.0f;
     private static volatile boolean sTabBarActive;
 
     /**
- * API 33+ 用 QWEA0 LiquidGlassTabBar 渲染器替换 RadioGroup（采样 fl_container）；API<33 走 legacy frost 路径
- */
+     * API 33+ 用 QWEA0 LiquidGlassTabBar 渲染器替换 RadioGroup（采样 fl_container）；API<33 走 legacy frost 路径
+     */
     private static void attachGlassRenderer(Activity activity, ViewGroup host,
                                             ViewGroup bar, ViewGroup tips, View midTab,
                                             ViewGroup content, int barHeightSpec, int navPad) {
         if (Build.VERSION.SDK_INT < 33 || content == null) {
             return;
         }
-        try {
-            if (USE_QWEA0_TABBAR && bar instanceof android.widget.RadioGroup) {
-                attachQwea0TabBar(activity, host,
-                        (android.widget.RadioGroup) bar, tips, midTab,
-                        content, barHeightSpec, navPad);
-            } else {
-                attachQwea0Renderer(activity, host, content, barHeightSpec);
-            }
-        } catch (Throwable t) {
-            // QWEA0 挂载失败不中断 install：host 已挂好、legacy frost 路径继续渲染玻璃
-            LiquidGlassLog.logErr("QWEA0 renderer failed, legacy frost fallback", t);
+        if (bar instanceof android.widget.RadioGroup) {
+            attachQwea0TabBar(activity, host,
+                    (android.widget.RadioGroup) bar, tips, midTab,
+                    content, barHeightSpec, navPad);
+        } else {
+            LiquidGlassLog.log(android.util.Log.WARN,
+                    "nav bar is not a RadioGroup, QWEA0 tab bar unavailable");
         }
     }
 
@@ -309,30 +284,10 @@ public final class LiquidGlassInstaller {
         glass.setEnableAdaptiveTint(adaptiveTint);
     }
 
-    private static void attachQwea0Renderer(Activity activity, ViewGroup host,
-                                            ViewGroup content, int barHeightSpec) {
-        try {
-            float density = host.getResources().getDisplayMetrics().density;
-            com.example.liquidglass.LiquidGlassView glass =
-                    new com.example.liquidglass.LiquidGlassView(activity, null, 0);
-            applyQwea0Params(glass, content, density, true);
-
-            host.addView(glass, 0, new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    barHeightSpec > 0 ? barHeightSpec : ViewGroup.LayoutParams.WRAP_CONTENT,
-                    android.view.Gravity.TOP | android.view.Gravity.FILL_HORIZONTAL));
-
-            LiquidGlassLog.log(android.util.Log.INFO,
-                    "renderer=QWEA0 LiquidGlassView (lens+dispersion+sensor specular)");
-        } catch (Throwable t) {
-            LiquidGlassLog.logErr("qwea0 renderer unavailable, frost fallback", t);
-        }
-    }
-
     /**
- * QWEA0 LiquidGlassTabBar 整体替换可见 RadioGroup：自身是 LiquidGlassView（水滴滑动/拉伸选中动画），原 RadioGroup 保留但不可见。
- * 双向同步：tab 点击 → rb.performClick()；app 选中 → 监听包装 → tabBar.setSelectedIndex
- */
+     * QWEA0 LiquidGlassTabBar 整体替换可见 RadioGroup：自身是 LiquidGlassView（水滴滑动/拉伸选中动画），原 RadioGroup 保留但不可见。
+     * 双向同步：tab 点击 → rb.performClick()；app 选中 → 监听包装 → tabBar.setSelectedIndex
+     */
     private static void attachQwea0TabBar(Activity activity, ViewGroup host,
                                           android.widget.RadioGroup bar,
                                           ViewGroup tips, View midTab,
@@ -347,7 +302,6 @@ public final class LiquidGlassInstaller {
             host.setPadding(host.getPaddingLeft(), host.getPaddingTop(),
                     host.getPaddingRight(), flushPad);
             sBasePadBottom = flushPad;
-            sCenterRefStatic = null;
             final com.example.liquidglass.LiquidGlassTabBar tabBar =
                     new com.example.liquidglass.LiquidGlassTabBar(activity, null, 0);
             sTabBarRef = new java.lang.ref.WeakReference<>(tabBar);
@@ -409,10 +363,9 @@ public final class LiquidGlassInstaller {
             applyTabBarOverLight(tabBar, isSystemNight(activity));
 
             final View centerRef = mountCenterButton(activity, host, midTab, tips);
-            sCenterRefStatic = centerRef;
 
             // 布局完成后把发布按钮定位到 tab 行正中（居中悬浮）
-            placeCenterNow(host, tabBar, centerRef, 0);
+            placeCenterNow(host, tabBar, centerRef);
             // 每次布局后跟随底栏几何（高度/偏移变化等），变化检测防止死循环
             if (centerRef != null) {
                 final ViewGroup hL = host, tL = tabBar;
@@ -421,7 +374,7 @@ public final class LiquidGlassInstaller {
                         new ViewTreeObserver.OnGlobalLayoutListener() {
                             @Override
                             public void onGlobalLayout() {
-                                placeCenterNow(hL, tL, cL, 0);
+                                placeCenterNow(hL, tL, cL);
                             }
                         });
             }
@@ -436,20 +389,7 @@ public final class LiquidGlassInstaller {
             setupTabSelectionSync(bar, tabBar);
 
             // uiMode 推送只播种初始态，亮度计预热后接管 chrome 颜色
-            final com.example.liquidglass.LiquidGlassTabBar tabBarRef = tabBar;
-            ((LiquidGlassHostLayout) host).setGlassTuner(
-                    new LiquidGlassHostLayout.GlassTuner() {
-                        @Override
-                        public void onSize(int w, int h, float cornerRadius) {
-                        }
-
-                        @Override
-                        public void onTheme(boolean dark) {
-                            LiquidGlassLog.log(android.util.Log.INFO,
-                                    "app theme changed: dark=" + dark
-                                            + " (backdrop meter now drives chrome)");
-                        }
-                    });
+            ((LiquidGlassHostLayout) host).setExternalRendererActive(true);
 
             LiquidGlassLog.log(android.util.Log.INFO,
                     "renderer=QWEA0 LiquidGlassTabBar (glass droplet selection)");
@@ -465,7 +405,7 @@ public final class LiquidGlassInstaller {
     private static View mountCenterButton(Activity activity, ViewGroup host,
                                           View midTab, ViewGroup tips) {
         View centerHost = null;
-        if (!isPublishHidden(activity) && midTab != null && midTab.getParent() == host) {
+        if (!readTabState(activity)[0] && midTab != null && midTab.getParent() == host) {
             host.removeView(midTab);
             midTab.setVisibility(View.VISIBLE);
 
@@ -504,21 +444,17 @@ public final class LiquidGlassInstaller {
                                 try {
                                     if (!GlassConfig.adaptiveChrome) {
                                         // 用户关闭自适应反色：标签色固定跟随应用主题
-                                        boolean uiDark = tabBar.getResources()
+                                        boolean uiDark = (tabBar.getResources()
                                                 .getConfiguration().uiMode
-                                                % 2 == 1;
+                                                & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+                                                == android.content.res.Configuration.UI_MODE_NIGHT_YES;
                                         if (sChromeLight != !uiDark
                                                 || sChromeForced) {
                                             sChromeForced = true;
                                             sChromeLight = !uiDark;
                                             final boolean d = uiDark;
-                                            tabBar.post(() -> {
-                                                try {
-                                                    applyTabBarOverLight(
-                                                            tabBar, d);
-                                                } catch (Throwable ignored) {
-                                                }
-                                            });
+                                            tabBar.post(() ->
+                                                    applyTabBarOverLight(tabBar, d));
                                         }
                                         return kotlin.Unit.INSTANCE;
                                     }
@@ -531,15 +467,12 @@ public final class LiquidGlassInstaller {
                                         sChromeLight = overLight;
                                         final boolean flip = overLight;
                                         tabBar.post(() -> {
-                                            try {
-                                                applyTabBarOverLight(tabBar,
-                                                        !flip);
-                                                LiquidGlassLog.log(
-                                                        android.util.Log.INFO,
-                                                        "backdrop flip: overLight="
-                                                                + flip);
-                                            } catch (Throwable ignored) {
-                                            }
+                                            applyTabBarOverLight(tabBar,
+                                                    !flip);
+                                            LiquidGlassLog.log(
+                                                    android.util.Log.INFO,
+                                                    "backdrop flip: overLight="
+                                                            + flip);
                                         });
                                     }
                                 } catch (Throwable ignored) {
@@ -586,8 +519,9 @@ public final class LiquidGlassInstaller {
                 return;
             }
             GlassConfig.load(tabBar.getContext());
-            boolean publishHidden = isPublishHidden(tabBar.getContext());
-            boolean fit = fitEffective(tabBar.getContext());
+            boolean[] st = readTabState(tabBar.getContext());
+            boolean publishHidden = st[0];
+            boolean fit = st[1];
             java.util.List<com.example.liquidglass.LiquidGlassTabBar.TabItem> items =
                     new java.util.ArrayList<>();
             java.lang.StringBuilder sig = new java.lang.StringBuilder();
@@ -641,9 +575,6 @@ public final class LiquidGlassInstaller {
             } finally {
                 sSyncing = false;
             }
-            final ViewGroup h2 = host;
-            final com.example.liquidglass.LiquidGlassTabBar t2 = tabBar;
-            host.post(() -> placeCenterNow(h2, t2, sCenterRefStatic, 0));
             LiquidGlassLog.log(android.util.Log.INFO,
                     "glass tab bar rebuilt: tabs=" + items.size()
                             + " fit=" + fit
@@ -705,7 +636,7 @@ public final class LiquidGlassInstaller {
                 return false;
             }
             android.widget.LinearLayout ll = (android.widget.LinearLayout) row;
-            boolean fit = fitEffective(tabBar.getContext());
+            boolean fit = readTabState(tabBar.getContext())[1];
             int selected = selectedIndex;
             int tabIndex = 0;
             for (int i = 0; i < ll.getChildCount(); i++) {
@@ -920,8 +851,8 @@ public final class LiquidGlassInstaller {
     }
 
     private static void placeCenterNow(ViewGroup host, ViewGroup tabBar,
-                                       View center, int attempt) {
-        if (center == null || attempt > 10) {
+                                       View center) {
+        if (center == null) {
             return;
         }
         try {
@@ -930,12 +861,9 @@ public final class LiquidGlassInstaller {
                 return;
             }
             android.widget.LinearLayout ll = (android.widget.LinearLayout) row;
+            // 行未测量完成时直接返回：tabBar 的全局布局监听会在下一轮布局重试
             int rowW = ll.getWidth();
             if (rowW <= 0) {
-                final ViewGroup h2 = host, t2 = tabBar;
-                final View c2 = center;
-                final int a2 = attempt + 1;
-                center.post(() -> placeCenterNow(h2, t2, c2, a2));
                 return;
             }
             // center 以默认 MATCH_PARENT 加入 host，宿主测量后 getMeasuredWidth 会是全宽，必须重测取加号本体宽
@@ -994,7 +922,6 @@ public final class LiquidGlassInstaller {
         try {
             View barV = sTabBarRef.get();
             ViewGroup host = sHostRef;
-            View center = sCenterRefStatic;
             if (!(barV instanceof ViewGroup) || host == null
                     || !(barV.getLayoutParams()
                             instanceof FrameLayout.LayoutParams)) {
@@ -1017,9 +944,6 @@ public final class LiquidGlassInstaller {
                             + Math.round(off * den));
 
             host.requestLayout();
-            final ViewGroup h2 = host;
-            final ViewGroup b2 = (ViewGroup) barV;
-            host.post(() -> placeCenterNow(h2, b2, center, 0));
         } catch (Throwable t) {
             LiquidGlassLog.logErr("applyBarGeometry failed", t);
         }
@@ -1120,8 +1044,17 @@ public final class LiquidGlassInstaller {
         return -1;
     }
 
-    private static void setupTabSelectionSync(final android.widget.RadioGroup bar,
-                                              final com.example.liquidglass.LiquidGlassTabBar tabBar) {
+    /** 附加动作异常由包装器兜底吞掉，不影响原监听转发 */
+    private interface OnCheckedExtra {
+        void onChecked(android.widget.RadioGroup group, int checkedId);
+    }
+
+    /**
+     * 包装宿主 RadioGroup 的 mOnCheckedChangeListener：先转发原监听，再执行附加动作。
+     * 选中同步（QWEA0 路径）与 pop 动画（legacy 路径）共用，两路互斥
+     */
+    private static void wrapCheckedListener(final android.widget.RadioGroup bar,
+                                            final OnCheckedExtra extra) {
         try {
             java.lang.reflect.Field f = android.widget.RadioGroup.class
                     .getDeclaredField("mOnCheckedChangeListener");
@@ -1135,22 +1068,29 @@ public final class LiquidGlassInstaller {
                                 .onCheckedChanged(group, checkedId);
                     }
                     try {
-                        for (int i = 0; i < sVisibleButtons.size(); i++) {
-                            if (sVisibleButtons.get(i).getId() == checkedId
-                                    && tabBar.getSelectedIndex() != i) {
-                                prepareSelectionLayout(tabBar, i);
-                                tabBar.setSelectedIndex(i);
-                                break;
-                            }
-                        }
+                        extra.onChecked(group, checkedId);
                     } catch (Throwable ignored) {
                     }
                 }
             });
         } catch (Throwable t) {
             LiquidGlassLog.log(android.util.Log.WARN,
-                    "tab selection sync unavailable: " + t);
+                    "checked listener wrap unavailable: " + t);
         }
+    }
+
+    private static void setupTabSelectionSync(final android.widget.RadioGroup bar,
+                                              final com.example.liquidglass.LiquidGlassTabBar tabBar) {
+        wrapCheckedListener(bar, (group, checkedId) -> {
+            for (int i = 0; i < sVisibleButtons.size(); i++) {
+                if (sVisibleButtons.get(i).getId() == checkedId
+                        && tabBar.getSelectedIndex() != i) {
+                    prepareSelectionLayout(tabBar, i);
+                    tabBar.setSelectedIndex(i);
+                    break;
+                }
+            }
+        });
     }
 
     /** Installed once per process: theme-driven glass body tint. */
@@ -1158,16 +1098,12 @@ public final class LiquidGlassInstaller {
     private static volatile boolean sChromeLight;
     private static volatile boolean sChromeForced;
     private static volatile ViewGroup sHostRef;
-    private static volatile View sCenterRefStatic;
     private static volatile float sDensity;
     private static int sBasePadBottom;
-    private static final java.lang.ref.WeakReference<View> EMPTY_BAR_REF =
-            new java.lang.ref.WeakReference<>(null);
-    private static volatile java.lang.ref.WeakReference<View> sTabBarRef = EMPTY_BAR_REF;
-    private static final java.lang.ref.WeakReference<android.widget.RadioGroup> EMPTY_RG_BAR_REF =
+    private static volatile java.lang.ref.WeakReference<View> sTabBarRef =
             new java.lang.ref.WeakReference<>(null);
     private static volatile java.lang.ref.WeakReference<android.widget.RadioGroup> sNativeBarRef =
-            EMPTY_RG_BAR_REF;
+            new java.lang.ref.WeakReference<>(null);
     private static final java.util.List<android.widget.RadioButton> sVisibleButtons =
             new java.util.ArrayList<>();
     private static final java.util.List<Boolean> sRepeatRefreshTabs =
@@ -1244,9 +1180,9 @@ public final class LiquidGlassInstaller {
                 try {
                     if (r instanceof View && !sGlassEntries.containsKey(r)) {
                         View icon = (View) r;
-                        sGlassEntries.put(icon, Boolean.TRUE);
                         android.content.Context cx = icon.getContext();
-                        if (cx instanceof Activity) {
+                        if (cx instanceof Activity && !GlassProvider.prefersHbmod(cx)) {
+                            sGlassEntries.put(icon, Boolean.TRUE);
                             final Activity a = (Activity) cx;
                             icon.setOnLongClickListener(v -> {
                                 GlassSettingsSheet.show(a);
@@ -1304,6 +1240,9 @@ public final class LiquidGlassInstaller {
             if (activity.isFinishing() || activity.isDestroyed() || attempt > 10) {
                 return;
             }
+            if (GlassProvider.prefersHbmod(activity)) {
+                return;
+            }
             int id = activity.getResources().getIdentifier(
                     "vg_general_settings", "id", activity.getPackageName());
             View row = id != 0 ? activity.findViewById(id) : null;
@@ -1331,26 +1270,12 @@ public final class LiquidGlassInstaller {
         if (!(bar instanceof android.widget.RadioGroup)) {
             return;
         }
-        try {
-            java.lang.reflect.Field f = android.widget.RadioGroup.class
-                    .getDeclaredField("mOnCheckedChangeListener");
-            f.setAccessible(true);
-            final Object original = f.get(bar);
-            android.widget.RadioGroup group = (android.widget.RadioGroup) bar;
-            group.setOnCheckedChangeListener((rg, checkedId) -> {
-                if (original instanceof android.widget.RadioGroup.OnCheckedChangeListener) {
-                    ((android.widget.RadioGroup.OnCheckedChangeListener) original)
-                            .onCheckedChanged(rg, checkedId);
-                }
-                if (rg.getParent() instanceof LiquidGlassHostLayout) {
-                    ((LiquidGlassHostLayout) rg.getParent())
-                            .popChild(rg.findViewById(checkedId));
-                }
-            });
-        } catch (Throwable t) {
-            LiquidGlassLog.log(android.util.Log.WARN,
-                    "tab pop animation unavailable: " + t);
-        }
+        wrapCheckedListener((android.widget.RadioGroup) bar, (group, checkedId) -> {
+            if (group.getParent() instanceof LiquidGlassHostLayout) {
+                ((LiquidGlassHostLayout) group.getParent())
+                        .popChild(group.findViewById(checkedId));
+            }
+        });
     }
 
     private static void hideLegacyShadow(ViewGroup root, int barId) {

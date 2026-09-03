@@ -7,7 +7,6 @@ public final class LiquidGlassHookBridge {
     private static volatile MainModule module;
     private LiquidGlassHookBridge() { }
     public static void setModule(MainModule value) { module = value; }
-    public static MainModule module() { return module; }
     public static void hookExecutable(java.lang.reflect.Executable executable,
                                ChainFunction function) {
         MainModule m = module;

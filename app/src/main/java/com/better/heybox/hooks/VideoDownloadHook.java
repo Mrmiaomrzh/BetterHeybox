@@ -3,7 +3,6 @@ package com.better.heybox.hooks;
 import android.app.Activity;
 import android.content.Context;
 import android.content.DialogInterface;
-import android.content.ContextWrapper;
 import android.content.Intent;
 import android.content.res.ColorStateList;
 import android.graphics.Canvas;
@@ -17,7 +16,6 @@ import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
-import android.os.Build;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -64,18 +62,13 @@ public final class VideoDownloadHook {
     }
 
     private final MainModule module;
-    private volatile boolean installed;
 
     public VideoDownloadHook(MainModule module) {
         this.module = module;
     }
 
     public void install(ClassLoader cl) {
-        if (installed) {
-            return;
-        }
         hookW(cl);
-        installed = true;
     }
 
     private void hookW(ClassLoader cl) {
@@ -165,7 +158,7 @@ public final class VideoDownloadHook {
         }
         // 惰性初始化下载管理器（宿主进程内拿到 Context 后注册通知广播/恢复任务历史）
         VideoDownloadManager.get().init(videoView.getContext());
-        ViewGroup decor = EntryController.findDecor(videoView);
+        ViewGroup decor = ViewUtils.findDecor(videoView);
         if (decor == null) {
             return;
         }
@@ -184,7 +177,6 @@ public final class VideoDownloadHook {
         controller.addCandidate(videoView, url, headers);
         controller.sync();
     }
-
     /**
  * 窗口级入口控制器：每 Decor 一个下载按钮，跟随「最近捕获且当前可见」的候选（预加载不可见时不抢占）
  */
@@ -470,14 +462,6 @@ public final class VideoDownloadHook {
                     ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
             attachListeners();
             entry.bringToFront();
-            VideoDownloadManager.get().addListener(new VideoDownloadManager.TaskListener() {
-                @Override
-                public void onTasksChanged() {
-                    if (entry != null) {
-                        entry.invalidate();
-                    }
-                }
-            });
         }
 
         private void attachListeners() {
@@ -553,26 +537,12 @@ public final class VideoDownloadHook {
                 sheet = null;
             }
         }
-
-        static ViewGroup findDecor(View v) {
-            Context context = v.getContext();
-            while (context instanceof ContextWrapper) {
-                if (context instanceof Activity) {
-                    View decor = ((Activity) context).getWindow().getDecorView();
-                    if (decor instanceof ViewGroup) {
-                        return (ViewGroup) decor;
-                    }
-                }
-                context = ((ContextWrapper) context).getBaseContext();
-            }
-            return null;
-        }
     }
 
     /** 供 cardTitle 回退使用 */
-    private static final class BottomSheetFallback {
-        static String videoTitle(Context context) {
-            Activity activity = DownloadSheet.findActivity(context);
+        private static final class BottomSheetFallback {
+            static String videoTitle(Context context) {
+                Activity activity = ViewUtils.findActivity(context);
             if (activity == null) {
                 return null;
             }
@@ -610,22 +580,32 @@ public final class VideoDownloadHook {
         private int phase = PHASE_IDLE;
         private int progress = -1;
 
+        /**
+         * 任务状态由监听器驱动（attach/detach 配对增删，随 FAB 生命周期），onDraw 只画不查表
+         */
+        private final VideoDownloadManager.TaskListener taskListener =
+                new VideoDownloadManager.TaskListener() {
+                    @Override
+                    public void onTasksChanged() {
+                        refreshTaskState();
+                        invalidate();
+                    }
+                };
+
         DownloadFab(Context context) {
             super(context);
             int size = ThemeUtils.dp(context, 44);
             setClickable(true);
             setFocusable(true);
             setContentDescription("下载视频");
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                setElevation(ThemeUtils.dp(context, 4));
-                setOutlineProvider(new ViewOutlineProvider() {
-                    @Override
-                    public void getOutline(View view, android.graphics.Outline outline) {
-                        outline.setOval(0, 0, getWidth(), getHeight());
-                    }
-                });
-                setClipToOutline(true);
-            }
+            setElevation(ThemeUtils.dp(context, 4));
+            setOutlineProvider(new ViewOutlineProvider() {
+                @Override
+                public void getOutline(View view, android.graphics.Outline outline) {
+                    outline.setOval(0, 0, getWidth(), getHeight());
+                }
+            });
+            setClipToOutline(true);
             setForeground(new RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), null,
                     circleMask()));
             setOnTouchListener(new OnTouchListener() {
@@ -657,6 +637,19 @@ public final class VideoDownloadHook {
 
         void bind(String url) {
             this.boundUrl = url;
+            refreshTaskState();
+        }
+
+        @Override
+        protected void onAttachedToWindow() {
+            super.onAttachedToWindow();
+            VideoDownloadManager.get().addListener(taskListener);
+        }
+
+        @Override
+        protected void onDetachedFromWindow() {
+            super.onDetachedFromWindow();
+            VideoDownloadManager.get().removeListener(taskListener);
         }
 
         @Override
@@ -673,7 +666,6 @@ public final class VideoDownloadHook {
             if (w <= 0) {
                 return;
             }
-            refreshTaskState();
             Context context = getContext();
 
             // 底：强档位 accent → accent2 的 45° 轻渐变（任意视频画面上都有足够对比度）
@@ -775,9 +767,7 @@ public final class VideoDownloadHook {
 
         private final Context context;
         private final ViewGroup decor;
-        private final boolean dark;
         private final int accent;
-        private final int accent2;
 
         private FrameLayout scrim;
         private LinearLayout panel;
@@ -786,7 +776,8 @@ public final class VideoDownloadHook {
         private Map<String, String> headers;
         private String title;
         private volatile boolean dismissed;
-        private String shownState = "";
+        /** 面板当前展示的状态桶（null=无任务空闲）；PENDING 归并入 DOWNLOADING 避免重复重建 */
+        private VideoDownloadManager.State shownState;
 
         /** 探测到的预计大小（-1 未知）与 HLS 分段数（-1 非 HLS） */
         private volatile long probeTotal = -1;
@@ -794,7 +785,6 @@ public final class VideoDownloadHook {
         private boolean probing;
 
         // 下载中/暂停内容引用（原地更新，不重建）
-        private TextView statusText;
         private View progressBar;
         private TextView pctText;
         private final int[] progressHolder = new int[1];
@@ -808,10 +798,11 @@ public final class VideoDownloadHook {
                         }
                         VideoDownloadManager.DownloadTask task =
                                 VideoDownloadManager.get().findTask(url);
-                        String state = stateName(task);
-                        if (!state.equals(shownState)) {
+                        VideoDownloadManager.State s = shownStateOf(task);
+                        if (s != shownState) {
                             rebuild(task);
-                        } else if ("DOWNLOADING".equals(state) || "PAUSED".equals(state)) {
+                        } else if (s == VideoDownloadManager.State.DOWNLOADING
+                                || s == VideoDownloadManager.State.PAUSED) {
                             updateProgress(task);
                         }
                     }
@@ -820,9 +811,7 @@ public final class VideoDownloadHook {
         DownloadSheet(Context context, ViewGroup decor) {
             this.context = context;
             this.decor = decor;
-            this.dark = ThemeUtils.isDarkMode(context);
             this.accent = ThemeUtils.resolveAccentStrong(context);
-            this.accent2 = ThemeUtils.resolveAccent2Strong(context);
         }
 
         void show(String url, Map<String, String> headers, String title) {
@@ -830,7 +819,7 @@ public final class VideoDownloadHook {
             this.headers = headers;
             this.title = title;
             this.dismissed = false;
-            this.shownState = "";
+            this.shownState = null;
             removeExisting();
 
             scrim = new FrameLayout(context);
@@ -933,23 +922,13 @@ public final class VideoDownloadHook {
             });
         }
 
-        private static String stateName(VideoDownloadManager.DownloadTask task) {
+        private static VideoDownloadManager.State shownStateOf(
+                VideoDownloadManager.DownloadTask task) {
             if (task == null) {
-                return "READY";
+                return null;
             }
-            switch (task.state) {
-                case DOWNLOADING:
-                case PENDING:
-                    return "DOWNLOADING";
-                case PAUSED:
-                    return "PAUSED";
-                case COMPLETED:
-                    return "DONE";
-                case FAILED:
-                    return "FAILED";
-                default:
-                    return "READY";
-            }
+            return task.state == VideoDownloadManager.State.PENDING
+                    ? VideoDownloadManager.State.DOWNLOADING : task.state;
         }
 
         /** 状态切换时整块重建内容；同状态进度变化走 updateProgress 原地更新 */
@@ -958,7 +937,7 @@ public final class VideoDownloadHook {
                 return;
             }
             content.removeAllViews();
-            shownState = stateName(task);
+            shownState = shownStateOf(task);
             Context c = context;
             VideoDownloadManager.State state = task != null ? task.state
                     : VideoDownloadManager.State.PENDING;
@@ -996,13 +975,10 @@ public final class VideoDownloadHook {
                         sizeLine.setText("小黑盒 · " + probeSegments + " 个分段");
                     }
                     addButtons(c, box,
-                            sheetButton(c, primaryStyle(), "开始下载", new ActionRunnable() {
-                                @Override
-                                public void run() {
-                                    VideoDownloadManager.get().startDownload(url, headers, title);
-                                }
-                            }, false),
-                            sheetButton(c, textStyle(), "取消", null, true));
+                            sheetButton(c, ButtonStyle.PRIMARY, "开始下载",
+                                    () -> VideoDownloadManager.get().startDownload(url, headers, title),
+                                    false),
+                            sheetButton(c, ButtonStyle.TEXT, "取消", null, true));
                 }
             }
         }
@@ -1035,7 +1011,7 @@ public final class VideoDownloadHook {
                             probeSegments = segments;
                             VideoDownloadManager.DownloadTask task =
                                     VideoDownloadManager.get().findTask(url);
-                            if (task == null || "READY".equals(stateName(task))) {
+                            if (task == null) {
                                 rebuild(task);
                             }
                         }
@@ -1063,7 +1039,7 @@ public final class VideoDownloadHook {
             int pct = Math.max(0, task.percent());
             LinearLayout pctRow = new LinearLayout(c);
             pctRow.setOrientation(LinearLayout.HORIZONTAL);
-            statusText = secondaryText(c, task.statusLine());
+            TextView statusText = secondaryText(c, task.statusLine());
             statusText.setLayoutParams(new LinearLayout.LayoutParams(0,
                     ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
             pctRow.addView(statusText);
@@ -1119,29 +1095,21 @@ public final class VideoDownloadHook {
             final VideoDownloadManager.DownloadTask t = task;
             LinearLayout row = new LinearLayout(c);
             row.setOrientation(LinearLayout.HORIZONTAL);
-            View play = sheetButton(c, primaryStyle(), "播放", new ActionRunnable() {
-                @Override
-                public void run() {
-                    t.open(context);
-                }
-            }, true);
+            View play = sheetButton(c, ButtonStyle.PRIMARY, "播放",
+                    () -> t.open(context), true);
             LinearLayout.LayoutParams playLp = new LinearLayout.LayoutParams(
                     0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
             playLp.rightMargin = ThemeUtils.dp(c, 6);
             row.addView(play, playLp);
-            View share = sheetButton(c, secondaryStyle(), "分享", new ActionRunnable() {
-                @Override
-                public void run() {
-                    t.share(context);
-                }
-            }, true);
+            View share = sheetButton(c, ButtonStyle.SECONDARY, "分享",
+                    () -> t.share(context), true);
             LinearLayout.LayoutParams shareLp = new LinearLayout.LayoutParams(
                     0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
             shareLp.leftMargin = ThemeUtils.dp(c, 6);
             row.addView(share, shareLp);
             box.addView(row);
             box.addView(space(c, 6));
-            addButtons(c, box, sheetButton(c, textStyle(), "完成", null, true));
+            addButtons(c, box, sheetButton(c, ButtonStyle.TEXT, "完成", null, true));
         }
 
         private void buildFailedState(Context c, LinearLayout box,
@@ -1154,19 +1122,13 @@ public final class VideoDownloadHook {
             box.addView(err);
             box.addView(space(c, 12));
             addButtons(c, box,
-                    sheetButton(c, primaryStyle(), "重新下载", new ActionRunnable() {
-                        @Override
-                        public void run() {
-                            VideoDownloadManager.get().resume(url);
-                        }
-                    }, false),
-                    sheetButton(c, textStyle(), "取消", null, true));
+                    sheetButton(c, ButtonStyle.PRIMARY, "重新下载",
+                            () -> VideoDownloadManager.get().resume(url), false),
+                    sheetButton(c, ButtonStyle.TEXT, "取消", null, true));
         }
 
 
-        private interface ActionRunnable {
-            void run();
-        }
+        private enum ButtonStyle { PRIMARY, SECONDARY, TEXT }
 
         private View space(Context c, int dp) {
             View v = new View(c);
@@ -1183,29 +1145,30 @@ public final class VideoDownloadHook {
             return tv;
         }
 
-        private interface StyleFactory {
-            void apply(TextView button);
-        }
-
-        private StyleFactory primaryStyle() {
-            return button -> applyStyle(button, accent,
-                    ThemeUtils.withAlpha(ThemeUtils.readableForegroundOn(accent), 0x33),
-                    ThemeUtils.readableForegroundOn(accent));
-        }
-
-        private StyleFactory secondaryStyle() {
-            return button -> applyStyle(button, ThemeUtils.surfaceVariantColor(context),
-                    ThemeUtils.withAlpha(ThemeUtils.textPrimaryColor(context), 0x1F),
-                    ThemeUtils.textPrimaryColor(context));
-        }
-
-        private StyleFactory textStyle() {
-            return button -> applyStyle(button, Color.TRANSPARENT,
-                    ThemeUtils.withAlpha(ThemeUtils.textPrimaryColor(context), 0x1F),
-                    ThemeUtils.textSecondaryColor(context));
-        }
-
-        private static void applyStyle(TextView button, int bgColor, int rippleOverlay, int textColor) {
+        private void applyStyle(TextView button, ButtonStyle style) {
+            int bgColor;
+            int rippleOverlay;
+            int textColor;
+            switch (style) {
+                case PRIMARY:
+                    bgColor = accent;
+                    rippleOverlay = ThemeUtils.withAlpha(
+                            ThemeUtils.readableForegroundOn(accent), 0x33);
+                    textColor = ThemeUtils.readableForegroundOn(accent);
+                    break;
+                case SECONDARY:
+                    bgColor = ThemeUtils.surfaceVariantColor(context);
+                    rippleOverlay = ThemeUtils.withAlpha(
+                            ThemeUtils.textPrimaryColor(context), 0x1F);
+                    textColor = ThemeUtils.textPrimaryColor(context);
+                    break;
+                default:
+                    bgColor = Color.TRANSPARENT;
+                    rippleOverlay = ThemeUtils.withAlpha(
+                            ThemeUtils.textPrimaryColor(context), 0x1F);
+                    textColor = ThemeUtils.textSecondaryColor(context);
+                    break;
+            }
             GradientDrawable bg = new GradientDrawable();
             bg.setColor(bgColor);
             bg.setCornerRadius(ThemeUtils.dp(button.getContext(), ThemeUtils.RADIUS_BUTTON_DP));
@@ -1214,8 +1177,8 @@ public final class VideoDownloadHook {
         }
 
         /** dismissAfter：true 时执行动作后关闭抽屉（开始/暂停/继续为 false，保持面板查看进度） */
-        private TextView sheetButton(Context c, StyleFactory style, String text,
-                                     final ActionRunnable action, final boolean dismissAfter) {
+        private TextView sheetButton(Context c, ButtonStyle style, String text,
+                                     final Runnable action, final boolean dismissAfter) {
             TextView button = new TextView(c);
             button.setText(text);
             button.setTextSize(15);
@@ -1223,7 +1186,7 @@ public final class VideoDownloadHook {
             button.setMinHeight(ThemeUtils.dp(c, 48));
             button.setClickable(true);
             button.setFocusable(true);
-            style.apply(button);
+            applyStyle(button, style);
             button.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
@@ -1253,20 +1216,10 @@ public final class VideoDownloadHook {
         private void addActiveButtons(Context c, LinearLayout box, boolean primary,
                                       String actionLabel, Runnable primaryAction) {
             addButtons(c, box,
-                    sheetButton(c, primary ? primaryStyle() : secondaryStyle(), actionLabel,
-                            () -> primaryAction.run(), false),
-                    sheetButton(c, textStyle(), "取消下载",
+                    sheetButton(c, primary ? ButtonStyle.PRIMARY : ButtonStyle.SECONDARY,
+                            actionLabel, primaryAction, false),
+                    sheetButton(c, ButtonStyle.TEXT, "取消下载",
                             () -> VideoDownloadManager.get().cancel(url), true));
-        }
-
-        static Activity findActivity(Context context) {
-            while (context instanceof ContextWrapper) {
-                if (context instanceof Activity) {
-                    return (Activity) context;
-                }
-                context = ((ContextWrapper) context).getBaseContext();
-            }
-            return null;
         }
 
         private void removeExisting() {

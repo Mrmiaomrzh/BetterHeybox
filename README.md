@@ -43,6 +43,11 @@
   设置页**「通用设置」行**可打开顶部调节面板，实时调节深/浅底色、不透明度、高度、
   距底部偏移、宽度自适应（选中项加长）等；与底栏隐藏联动，隐藏 tab 后玻璃条同步收缩；
   Android 12 及以下自动回退毛玻璃效果
+- **液态玻璃实现选择**：与独立的「小黑盒液态玻璃」模块共存时，首次打开小黑盒
+  自动弹出选择，可让玻璃效果由该模块提供——本模块的玻璃底栏与长按入口同步让位，
+  避免两条玻璃底栏叠加；选择后仍可在设置面板「液态玻璃提供方」行切换
+- **屏蔽双列信息流**（实验性，仅 1.3.394）：将首页推荐 / 话题 / 百科的
+  双列瀑布流恢复为单列，封面宽高比同步修正回旧单列卡样式
 
 ### 帖子增强
 
@@ -154,6 +159,7 @@ app/src/main/
 │   ├── Checkpoint.java          # Debug 运行检查点
 │   ├── ConfigBackup.java        # 配置导入/导出（JSON）
 │   ├── DexKitResolver.java      # DexKit 自动分析：小黑盒更新后自动定位原生弹窗
+│   ├── GlassProvider.java       # 液态玻璃实现仲裁：与独立玻璃模块共存时选择提供方
 │   ├── VideoDownloadManager.java # 视频下载：任务状态机/断点续传/HLS 分片/转封装/保存/通知
 │   ├── CustomTextSelection.java # 自绘制文本选择（禁用系统选择 API）
 │   ├── PreferenceReceiver.java  # 设置写回广播接收（镜像同步 RemotePreferences）
@@ -163,6 +169,7 @@ app/src/main/
 │       ├── SettingsEntryHook.java # 设置页入口注入 + 内嵌设置面板
 │       ├── BottomTabHook.java   #   底部导航栏隐藏（tab 名版本自适应）
 │       ├── PromotePostHook.java #   推广贴屏蔽
+│       ├── SingleColumnFeedHook.java # 单列信息流：屏蔽双列瀑布流（旧布局 + 首页 Epoxy 配对）
 │       ├── TextSelectHook.java  #   解除复制 / 标准文本选择 / 跨行选择
 │       ├── ImageShareHook.java  #   图片系统分享（优先保存系统相册）
 │       ├── ShareLinkPurifyHook.java # 净化分享链接

@@ -201,15 +201,15 @@ public final class VideoDownloadManager {
     /**
  * 创建下载任务（幂等）：未完成任务重复请求只刷新通知；终态任务重新请求则重置重下
  */
-    public boolean startDownload(String url, Map<String, String> headers, String suggestedName) {
+    public void startDownload(String url, Map<String, String> headers, String suggestedName) {
         if (url == null || !isSupportedUrl(url)) {
-            return false;
+            return;
         }
         String key = taskKey(url);
         DownloadTask task = findTask(url);
         if (task != null && !task.isTerminal()) {
-            task.notifyProgress(-1);
-            return false;
+            task.notifyProgress();
+            return;
         }
         if (task != null) {
             // 终态任务重新下载：清掉旧记录（断点一并清除，从头开始）
@@ -220,7 +220,6 @@ public final class VideoDownloadManager {
         DownloadTask created = new DownloadTask(url, headers, suggestedName);
         created.start();
         notifyChanged();
-        return true;
     }
 
     /** 暂停（保留断点，可续传） */
@@ -247,16 +246,13 @@ public final class VideoDownloadManager {
         }
     }
 
-    /** 移除任务记录；deleteFile 为 true 时同时删除已保存的文件/断点数据 */
-    public void remove(String url, boolean deleteFile) {
+    /** 移除任务记录（已保存文件由通知的删除动作经 ContentResolver 删除） */
+    public void remove(String url) {
         DownloadTask task = findTask(url);
         if (task == null) {
             return;
         }
         task.cancel();
-        if (deleteFile) {
-            task.deleteSavedFile();
-        }
         synchronized (tasks) {
             tasks.remove(task.key);
         }
@@ -339,28 +335,28 @@ public final class VideoDownloadManager {
         });
     }
 
-    public boolean handleAction(Context context, String action, Intent intent) {
+    public void handleAction(Context context, String action, Intent intent) {
         if (action == null || intent == null) {
-            return false;
+            return;
         }
         String url = intent.getStringExtra(EXTRA_URL);
         if (ACTION_CANCEL.equals(action)) {
             if (url != null) {
                 cancel(url);
             }
-            return true;
+            return;
         }
         if (ACTION_PAUSE.equals(action)) {
             if (url != null) {
                 pause(url);
             }
-            return true;
+            return;
         }
         if (ACTION_RETRY.equals(action)) {
             if (url != null) {
                 resume(url);
             }
-            return true;
+            return;
         }
         if (ACTION_DELETE.equals(action)) {
             Uri uri = intent.getParcelableExtra(EXTRA_URI);
@@ -372,11 +368,9 @@ public final class VideoDownloadManager {
                 }
             }
             if (url != null) {
-                remove(url, false);
+                remove(url);
             }
-            return true;
         }
-        return false;
     }
 
 
@@ -530,14 +524,17 @@ public final class VideoDownloadManager {
 
         /** 列表/面板展示标题：帖子标题 > URL 文件名 > 通用名 */
         public String displayTitle() {
+            String n = bestBaseName();
+            return n != null ? n : "视频下载";
+        }
+
+        /** 文件名基础名优先级：帖子标题 > URL 文件名 > null（通用分段名视为无，调用方自定兜底） */
+        private String bestBaseName() {
             String n = cleanName(suggestedName, null);
             if (n == null) {
                 n = nameFromUrl(url);
             }
-            if (isGenericSegmentName(n)) {
-                n = null;
-            }
-            return n != null ? n : "视频下载";
+            return isGenericSegmentName(n) ? null : n;
         }
 
         /** 进度百分比（-1 未知）；HLS 按分段、直链按字节 */
@@ -587,11 +584,7 @@ public final class VideoDownloadManager {
                 return;
             }
             try {
-                Intent i = new Intent(Intent.ACTION_VIEW)
-                        .setDataAndType(uri, mimeForExtension(resultExtension()))
-                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                context.startActivity(i);
+                context.startActivity(buildViewIntent(uri));
             } catch (Throwable t) {
                 Toast.makeText(context, "没有可播放的应用", Toast.LENGTH_SHORT).show();
             }
@@ -604,11 +597,7 @@ public final class VideoDownloadManager {
                 return;
             }
             try {
-                Intent i = new Intent(Intent.ACTION_SEND)
-                        .setType(mimeForExtension(resultExtension()))
-                        .putExtra(Intent.EXTRA_STREAM, uri)
-                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                Intent chooser = Intent.createChooser(i, "分享视频");
+                Intent chooser = Intent.createChooser(buildShareIntent(uri), "分享视频");
                 chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 context.startActivity(chooser);
             } catch (Throwable t) {
@@ -616,12 +605,26 @@ public final class VideoDownloadManager {
             }
         }
 
+        private Intent buildViewIntent(Uri uri) {
+            return new Intent(Intent.ACTION_VIEW)
+                    .setDataAndType(uri, mimeForExtension(resultExtension()))
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        }
+
+        private Intent buildShareIntent(Uri uri) {
+            return new Intent(Intent.ACTION_SEND)
+                    .setType(mimeForExtension(resultExtension()))
+                    .putExtra(Intent.EXTRA_STREAM, uri)
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        }
+
 
         void start() {
             runGeneration++;
             activeTasksPut(this);
             executor.execute(this);
-            notifyProgress(0);
+            notifyProgress();
         }
 
         /** 暂停：保留断点（.part / 已下载分片），可续传。立即转 PAUSED，当前代线程在检查点静默退出 */
@@ -649,7 +652,7 @@ public final class VideoDownloadManager {
             transition(State.DOWNLOADING);
             runGeneration++;
             executor.execute(this);
-            notifyProgress(-1);
+            notifyProgress();
         }
 
         /** 取消：删除断点与半成品；终态 CANCELLED 保留在列表，可重新下载 */
@@ -670,31 +673,6 @@ public final class VideoDownloadManager {
                         }
                     }
                 });
-            }
-        }
-
-        /** 删除已保存的文件（完成态）与断点数据（任意态） */
-        void deleteSavedFile() {
-            deleteTemp();
-            Uri uri = resultUri;
-            if (uri != null) {
-                try {
-                    if ("content".equals(uri.getScheme())) {
-                        appContext.getContentResolver().delete(uri, null, null);
-                    } else {
-                        new File(uri.getPath()).delete();
-                    }
-                } catch (Throwable t) {
-                    moduleLogWarn("删除已保存视频失败", t);
-                }
-                resultUri = null;
-            }
-            if (savedPath != null && savedPath.startsWith("/sdcard/")) {
-                try {
-                    //noinspection ResultOfMethodCallIgnored
-                    new File(savedPath).delete();
-                } catch (Throwable ignored) {
-                }
             }
         }
 
@@ -746,7 +724,7 @@ public final class VideoDownloadManager {
             if (retryCount <= MAX_AUTO_RETRY) {
                 // 自动重试：保留断点续传
                 executor.execute(this);
-                notifyProgress(-1);
+                notifyProgress();
                 return;
             }
             errorMsg = t instanceof java.net.ConnectException
@@ -847,7 +825,7 @@ public final class VideoDownloadManager {
                             updateSpeed(now, tickAt, tickBytes);
                             tickAt = now;
                             tickBytes = downloaded;
-                            notifyProgress(-1);
+                            notifyProgress();
                         }
                     }
                 }
@@ -924,7 +902,7 @@ public final class VideoDownloadManager {
                         updateSpeed(now, tickAt, tickBytes);
                         tickAt = now;
                         tickBytes = bytes;
-                        notifyProgress(-1);
+                        notifyProgress();
                     }
                 }
                 // 按序合并为单个 MPEG-TS（ts 顺序拼接即可播放，无需 ffmpeg）。
@@ -1001,16 +979,10 @@ public final class VideoDownloadManager {
                 handleFailure(new IllegalStateException("Context 未初始化"));
                 return;
             }
-            String ext = extensionFromUrl(url);
-            if (ext == null && resolvedExt != null) {
-                ext = resolvedExt;
-            }
-            if (ext == null) {
-                ext = "mp4";
-            }
+            String ext = resultExtension();
             // HLS 合并产物是 ts：按设置自动转封装为 MP4（无转码；失败保留 ts）
             if ("ts".equals(ext) && HeyboxPrefs.getBoolean(App.KEY_VIDEO_TO_MP4, true)) {
-                notifyProgress(-1);
+                notifyProgress();
                 File mp4 = remuxTsToMp4(tmp);
                 if (cancelled.get() || pauseRequested.get()) {
                     return;
@@ -1025,13 +997,7 @@ public final class VideoDownloadManager {
                 }
             }
             // 文件名优先级：视频帖子标题（捕获侧传入）> URL 文件名 > 时间戳
-            String base = cleanName(suggestedName, null);
-            if (base == null) {
-                base = nameFromUrl(url);
-            }
-            if (isGenericSegmentName(base)) {
-                base = null;
-            }
+            String base = bestBaseName();
             if (base == null) {
                 base = "heybox_video_" + System.currentTimeMillis();
             }
@@ -1116,22 +1082,13 @@ public final class VideoDownloadManager {
                 Uri parent = android.provider.DocumentsContract.buildDocumentUriUsingTree(
                         treeUri, android.provider.DocumentsContract.getTreeDocumentId(treeUri));
                 ContentResolver resolver = context.getContentResolver();
-                Uri doc = null;
-                String candidate = fileName;
-                int dot = fileName.lastIndexOf('.');
-                String base = dot > 0 ? fileName.substring(0, dot) : fileName;
-                String ext = dot > 0 ? fileName.substring(dot) : "";
-                for (int i = 0; i < 100 && doc == null; i++) {
-                    try {
-                        doc = android.provider.DocumentsContract.createDocument(
-                                resolver, parent, mime, candidate);
-                    } catch (Throwable t) {
-                        doc = null;
-                    }
-                    if (doc == null && i >= 1) {
-                        break;
-                    }
-                    candidate = base + "(" + (i + 1) + ")" + ext;
+                // 重名时尝试一次 base(1) 后缀；SAF provider 自身也会对冲突名追加后缀
+                Uri doc = createTreeDocument(resolver, parent, mime, fileName);
+                if (doc == null) {
+                    int dot = fileName.lastIndexOf('.');
+                    String base = dot > 0 ? fileName.substring(0, dot) : fileName;
+                    String ext = dot > 0 ? fileName.substring(dot) : "";
+                    doc = createTreeDocument(resolver, parent, mime, base + "(1)" + ext);
                 }
                 if (doc == null) {
                     return null;
@@ -1153,6 +1110,17 @@ public final class VideoDownloadManager {
                 return doc;
             } catch (Throwable t) {
                 moduleLogWarn("写入所选文件夹失败", t);
+                return null;
+            }
+        }
+
+        /** createDocument 的静默版：异常按失败处理 */
+        private static Uri createTreeDocument(ContentResolver resolver, Uri parent,
+                                              String mime, String name) {
+            try {
+                return android.provider.DocumentsContract.createDocument(
+                        resolver, parent, mime, name);
+            } catch (Throwable t) {
                 return null;
             }
         }
@@ -1339,10 +1307,7 @@ public final class VideoDownloadManager {
             }
         }
 
-        private void notifyProgress(long downloadedNow) {
-            if (downloadedNow >= 0) {
-                downloaded = downloadedNow;
-            }
+        private void notifyProgress() {
             notifyChanged(); // 实时刷新
             if (!notifAllowed()) {
                 return;
@@ -1413,20 +1378,12 @@ public final class VideoDownloadManager {
         }
 
         private PendingIntent openPendingIntent(Uri uri) {
-            Intent i = new Intent(Intent.ACTION_VIEW)
-                    .setDataAndType(uri, mimeForExtension(resultExtension()))
-                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            return PendingIntent.getActivity(context(), id(), i,
+            return PendingIntent.getActivity(context(), id(), buildViewIntent(uri),
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         }
 
         private PendingIntent sharePendingIntent(Uri uri) {
-            Intent i = new Intent(Intent.ACTION_SEND)
-                    .setType(mimeForExtension(resultExtension()))
-                    .putExtra(Intent.EXTRA_STREAM, uri)
-                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            Intent chooser = Intent.createChooser(i, "分享视频");
+            Intent chooser = Intent.createChooser(buildShareIntent(uri), "分享视频");
             chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             return PendingIntent.getActivity(context(), id() + 1, chooser,
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
@@ -1600,9 +1557,6 @@ public final class VideoDownloadManager {
 
 
     private void ensureChannel(Context context) {
-        if (Build.VERSION.SDK_INT < 26) {
-            return;
-        }
         try {
             NotificationManager nm = (NotificationManager) context.getSystemService(
                     Context.NOTIFICATION_SERVICE);
@@ -1623,12 +1577,7 @@ public final class VideoDownloadManager {
     private Notification.Builder buildBase(String title) {
         Context context = appContext;
         ensureChannel(context);
-        Notification.Builder builder;
-        if (Build.VERSION.SDK_INT >= 26) {
-            builder = new Notification.Builder(context, CHANNEL_ID_DOWNLOADS);
-        } else {
-            builder = new Notification.Builder(context);
-        }
+        Notification.Builder builder = new Notification.Builder(context, CHANNEL_ID_DOWNLOADS);
         // 必须设置 smallIcon，否则 NotificationManager 直接拒收（no valid small icon）
         builder.setSmallIcon(android.R.drawable.stat_sys_download);
         builder.setContentTitle(title);
@@ -1672,13 +1621,7 @@ public final class VideoDownloadManager {
                     o.put("uri", t.resultUri != null ? t.resultUri.toString() : "");
                     o.put("total", t.total);
                     o.put("at", t.createdAt);
-                    JSONArray hs = new JSONArray();
-                    for (Map.Entry<String, String> e : t.headers.entrySet()) {
-                        if (e.getKey() != null && e.getValue() != null) {
-                            hs.put(e.getKey() + "\u0001" + e.getValue());
-                        }
-                    }
-                    o.put("headers", hs);
+                    o.put("headers", new JSONObject(t.headers));
                     arr.put(o);
                 }
             }
@@ -1712,13 +1655,23 @@ public final class VideoDownloadManager {
                         st = State.PAUSED; // 进程被杀时的瞬态归档为暂停
                     }
                     Map<String, String> headers = new HashMap<>();
-                    JSONArray hs = o.optJSONArray("headers");
+                    JSONObject hs = o.optJSONObject("headers");
                     if (hs != null) {
-                        for (int j = 0; j < hs.length(); j++) {
-                            String pair = hs.optString(j, "");
-                            int sep = pair.indexOf('\u0001');
-                            if (sep > 0) {
-                                headers.put(pair.substring(0, sep), pair.substring(sep + 1));
+                        java.util.Iterator<String> keys = hs.keys();
+                        while (keys.hasNext()) {
+                            String k = keys.next();
+                            headers.put(k, hs.optString(k));
+                        }
+                    } else {
+                        // 旧格式：["k\u0001v", ...] 字符串数组
+                        JSONArray legacy = o.optJSONArray("headers");
+                        if (legacy != null) {
+                            for (int j = 0; j < legacy.length(); j++) {
+                                String pair = legacy.optString(j, "");
+                                int sep = pair.indexOf('\u0001');
+                                if (sep > 0) {
+                                    headers.put(pair.substring(0, sep), pair.substring(sep + 1));
+                                }
                             }
                         }
                     }

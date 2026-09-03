@@ -36,12 +36,8 @@ final class LiquidGlassHostLayout extends FrameLayout {
     private int mCaptureCount;
 
     private final boolean mUseAgsl;
-    interface GlassTuner {
-        void onSize(int w, int h, float cornerRadius);
-        void onTheme(boolean dark);
-    }
 
-    private GlassTuner mTuner;
+    private boolean mExternalRenderer;
 
     private final Paint mBackdropPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint mTintPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -70,11 +66,11 @@ final class LiquidGlassHostLayout extends FrameLayout {
                         + " dark=" + mDarkMode + " source=uiMode");
     }
 
-    void setGlassTuner(GlassTuner tuner) {
-        mTuner = tuner;
+    /** QWEA0 渲染器接管后关闭 frost 采样与自绘（唯一实现场景：API 33+ 玻璃底栏） */
+    void setExternalRendererActive(boolean active) {
+        mExternalRenderer = active;
     }
 
-    @SuppressWarnings("unused")
     private static boolean isSystemNight(Context context) {
         int mode = context.getResources().getConfiguration().uiMode
                 & Configuration.UI_MODE_NIGHT_MASK;
@@ -141,8 +137,7 @@ final class LiquidGlassHostLayout extends FrameLayout {
         super.onSizeChanged(w, h, oldw, oldh);
         mBounds.set(0f, 0f, w, h);
         mCornerRadius = Math.min(h * 0.46f, 30f * mDensity);
-        if (mTuner != null) {
-            mTuner.onSize(w, h, mCornerRadius);
+        if (mExternalRenderer) {
             return;
         }
         if (!mUseAgsl) {
@@ -158,7 +153,7 @@ final class LiquidGlassHostLayout extends FrameLayout {
         try {
             mCapturing = true;
             maybeRefreshTheme();
-            if (mTuner != null) {
+            if (mExternalRenderer) {
                 return;
             }
             int w = getWidth();
@@ -233,9 +228,6 @@ final class LiquidGlassHostLayout extends FrameLayout {
         }
         if (detected != mDarkMode) {
             mDarkMode = detected;
-            if (mTuner != null) {
-                mTuner.onTheme(mDarkMode);
-            }
             setupPaints();
             invalidate();
             LiquidGlassLog.log(android.util.Log.INFO,
@@ -254,7 +246,7 @@ final class LiquidGlassHostLayout extends FrameLayout {
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
-        if (mTuner != null) {
+        if (mExternalRenderer) {
             return;
         }
         if (getWidth() <= 0 || getHeight() <= 0) {

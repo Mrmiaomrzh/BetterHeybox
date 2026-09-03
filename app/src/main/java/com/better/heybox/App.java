@@ -98,6 +98,12 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
 
     public static final String KEY_GLASS_FIT_TABS = "glass_fit_tabs";
 
+    /** 液态玻璃提供方：GlassProvider.PROVIDER_*；空串为未选择（默认自带实现） */
+    public static final String KEY_GLASS_PROVIDER = "glass_provider";
+
+    /** 实验性功能：屏蔽双列瀑布流（社区信息流恢复单列，仅 1.3.394 生效） */
+    public static final String KEY_SINGLE_COLUMN_FEED = "single_column_feed";
+
     /** 参考项目玻璃颜色预设/透明度/布局参数 */
     public static final String KEY_GLASS_DARK_PRESET = "glass_dark_preset";
     public static final String KEY_GLASS_LIGHT_PRESET = "glass_light_preset";
@@ -137,6 +143,7 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
         m.put(KEY_GLASS_IMMERSIVE, true);
         m.put(KEY_GLASS_ADAPTIVE, true);
         m.put(KEY_GLASS_FIT_TABS, false);
+        m.put(KEY_SINGLE_COLUMN_FEED, false);
         return m;
     }
 

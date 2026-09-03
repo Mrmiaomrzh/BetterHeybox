@@ -7,7 +7,6 @@ import android.content.ContentResolver;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.net.Uri;
 import android.text.InputType;
 import android.util.Log;
@@ -35,7 +34,9 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.List;
 import java.util.Locale;
 
 import com.better.heybox.App;
@@ -43,10 +44,12 @@ import com.better.heybox.BuildFlags;
 import com.better.heybox.Checkpoint;
 import com.better.heybox.ConfigBackup;
 import com.better.heybox.DexKitResolver;
+import com.better.heybox.GlassProvider;
 import com.better.heybox.HeyboxPrefs;
 import com.better.heybox.LogExport;
 import com.better.heybox.LogRecorder;
 import com.better.heybox.ThemeUtils;
+import com.better.heybox.VersionUtils;
 import com.better.heybox.VideoDownloadManager;
 import com.better.heybox.MainModule;
 import com.better.heybox.PreferenceReceiver;
@@ -54,19 +57,45 @@ import com.better.heybox.PreferenceReceiver;
 public final class SettingsEntryHook {
 
     private final MainModule module;
-    private static volatile SettingsEntryHook sInstance;
 
     public SettingsEntryHook(MainModule module) {
         this.module = module;
-        sInstance = this;
     }
 
     public void install(ClassLoader cl) {
         hookSettingsEntry(cl);
+        hookLaunchPrompt(cl);
+    }
+
+    /** 首次检测到独立液态玻璃模块且未做选择时，小黑盒打开即弹实现选择（每次进程启动至多一次） */
+    private static volatile boolean sLaunchPromptShown;
+
+    private void hookLaunchPrompt(ClassLoader cl) {
+        try {
+            Class<?> main = Class.forName("com.max.xiaoheihe.MainActivity", false, cl);
+            Method onCreate = main.getDeclaredMethod("onCreate", android.os.Bundle.class);
+            module.hook(onCreate).intercept(chain -> {
+                Object result = chain.proceed();
+                try {
+                    Object self = chain.getThisObject();
+                    if (self instanceof Activity) {
+                        final Activity activity = (Activity) self;
+                        // 等首帧渲染完成再弹，避免盖在启动画面上
+                        activity.getWindow().getDecorView().postDelayed(
+                                () -> maybePromptGlassProvider(activity), 1000L);
+                    }
+                } catch (Throwable t) {
+                    module.logd(Log.WARN, module.TAG, "液态玻璃实现启动提示调度失败: " + t);
+                }
+                return result;
+            });
+            module.logd(Log.INFO, module.TAG, "✔ 液态玻璃实现启动提示 Hook 已安装");
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "液态玻璃实现启动提示 Hook 失败: " + t);
+        }
     }
 
     private static final String ENTRY_TAG = "betterheybox_entry";
-    private static final String EMBEDDED_SETTINGS_TAG = "betterheybox_embedded_settings";
 
     private static final int REQUEST_EMBEDDED_EXPORT = 0x4248;
     private static final int REQUEST_EMBEDDED_IMPORT = 0x4249;
@@ -83,7 +112,7 @@ public final class SettingsEntryHook {
 
     enum Action {
         NONE, EDIT_LINK, CLEAR_DAILY, CHANNEL, EXPORT, IMPORT,
-        EXPORT_LOG, RUNTIME_STATUS, OPEN_WEB, PICK_DIR, RESET_GLASS
+        EXPORT_LOG, RUNTIME_STATUS, OPEN_WEB, PICK_DIR, RESET_GLASS, CHOOSE_GLASS
     }
 
     private static class SwitchDef {
@@ -156,19 +185,6 @@ public final class SettingsEntryHook {
                     new SwitchDef("分享渠道", null, App.KEY_SHARE_CHANNEL, false, false, true, null, Action.CHANNEL),
                     new SwitchDef("清除今日打卡", null, null, false, false, true, null, Action.CLEAR_DAILY),
             }),
-            new SettingsGroup("液态玻璃", new SwitchDef[]{
-                    new SwitchDef("液态玻璃底栏", "在底部导航显示液态玻璃效果（需重启小黑盒）", App.KEY_LIQUID_GLASS, true, true),
-                    new SwitchDef("沉浸式小白条", "让底栏延伸到系统手势区域", App.KEY_GLASS_IMMERSIVE, true, false),
-                    new SwitchDef("自适应反色", "标签文字与图标随背景亮度切换黑白", App.KEY_GLASS_ADAPTIVE, true, false),
-                    new SwitchDef("玻璃宽度自适应", "隐藏标签后底栏宽度随可见标签数收缩", App.KEY_GLASS_FIT_TABS, false, false),
-                    new SwitchDef("暗色模式底色", "输入颜色值，例如 #000000", null, false, false, true, App.KEY_GLASS_DARK_COLOR),
-                    new SwitchDef("暗色模式不透明度", "输入 5-98 的百分比", null, false, false, true, App.KEY_GLASS_DARK_ALPHA),
-                    new SwitchDef("亮色模式底色", "输入颜色值，例如 #FFFFFF", null, false, false, true, App.KEY_GLASS_LIGHT_COLOR),
-                    new SwitchDef("亮色模式不透明度", "输入 5-98 的百分比", null, false, false, true, App.KEY_GLASS_LIGHT_ALPHA),
-                    new SwitchDef("玻璃条高度", "输入 0 为自动，或 51-99 dp", null, false, false, true, App.KEY_GLASS_BAR_HEIGHT),
-                    new SwitchDef("距屏幕底部", "输入 0-40 dp", null, false, false, true, App.KEY_GLASS_BAR_OFFSET),
-                    new SwitchDef("恢复液态玻璃默认设置", "恢复参考项目的默认外观与布局参数", null, false, false, true, null, Action.RESET_GLASS),
-            }),
             new SettingsGroup("通用", new SwitchDef[]{
                     new SwitchDef("伪装通知权限", "让小黑盒认为通知已开启，获得签到加成", App.KEY_FAKE_NOTIFICATION, false, false),
                     new SwitchDef("屏蔽更新", "屏蔽小黑盒更新入口", App.KEY_BLOCK_UPDATE, false, false),
@@ -195,33 +211,90 @@ public final class SettingsEntryHook {
         });
     }
 
-    private static SettingsGroup[] getSettingsGroups(Activity activity) {
-        SettingsGroup[] base = BASE_GROUPS;
-        if (BuildFlags.DEBUG) {
-            base = withRuntimeStatusGroup(base);
+    /** 「通用」分组标题（BASE_GROUPS 中的插入定位点，勿随意改名） */
+    private static final String TITLE_GENERAL = "通用";
+    /** 实验性功能（屏蔽双列）目标构建：1.3.394 (1127)，其余版本不显示开关 */
+    private static final String EXPERIMENTAL_HEYBOX_VERSION = "1.3.394";
+    private static final long EXPERIMENTAL_HEYBOX_CODE = 1127L;
+
+    /** 顺序组装全部分组：底部导航栏隐藏置顶 → BASE_GROUPS → 运行状态行（Debug）→ 液态玻璃插到「通用」前 → 实验组 */
+    private List<SettingsGroup> buildSettingsGroups(Activity activity) {
+        List<SettingsGroup> groups = new ArrayList<>();
+        groups.add(buildBottomTabGroup(activity));
+        for (SettingsGroup g : BASE_GROUPS) {
+            groups.add(g);
         }
-        SettingsGroup[] all = new SettingsGroup[base.length + 1];
-        all[0] = buildBottomTabGroup(activity);
-        System.arraycopy(base, 0, all, 1, base.length);
-        return all;
+        if (BuildFlags.DEBUG) {
+            addRuntimeStatusRow(groups);
+        }
+        SettingsGroup glass = buildGlassGroup(activity);
+        if (glass != null) {
+            int insertAt = groups.size();
+            for (int i = 0; i < groups.size(); i++) {
+                if (TITLE_GENERAL.equals(groups.get(i).title)) {
+                    insertAt = i;
+                    break;
+                }
+            }
+            groups.add(insertAt, glass);
+        }
+        if (VersionUtils.isHeyboxBuild(activity, EXPERIMENTAL_HEYBOX_VERSION,
+                EXPERIMENTAL_HEYBOX_CODE)) {
+            groups.add(new SettingsGroup("实验性功能", new SwitchDef[]{
+                    new SwitchDef("屏蔽双列信息流",
+                            "将首页推荐/话题/百科信息流从双列样式恢复为单列", App.KEY_SINGLE_COLUMN_FEED, false, false),
+            }));
+        }
+        return groups;
     }
 
-    private static SettingsGroup[] withRuntimeStatusGroup(SettingsGroup[] groups) {
-        SettingsGroup[] out = new SettingsGroup[groups.length];
-        for (int i = 0; i < groups.length; i++) {
-            SettingsGroup g = groups[i];
-            if ("通用".equals(g.title)) {
+    /**
+     * 液态玻璃分组动态组装：提供方切换行仅在检测到独立模块（或已做过选择）时出现，
+     * 自带玻璃各选项仅在自带实现生效时出现，避免选外部模块后残留无效选项
+     */
+    private SettingsGroup buildGlassGroup(Activity activity) {
+        boolean switchable = GlassProvider.isHbmodInstalled(activity)
+                || GlassProvider.prefersHbmod(module);
+        boolean ownGlass = !GlassProvider.prefersHbmod(module);
+        List<SwitchDef> rows = new ArrayList<>();
+        if (switchable) {
+            String label = GlassProvider.providerLabel(
+                    module.getString(App.KEY_GLASS_PROVIDER, ""));
+            rows.add(new SwitchDef("液态玻璃提供方",
+                    "当前：" + label + "，点击切换", null, false, false, true, null, Action.CHOOSE_GLASS));
+        }
+        if (ownGlass) {
+            rows.add(new SwitchDef("液态玻璃底栏", "在底部导航显示液态玻璃效果（需重启小黑盒）", App.KEY_LIQUID_GLASS, true, true));
+            rows.add(new SwitchDef("沉浸式小白条", "让底栏延伸到系统手势区域", App.KEY_GLASS_IMMERSIVE, true, false));
+            rows.add(new SwitchDef("自适应反色", "标签文字与图标随背景亮度切换黑白", App.KEY_GLASS_ADAPTIVE, true, false));
+            rows.add(new SwitchDef("玻璃宽度自适应", "隐藏标签后底栏宽度随可见标签数收缩", App.KEY_GLASS_FIT_TABS, false, false));
+            rows.add(new SwitchDef("暗色模式底色", "输入颜色值，例如 #000000", null, false, false, true, App.KEY_GLASS_DARK_COLOR));
+            rows.add(new SwitchDef("暗色模式不透明度", "输入 5-98 的百分比", null, false, false, true, App.KEY_GLASS_DARK_ALPHA));
+            rows.add(new SwitchDef("亮色模式底色", "输入颜色值，例如 #FFFFFF", null, false, false, true, App.KEY_GLASS_LIGHT_COLOR));
+            rows.add(new SwitchDef("亮色模式不透明度", "输入 5-98 的百分比", null, false, false, true, App.KEY_GLASS_LIGHT_ALPHA));
+            rows.add(new SwitchDef("玻璃条高度", "输入 0 为自动，或 51-99 dp", null, false, false, true, App.KEY_GLASS_BAR_HEIGHT));
+            rows.add(new SwitchDef("距屏幕底部", "输入 0-40 dp", null, false, false, true, App.KEY_GLASS_BAR_OFFSET));
+            rows.add(new SwitchDef("恢复液态玻璃默认设置", "恢复参考项目的默认外观与布局参数", null, false, false, true, null, Action.RESET_GLASS));
+        }
+        if (rows.isEmpty()) {
+            return null;
+        }
+        return new SettingsGroup("液态玻璃", rows.toArray(new SwitchDef[0]));
+    }
+
+    private static void addRuntimeStatusRow(List<SettingsGroup> groups) {
+        for (int i = 0; i < groups.size(); i++) {
+            SettingsGroup g = groups.get(i);
+            if (TITLE_GENERAL.equals(g.title)) {
                 SwitchDef[] items = new SwitchDef[g.items.length + 1];
                 System.arraycopy(g.items, 0, items, 0, g.items.length);
                 items[g.items.length] = new SwitchDef(
                         "运行状态", "查看模块运行检查点", null, false, false,
                         true, null, Action.RUNTIME_STATUS);
-                out[i] = new SettingsGroup(g.title, items);
-            } else {
-                out[i] = g;
+                groups.set(i, new SettingsGroup(g.title, items));
+                return;
             }
         }
-        return out;
     }
     private void hookSettingsEntry(ClassLoader cl) {
         try {
@@ -397,6 +470,24 @@ public final class SettingsEntryHook {
         return null;
     }
 
+    /** 原生确认弹窗正文：主文字色 + 弹窗内边距（保存位置/导入确认共用） */
+    private TextView buildDialogMessage(Activity activity, String text) {
+        TextView message = new TextView(activity);
+        int pad = module.dp(activity, 10);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(0, pad, 0, pad * 2);
+        message.setLayoutParams(lp);
+        message.setPadding(pad, pad, pad, pad);
+        message.setText(text);
+        message.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        int textColor = hostColor(activity, "color_text_primary_day_night", 0);
+        if (textColor != 0) {
+            message.setTextColor(textColor);
+        }
+        return message;
+    }
+
     private void withHeyboxDialog(Activity activity, NativeDialogCall nativeCall, Runnable fallback) {
         DexKitResolver.getHeyboxDialogSpec(module, activity, new DexKitResolver.SpecCallback() {
             @Override
@@ -434,20 +525,8 @@ public final class SettingsEntryHook {
 
     private void showSaveDirDialogNative(final Activity activity, final String current,
                                          DexKitResolver.HeyboxDialogSpec spec) throws Exception {
-        TextView message = new TextView(activity);
-        int pad = module.dp(activity, 10);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.setMargins(0, pad, 0, pad * 2);
-        message.setLayoutParams(lp);
-        message.setPadding(pad, pad, pad, pad);
-        message.setText("当前：" + describeSaveDir(activity, current)
+        TextView message = buildDialogMessage(activity, "当前：" + describeSaveDir(activity, current)
                 + "\n\n默认位置为相册 Movies/BetterHeybox");
-        message.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        int textColor = hostColor(activity, "color_text_primary_day_night", 0);
-        if (textColor != 0) {
-            message.setTextColor(textColor);
-        }
         DialogInterface.OnClickListener pick = (d, w) -> {
             d.dismiss();
             startDirPicker(activity);
@@ -656,22 +735,8 @@ public final class SettingsEntryHook {
         try {
             dismissEmbeddedSettings();
             HeyboxPrefs.init(activity);
-            int appbarBg = 0xFFFFFFFF;
-            int pageBg = 0xFFFFFFFF;
-            int appbarBgId = hostResId(activity, "appbar_bg_color", "color", 0);
-            if (appbarBgId != 0) {
-                try {
-                    appbarBg = activity.getResources().getColor(appbarBgId);
-                } catch (Throwable ignored) {
-                }
-            }
-            int pageBgId = hostResId(activity, "color_bg_subtle_day_night", "color", 0);
-            if (pageBgId != 0) {
-                try {
-                    pageBg = activity.getResources().getColor(pageBgId);
-                } catch (Throwable ignored) {
-                }
-            }
+            int appbarBg = hostColor(activity, "appbar_bg_color", 0xFFFFFFFF);
+            int pageBg = hostColor(activity, "color_bg_subtle_day_night", 0xFFFFFFFF);
 
             int statusBarH = 0;
             try {
@@ -687,7 +752,6 @@ public final class SettingsEntryHook {
 
             FrameLayout overlay = new FrameLayout(activity);
             overlay.setBackgroundColor(pageBg);
-            overlay.setTag(EMBEDDED_SETTINGS_TAG);
             overlay.setClickable(true);
             overlay.setFocusable(true);
             overlay.setFocusableInTouchMode(true);
@@ -715,7 +779,7 @@ public final class SettingsEntryHook {
             scroller.addView(box);
             page.addView(scroller);
 
-            for (SettingsGroup group : getSettingsGroups(activity)) {
+            for (SettingsGroup group : buildSettingsGroups(activity)) {
                 View card = buildSectionCard(activity, cl, group);
                 if (card != null) {
                     box.addView(card);
@@ -769,15 +833,7 @@ public final class SettingsEntryHook {
                     + (displayVersion == null ? "unknown" : displayVersion));
             footer.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12);
             footer.setGravity(android.view.Gravity.CENTER);
-            int footerColor = 0xFF8A8A8A;
-            int footerColorId = hostResId(activity, "color_text_tertiary_day_night", "color", 0);
-            if (footerColorId != 0) {
-                try {
-                    footerColor = activity.getResources().getColor(footerColorId);
-                } catch (Throwable ignored) {
-                }
-            }
-            footer.setTextColor(footerColor);
+            footer.setTextColor(hostColor(activity, "color_text_tertiary_day_night", 0xFF8A8A8A));
             LinearLayout.LayoutParams footerLp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             int fm = module.dp(activity, 16);
@@ -830,15 +886,7 @@ public final class SettingsEntryHook {
             groupTitle.setText(group.title);
             int titleSize = module.dp(activity, 13);
             groupTitle.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, titleSize);
-            int titleColor = 0xFF8A8A8A;
-            int titleColorId = hostResId(activity, "color_text_tertiary_day_night", "color", 0);
-            if (titleColorId != 0) {
-                try {
-                    titleColor = activity.getResources().getColor(titleColorId);
-                } catch (Throwable ignored) {
-                }
-            }
-            groupTitle.setTextColor(titleColor);
+            groupTitle.setTextColor(hostColor(activity, "color_text_tertiary_day_night", 0xFF8A8A8A));
             groupTitle.setGravity(android.view.Gravity.CENTER_VERTICAL);
             LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -937,6 +985,9 @@ public final class SettingsEntryHook {
                         break;
                     case RESET_GLASS:
                         setRowClick(itemCls, item, v -> resetLiquidGlassSettings(activity));
+                        break;
+                    case CHOOSE_GLASS:
+                        setRowClick(itemCls, item, v -> showGlassProviderDialog(activity));
                         break;
                     case EDIT_LINK:
                     default:
@@ -1048,86 +1099,166 @@ public final class SettingsEntryHook {
                 () -> showChannelDialogFallback(activity));
     }
 
-    private void showChannelDialogNative(final Activity activity, DexKitResolver.HeyboxDialogSpec spec)
-            throws Exception {
-        final String[] channels = SHARE_CHANNELS;
-        final String[] labels = SHARE_CHANNEL_LABELS;
-        String cur = module.getString(App.KEY_SHARE_CHANNEL, "QQ");
-        final int checked = "WECHAT".equals(cur) ? 1 : ("WEIBO".equals(cur) ? 2 : 0);
+    /** 原生弹窗选项行列表：TextView 纵排、当前项高亮（分享渠道/玻璃提供方共用） */
+    private LinearLayout buildOptionRowList(Activity activity, String[] labels, int checked) {
         LinearLayout list = new LinearLayout(activity);
         list.setOrientation(LinearLayout.VERTICAL);
         int pad = module.dp(activity, 8);
         list.setPadding(pad, pad, pad, pad);
         for (int i = 0; i < labels.length; i++) {
-            final int index = i;
             TextView row = new TextView(activity);
             row.setText(labels[i]);
             row.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
             row.setGravity(Gravity.CENTER_VERTICAL);
             row.setPadding(pad, module.dp(activity, 14), pad, module.dp(activity, 14));
-            int rowColor = hostColor(activity,
-                    index == checked ? "color_text_link_day_night" : "color_text_primary_day_night",
-                    index == checked ? 0xFF1677FF : 0xFF333333);
-            row.setTextColor(rowColor);
+            row.setTextColor(hostColor(activity,
+                    i == checked ? "color_text_link_day_night" : "color_text_primary_day_night",
+                    i == checked ? 0xFF1677FF : 0xFF333333));
             row.setClickable(true);
             row.setFocusable(true);
             list.addView(row, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         }
-        Dialog dialog = spec.buildAndShow(activity, "分享渠道", list, null, null,
-                "取消", (d, w) -> d.dismiss());
-        for (int i = 0; i < labels.length; i++) {
+        return list;
+    }
+
+    /** 选项行点击绑定：回调后统一 dismiss */
+    private interface OptionPick {
+        void pick(int index);
+    }
+
+    private void bindOptionRows(Dialog dialog, LinearLayout list, OptionPick onPick) {
+        for (int i = 0; i < list.getChildCount(); i++) {
             final int index = i;
-            View row = list.getChildAt(i);
-            row.setOnClickListener(v -> {
-                try {
-                    HeyboxPrefs.init(activity);
-                    HeyboxPrefs.setString(App.KEY_SHARE_CHANNEL, channels[index]);
-                    LogRecorder.recordEvent("分享渠道已选择: " + channels[index]);
-                    Toast.makeText(activity, "分享渠道已设为 " + labels[index],
-                            Toast.LENGTH_SHORT).show();
-                } catch (Throwable t) {
-                    module.logd(Log.WARN, module.TAG, "保存分享渠道失败: " + t);
-                }
+            list.getChildAt(i).setOnClickListener(v -> {
+                onPick.pick(index);
                 try {
                     dialog.dismiss();
                 } catch (Throwable ignored) {
                 }
             });
         }
-        module.logd(Log.INFO, module.TAG, "✔ 使用小黑盒原生弹窗选择分享渠道");
     }
-    private void showChannelDialogFallback(final Activity activity) {
-        final String[] channels = SHARE_CHANNELS;
-        final String[] labels = SHARE_CHANNEL_LABELS;
-        String cur = module.getString(App.KEY_SHARE_CHANNEL, "QQ");
-        int checked = "WECHAT".equals(cur) ? 1 : ("WEIBO".equals(cur) ? 2 : 0);
+
+    /** 系统弹窗兜底的单选列表（原生框解析失败时） */
+    private void showSingleChoiceFallback(final Activity activity, String title,
+                                          String[] labels, int checked, OptionPick onPick) {
         try {
             new AlertDialog.Builder(activity)
-                    .setTitle("分享渠道")
+                    .setTitle(title)
                     .setSingleChoiceItems(labels, checked, (dialog, which) -> {
-                        try {
-                            HeyboxPrefs.init(activity);
-                            HeyboxPrefs.setString(App.KEY_SHARE_CHANNEL, channels[which]);
-                            LogRecorder.recordEvent("分享渠道已选择: " + channels[which]);
-                            Toast.makeText(activity, "分享渠道已设为 " + labels[which],
-                                    Toast.LENGTH_SHORT).show();
-                        } catch (Throwable t) {
-                            module.logd(Log.WARN, module.TAG, "保存分享渠道失败: " + t);
-                        }
+                        onPick.pick(which);
                         dialog.dismiss();
                     })
                     .setNegativeButton("取消", null)
                     .show();
         } catch (Throwable t) {
-            module.logd(Log.WARN, module.TAG, "分享渠道选择弹框失败: " + t);
+            module.logd(Log.WARN, module.TAG, "单选弹框失败(" + title + "): " + t);
         }
+    }
+
+    private void applyShareChannel(Activity activity, int index) {
+        try {
+            HeyboxPrefs.init(activity);
+            HeyboxPrefs.setString(App.KEY_SHARE_CHANNEL, SHARE_CHANNELS[index]);
+            LogRecorder.recordEvent("分享渠道已选择: " + SHARE_CHANNELS[index]);
+            Toast.makeText(activity, "分享渠道已设为 " + SHARE_CHANNEL_LABELS[index],
+                    Toast.LENGTH_SHORT).show();
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "保存分享渠道失败: " + t);
+        }
+    }
+
+    private void showChannelDialogNative(final Activity activity, DexKitResolver.HeyboxDialogSpec spec)
+            throws Exception {
+        String cur = module.getString(App.KEY_SHARE_CHANNEL, "QQ");
+        final int checked = "WECHAT".equals(cur) ? 1 : ("WEIBO".equals(cur) ? 2 : 0);
+        LinearLayout list = buildOptionRowList(activity, SHARE_CHANNEL_LABELS, checked);
+        Dialog dialog = spec.buildAndShow(activity, "分享渠道", list, null, null,
+                "取消", (d, w) -> d.dismiss());
+        bindOptionRows(dialog, list, index -> applyShareChannel(activity, index));
+        module.logd(Log.INFO, module.TAG, "✔ 使用小黑盒原生弹窗选择分享渠道");
+    }
+
+    private void showChannelDialogFallback(final Activity activity) {
+        String cur = module.getString(App.KEY_SHARE_CHANNEL, "QQ");
+        int checked = "WECHAT".equals(cur) ? 1 : ("WEIBO".equals(cur) ? 2 : 0);
+        showSingleChoiceFallback(activity, "分享渠道", SHARE_CHANNEL_LABELS, checked,
+                index -> applyShareChannel(activity, index));
     }
 
     private static final String DEFAULT_WEBVIEW_ENTRY_URL = "https://github.com/Mrmiaomrzh/BetterHeybox";
 
     private static final String[] SHARE_CHANNELS = {"QQ", "WECHAT", "WEIBO"};
     private static final String[] SHARE_CHANNEL_LABELS = {"QQ / QQ空间", "微信 / 朋友圈", "微博"};
+
+    private static final String[] GLASS_PROVIDER_VALUES = {
+            GlassProvider.PROVIDER_OWN, GlassProvider.PROVIDER_HBMOD};
+    private static final String[] GLASS_PROVIDER_LABELS = {
+            "BetterHeybox（模块自带）", "小黑盒液态玻璃模块"};
+
+    private void showGlassProviderDialog(final Activity activity) {
+        withHeyboxDialog(activity, spec -> showGlassProviderDialogNative(activity, spec),
+                () -> showGlassProviderDialogFallback(activity));
+    }
+
+    /** 样式与「分享渠道」弹窗一致：小黑盒原生框 + 选项行，当前项高亮 */
+    private void showGlassProviderDialogNative(final Activity activity,
+                                               DexKitResolver.HeyboxDialogSpec spec) throws Exception {
+        String current = module.getString(App.KEY_GLASS_PROVIDER, "");
+        final int checked = GlassProvider.PROVIDER_HBMOD.equals(current) ? 1 : 0;
+        LinearLayout list = buildOptionRowList(activity, GLASS_PROVIDER_LABELS, checked);
+        Dialog dialog = spec.buildAndShow(activity, "选择液态玻璃实现", list, null, null,
+                "取消", (d, w) -> d.dismiss());
+        bindOptionRows(dialog, list, index ->
+                chooseGlassProvider(activity, GLASS_PROVIDER_VALUES[index]));
+        module.logd(Log.INFO, module.TAG, "✔ 使用小黑盒原生弹窗选择液态玻璃实现");
+    }
+
+    private void showGlassProviderDialogFallback(final Activity activity) {
+        String current = module.getString(App.KEY_GLASS_PROVIDER, "");
+        int checked = GlassProvider.PROVIDER_HBMOD.equals(current) ? 1 : 0;
+        showSingleChoiceFallback(activity, "选择液态玻璃实现", GLASS_PROVIDER_LABELS, checked,
+                index -> chooseGlassProvider(activity, GLASS_PROVIDER_VALUES[index]));
+    }
+
+    private void chooseGlassProvider(Activity activity, String value) {
+        try {
+            HeyboxPrefs.setString(App.KEY_GLASS_PROVIDER, value);
+            LogRecorder.recordEvent("液态玻璃实现已选择: " + value);
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "保存液态玻璃实现选择失败: " + t);
+            return;
+        }
+        try {
+            View panel = mSettingsPanel == null ? null : mSettingsPanel.get();
+            if (panel != null && panel.getParent() != null) {
+                showEmbeddedSettings(activity);
+            }
+        } catch (Throwable ignored) {
+        }
+        // 复用小黑盒自带重启提示（含重启入口）
+        showRestartAppDialog(activity, activity.getClassLoader());
+    }
+
+    /** 未选择提供方时弹实现选择（触发点：MainActivity 启动）；sLaunchPromptShown 保证每次进程启动至多一次 */
+    private void maybePromptGlassProvider(final Activity activity) {
+        try {
+            if (sLaunchPromptShown) {
+                return;
+            }
+            if (!GlassProvider.isHbmodInstalled(activity)) {
+                return;
+            }
+            if (!module.getString(App.KEY_GLASS_PROVIDER, "").isEmpty()) {
+                return;
+            }
+            sLaunchPromptShown = true;
+            activity.getWindow().getDecorView().post(() -> showGlassProviderDialog(activity));
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "液态玻璃实现选择提示失败: " + t);
+        }
+    }
 
     private void showOpenWebDialog(final Activity activity) {
         withHeyboxDialog(activity, spec -> showOpenWebDialogNative(activity, spec),
@@ -1144,10 +1275,8 @@ public final class SettingsEntryHook {
         String current = HeyboxPrefs.getString(App.KEY_WEBVIEW_ENTRY_URL, DEFAULT_WEBVIEW_ENTRY_URL);
         input.setText(current == null || current.trim().isEmpty() ? DEFAULT_WEBVIEW_ENTRY_URL : current);
         input.setSelection(input.length());
-        try {
-            int bgId = activity.getResources().getIdentifier("bg_dialog_edit", "drawable", MainModule.TARGET_PKG);
-            if (bgId != 0) input.setBackgroundResource(bgId);
-        } catch (Throwable ignored) { }
+        int bgId = hostResId(activity, "bg_dialog_edit", "drawable", 0);
+        if (bgId != 0) input.setBackgroundResource(bgId);
         return input;
     }
 
@@ -1226,13 +1355,9 @@ public final class SettingsEntryHook {
         input.setLayoutParams(lp);
         input.setPadding(pad, pad, pad, pad);
         input.setGravity(Gravity.CENTER_VERTICAL);
-        try {
-            int bgId = activity.getResources().getIdentifier(
-                    "bg_dialog_edit", "drawable", MainModule.TARGET_PKG);
-            if (bgId != 0) {
-                input.setBackgroundResource(bgId);
-            }
-        } catch (Throwable ignored) {
+        int bgId = hostResId(activity, "bg_dialog_edit", "drawable", 0);
+        if (bgId != 0) {
+            input.setBackgroundResource(bgId);
         }
         int textColor = hostColor(activity, "color_text_primary_day_night", 0);
         if (textColor != 0) {
@@ -1415,30 +1540,10 @@ public final class SettingsEntryHook {
 
     private void startEmbeddedImportNative(final Activity activity, DexKitResolver.HeyboxDialogSpec spec)
             throws Exception {
-        TextView message = new TextView(activity);
-        int pad = module.dp(activity, 10);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.setMargins(0, pad, 0, pad * 2);
-        message.setLayoutParams(lp);
-        message.setPadding(pad, pad, pad, pad);
-        message.setText("导入将覆盖当前所有设置（开关、分享链接、分享渠道等），确定继续？");
-        message.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        int textColor = hostColor(activity, "color_text_primary_day_night", 0);
-        if (textColor != 0) {
-            message.setTextColor(textColor);
-        }
+        TextView message = buildDialogMessage(activity,
+                "导入将覆盖当前所有设置（开关、分享链接、分享渠道等），确定继续？");
         DialogInterface.OnClickListener importListener = (d, w) -> {
-            try {
-                sPendingPick = uri -> readEmbeddedImport(activity, uri);
-                Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-                intent.addCategory(Intent.CATEGORY_OPENABLE);
-                intent.setType("application/json");
-                activity.startActivityForResult(intent, REQUEST_EMBEDDED_IMPORT);
-            } catch (Throwable t) {
-                module.logd(Log.ERROR, module.TAG, "打开导入选择器失败: " + t);
-                Toast.makeText(activity, "导入失败，请重试", Toast.LENGTH_SHORT).show();
-            }
+            launchImportPicker(activity);
             d.dismiss();
         };
         spec.buildAndShow(activity, "导入配置", message, "导入", importListener,
@@ -1451,22 +1556,25 @@ public final class SettingsEntryHook {
             new AlertDialog.Builder(activity)
                     .setTitle("导入配置")
                     .setMessage("导入将覆盖当前所有设置（开关、分享链接、分享渠道等），确定继续？")
-                    .setPositiveButton("导入", (dialog, which) -> {
-                        try {
-                            sPendingPick = uri -> readEmbeddedImport(activity, uri);
-                            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-                            intent.addCategory(Intent.CATEGORY_OPENABLE);
-                            intent.setType("application/json");
-                            activity.startActivityForResult(intent, REQUEST_EMBEDDED_IMPORT);
-                        } catch (Throwable t) {
-                            module.logd(Log.ERROR, module.TAG, "打开导入选择器失败: " + t);
-                            Toast.makeText(activity, "导入失败，请重试", Toast.LENGTH_SHORT).show();
-                        }
-                    })
+                    .setPositiveButton("导入", (dialog, which) -> launchImportPicker(activity))
                     .setNegativeButton("取消", null)
                     .show();
         } catch (Throwable t) {
             module.logd(Log.ERROR, module.TAG, "导入确认弹框失败: " + t);
+        }
+    }
+
+    /** 打开系统「选择文件」选择器挑选配置备份，结果经 onActivityResult Hook 回调写入 */
+    private void launchImportPicker(Activity activity) {
+        try {
+            sPendingPick = uri -> readEmbeddedImport(activity, uri);
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("application/json");
+            activity.startActivityForResult(intent, REQUEST_EMBEDDED_IMPORT);
+        } catch (Throwable t) {
+            module.logd(Log.ERROR, module.TAG, "打开导入选择器失败: " + t);
+            Toast.makeText(activity, "导入失败，请重试", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -1518,10 +1626,7 @@ public final class SettingsEntryHook {
     private boolean writeEmbeddedBoolean(Activity activity, String key, boolean value) {
         LogRecorder.setContext(activity);
         HeyboxPrefs.init(activity);
-        module.logd(Log.INFO, module.TAG, "设置写入开始: key=" + key + ", value=" + value
-                + ", pid=" + android.os.Process.myPid());
         boolean localOk = HeyboxPrefs.setBoolean(key, value);
-        module.logd(Log.INFO, module.TAG, "本地配置写入: key=" + key + ", value=" + value + ", ok=" + localOk);
         LogRecorder.recordEvent("内嵌面板开关已写入小黑盒本地配置: key=" + key
                 + ", value=" + value + ", ok=" + localOk);
         try {
@@ -1532,7 +1637,6 @@ public final class SettingsEntryHook {
                     .putExtra(PreferenceReceiver.EXTRA_VALUE, value)
                     .addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES);
             activity.sendBroadcast(request);
-            module.logd(Log.INFO, module.TAG, "远程镜像广播已发送: key=" + key + ", value=" + value);
         } catch (Throwable t) {
             module.logd(Log.WARN, module.TAG, "远程镜像广播失败（本地配置已生效，不影响使用）: " + key, t);
         }

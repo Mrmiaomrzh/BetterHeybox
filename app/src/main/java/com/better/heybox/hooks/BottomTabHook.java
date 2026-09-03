@@ -122,7 +122,7 @@ public final class BottomTabHook {
                 hideTabField(binding, "l", "推荐占位");
             }
             normalizeVisibleTabs(binding);
-            ViewGroup group = findTabGroup(binding);
+            ViewGroup group = tabGroup(binding);
             if (group != null) {
                 group.addOnLayoutChangeListener((v, left, top, right, bottom,
                         oldLeft, oldTop, oldRight, oldBottom) -> normalizeVisibleTabs(binding));
@@ -194,10 +194,6 @@ public final class BottomTabHook {
         }
     }
 
-    private ViewGroup findTabGroup(Object binding) {
-        return tabGroup(binding);
-    }
-
     private void retryDelayed(View view, Runnable action, long... delays) {
         for (long delay : delays) {
             view.postDelayed(action, delay);
@@ -218,16 +214,6 @@ public final class BottomTabHook {
         return null;
     }
 
-    private void dumpFields(Object obj) {
-        try {
-            for (Field f : obj.getClass().getDeclaredFields()) {
-                module.logd(Log.WARN, module.TAG, "  field: " + f.getName() + " : " + f.getType().getName());
-            }
-        } catch (Throwable t) {
-            module.logd(Log.WARN, module.TAG, "转储字段失败: " + t);
-        }
-    }
-
     private void hideTabField(Object binding, String fieldName, String label) {
         try {
             Field field = binding.getClass().getDeclaredField(fieldName);
@@ -241,8 +227,8 @@ public final class BottomTabHook {
                 module.logd(Log.INFO, module.TAG, "隐藏 " + label + ": " + v.getVisibility());
             }
         } catch (Throwable t) {
-            module.logd(Log.WARN, module.TAG, "隐藏 tab 失败 (" + label + ")，字段 " + fieldName + " 可能被 Robust 重命名，转储字段名：");
-            dumpFields(binding);
+            module.logd(Log.WARN, module.TAG,
+                    "隐藏 tab 失败 (" + label + ")，字段 " + fieldName + " 可能被 Robust 重命名");
         }
     }
 }

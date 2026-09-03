@@ -13,18 +13,17 @@ import android.view.Window;
 import android.view.WindowManager;
 import android.widget.TextView;
 
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -511,15 +510,10 @@ public final class DexKitResolver {
                     + s.setTitle.getName() + ";" + s.setCenterView.getName() + ";"
                     + s.setPositiveButton.getName() + ";" + s.setNegativeButton.getName() + ";"
                     + s.buildMethod.getName();
-            java.util.Map<String, String> entries = readCacheEntries(ctx);
-            entries.put(key, v);
-            StringBuilder sb = new StringBuilder();
-            for (java.util.Map.Entry<String, String> e : entries.entrySet()) {
-                sb.append(e.getKey()).append('\n').append(e.getValue()).append('\n');
-            }
-            File f = cacheFile(ctx);
-            try (FileOutputStream fos = new FileOutputStream(f)) {
-                fos.write(sb.toString().getBytes(StandardCharsets.UTF_8));
+            Properties entries = readCacheEntries(ctx);
+            entries.setProperty(key, v);
+            try (FileOutputStream fos = new FileOutputStream(cacheFile(ctx))) {
+                entries.store(fos, null);
             }
         } catch (Throwable t) {
             Log.w(TAG, "HeyBoxDialog 缓存写入失败: " + t);
@@ -530,28 +524,14 @@ public final class DexKitResolver {
         return new File(ctx.getFilesDir(), "bh_dexkit_dialog_cache.txt");
     }
 
-    /** key\nvalue 成对存储（兼容旧的单条目 key\nvalue 格式） */
-    private static java.util.Map<String, String> readCacheEntries(Context ctx) {
-        java.util.Map<String, String> entries = new java.util.LinkedHashMap<>();
+    /** 旧版为 key\nvalue 成对手写格式，Properties解析不出值会整体视为缓存缺失，触发一次重新分析后以新格式落盘 */
+    private static Properties readCacheEntries(Context ctx) {
+        Properties entries = new Properties();
         try {
             File f = cacheFile(ctx);
-            if (!f.exists()) {
-                return entries;
-            }
-            ByteArrayOutputStream bos = new ByteArrayOutputStream();
-            try (FileInputStream fis = new FileInputStream(f)) {
-                byte[] buf = new byte[512];
-                int n;
-                while ((n = fis.read(buf)) > 0) {
-                    bos.write(buf, 0, n);
-                }
-            }
-            String[] lines = new String(bos.toByteArray(), StandardCharsets.UTF_8).split("\n");
-            for (int i = 0; i + 1 < lines.length; i += 2) {
-                String k = lines[i].trim();
-                String v = lines[i + 1].trim();
-                if (!k.isEmpty() && !v.isEmpty()) {
-                    entries.put(k, v);
+            if (f.exists()) {
+                try (FileInputStream fis = new FileInputStream(f)) {
+                    entries.load(fis);
                 }
             }
         } catch (Throwable ignored) {
@@ -561,8 +541,8 @@ public final class DexKitResolver {
 
     private static HeyboxDialogSpec readCache(Context ctx, ClassLoader cl, String key) {
         try {
-            String v = readCacheEntries(ctx).get(key);
-            if (v == null) {
+            String v = readCacheEntries(ctx).getProperty(key);
+            if (v == null || v.isEmpty()) {
                 return null;
             }
             String[] p = v.split(";");
