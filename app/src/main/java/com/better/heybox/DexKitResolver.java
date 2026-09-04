@@ -35,7 +35,6 @@ import org.luckypray.dexkit.result.ClassDataList;
 
 /**
  * DexKit 字节码特征解析：宿主更新致混淆名变化后自动重新定位 HeyBoxDialog。
- * 定位三层降级：版本缓存 → DexKit 锚点（品牌字符串+结构特征）→ 隐形探针按渲染位置分类并写回缓存。任一层失败返回 null，调用方回退系统弹窗
  */
 public final class DexKitResolver {
 
@@ -290,16 +289,32 @@ public final class DexKitResolver {
         Method positive;
         Method negative;
         Method buildUsed;
+        Method replacer;
     }
 
     private static void probeAndClassify(MainModule module, Activity activity, Analysis a,
                                          String key, SpecCallback cb) {
+        probeRound(module, activity, a, 0, key, cb);
+    }
+
+    private static void probeRound(MainModule module, Activity activity, Analysis a,
+                                   final int round, final String key, final SpecCallback cb) {
+        if (round >= 3) {
+            cb.onFailed("探针超过最大轮数仍未分类完成");
+            return;
+        }
         probeOnce(activity, a,
                 new ArrayList<>(a.charSeqCands), new ArrayList<>(a.viewCands),
                 new ArrayList<>(a.buttonCands), r -> {
-                    module.logd(Log.INFO, TAG, "探针: title=" + name(r.title)
+                    module.logd(Log.INFO, TAG, "探针第" + round + "轮: title=" + name(r.title)
                             + " center=" + name(r.center) + " pos=" + name(r.positive)
-                            + " neg=" + name(r.negative) + " build=" + name(r.buildUsed));
+                            + " neg=" + name(r.negative) + " replacer=" + name(r.replacer)
+                            + " build=" + name(r.buildUsed));
+                    if (r.replacer != null) {
+                        a.viewCands.remove(r.replacer);
+                        probeRound(module, activity, a, round + 1, key, cb);
+                        return;
+                    }
                     if (r.title == null || r.center == null || r.positive == null
                             || r.negative == null || r.buildUsed == null) {
                         cb.onFailed("探针未能分类 Builder 方法（"
@@ -447,7 +462,9 @@ public final class DexKitResolver {
                 continue;
             }
             Method cand = viewCands.get(idx);
-            if (titleView != null && screenY(tv) > screenY(titleView)) {
+            if (titleView == null) {
+                r.replacer = cand;
+            } else if (screenY(tv) > screenY(titleView)) {
                 r.center = cand;
             }
         }
@@ -524,7 +541,6 @@ public final class DexKitResolver {
         return new File(ctx.getFilesDir(), "bh_dexkit_dialog_cache.txt");
     }
 
-    /** 旧版为 key\nvalue 成对手写格式，Properties解析不出值会整体视为缓存缺失，触发一次重新分析后以新格式落盘 */
     private static Properties readCacheEntries(Context ctx) {
         Properties entries = new Properties();
         try {
