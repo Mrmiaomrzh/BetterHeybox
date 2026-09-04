@@ -115,28 +115,31 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     /** 实验性功能：屏蔽双列瀑布流（社区信息流恢复单列，仅 1.3.394 生效） */
     public static final String KEY_SINGLE_COLUMN_FEED = "single_column_feed";
 
-    /** 发帖过滤：屏蔽 LvN 以下用户发帖（"0"=关闭，#15） */
+    /** 发帖过滤：等级阈值，0 为关闭 */
     public static final String KEY_POST_MIN_LEVEL = "post_min_level";
 
-    /** 发帖过滤：自定义关键词，一行一个，regex: 前缀为正则（空=关闭） */
+    /** 发帖过滤：无等级用户也屏蔽 */
+    public static final String KEY_POST_NO_LEVEL = "post_filter_no_level";
+
+    /** 发帖过滤：关键词，一行一个 */
     public static final String KEY_POST_KEYWORDS = "post_filter_keywords";
 
-    /** 发帖过滤：AI 标题党识别（默认关，标题会发往用户配置的 AI 服务商） */
+    /** 发帖过滤：AI 标题党识别 */
     public static final String KEY_POST_AI_ENABLED = "post_filter_ai_enabled";
 
-    /** AI 标题党：提供商预设 id（AIClickbaitChecker.PROVIDER_*，选中时自动填充地址与模型） */
+    /** AI 提供商预设 */
     public static final String KEY_AI_PROVIDER = "ai_provider";
 
-    /** AI 标题党：OpenAI 兼容接口地址 */
+    /** AI 接口地址 */
     public static final String KEY_AI_BASE_URL = "ai_base_url";
 
-    /** AI 标题党：模型名 */
+    /** AI 模型名 */
     public static final String KEY_AI_MODEL = "ai_model";
 
-    /** AI 标题党：API Token（敏感，刻意不进配置备份） */
+    /** AI Token */
     public static final String KEY_AI_TOKEN = "ai_token";
 
-    /** AI 标题党：判定提示词（空=内置默认） */
+    /** AI 判定提示词，空用默认 */
     public static final String KEY_AI_PROMPT = "ai_prompt";
 
     /** 参考项目玻璃颜色预设/透明度/布局参数 */
@@ -181,6 +184,7 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
         m.put(KEY_GLASS_FIT_TABS, false);
         m.put(KEY_SINGLE_COLUMN_FEED, false);
         m.put(KEY_POST_AI_ENABLED, false);
+        m.put(KEY_POST_NO_LEVEL, false);
         return m;
     }
 

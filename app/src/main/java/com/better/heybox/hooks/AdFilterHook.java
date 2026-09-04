@@ -67,28 +67,36 @@ public final class AdFilterHook {
     }
 
     private Object filterFeedAd(XposedInterface.Chain chain) throws Throwable {
-        if (!module.isEnabled(App.KEY_FEED_AD, true)) {
-            return chain.proceed();
-        }
-        try {
-            Object elem = chain.getArg(0);
-            if (elem != null) {
-                Object obj = elem.getClass().getMethod("getAsJsonObject").invoke(elem);
-                if (obj != null) {
-                    Object ct = obj.getClass().getMethod("get", String.class).invoke(obj, "content_type");
-                    if (ct != null) {
-                        String ctStr = (String) ct.getClass().getMethod("getAsString").invoke(ct);
-                        if ("23".equals(ctStr)) {
-                            module.logd(Log.INFO, module.TAG, "过滤信息流广告条目 (content_type=23)");
-                            return createEmptyFeedObj(chain.getThisObject());
+        if (module.isEnabled(App.KEY_FEED_AD, true)) {
+            try {
+                Object elem = chain.getArg(0);
+                if (elem != null) {
+                    Object obj = elem.getClass().getMethod("getAsJsonObject").invoke(elem);
+                    if (obj != null) {
+                        Object ct = obj.getClass().getMethod("get", String.class).invoke(obj, "content_type");
+                        if (ct != null) {
+                            String ctStr = (String) ct.getClass().getMethod("getAsString").invoke(ct);
+                            if ("23".equals(ctStr)) {
+                                module.logd(Log.INFO, module.TAG, "过滤信息流广告条目 (content_type=23)");
+                                return createEmptyFeedObj(chain.getThisObject());
+                            }
                         }
                     }
                 }
+            } catch (Throwable t) {
+                module.logd(Log.WARN, module.TAG, "信息流广告判断异常，放行: " + t);
             }
-        } catch (Throwable t) {
-            module.logd(Log.WARN, module.TAG, "信息流广告判断异常，放行: " + t);
         }
-        return chain.proceed();
+        Object result = chain.proceed();
+        // 委托发帖过滤
+        PostFilterHook postFilter = PostFilterHook.get();
+        if (postFilter != null && result != null) {
+            Object replacement = postFilter.onDeserialized(result);
+            if (replacement != null) {
+                return replacement;
+            }
+        }
+        return result;
     }
 
     private Object createEmptyFeedObj(Object thisObj) {

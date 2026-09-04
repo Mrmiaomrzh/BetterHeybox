@@ -39,7 +39,7 @@ public final class ConfigBackup {
             App.KEY_AI_BASE_URL,
             App.KEY_AI_MODEL,
             App.KEY_AI_PROMPT,
-            // KEY_AI_TOKEN 刻意不备份：导出文件可能被分享，避免泄露密钥
+            // token 不进备份
     };
     private static final String[] RESTART_KEYS = {
             App.KEY_HIDE_TAB_HOME,

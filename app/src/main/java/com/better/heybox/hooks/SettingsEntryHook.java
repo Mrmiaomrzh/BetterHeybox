@@ -112,7 +112,8 @@ public final class SettingsEntryHook {
 
     enum Action {
         NONE, EDIT_LINK, CLEAR_DAILY, CHANNEL, EXPORT, IMPORT,
-        EXPORT_LOG, RUNTIME_STATUS, OPEN_WEB, PICK_DIR, RESET_GLASS, CHOOSE_GLASS
+        EXPORT_LOG, RUNTIME_STATUS, OPEN_WEB, PICK_DIR, RESET_GLASS, CHOOSE_GLASS,
+        POST_LEVEL, POST_KEYWORDS, AI_PROVIDER, AI_PROMPT, AI_TEST
     }
 
     private static class SwitchDef {
@@ -218,13 +219,14 @@ public final class SettingsEntryHook {
     private static final String EXPERIMENTAL_HEYBOX_VERSION = "1.3.394";
     private static final long EXPERIMENTAL_HEYBOX_CODE = 1127L;
 
-    /** 顺序组装全部分组：底部导航栏隐藏置顶 → BASE_GROUPS → 运行状态行（Debug）→ 液态玻璃插到「通用」前 → 实验组 */
+    /** 顺序组装全部分组：底部导航栏隐藏置顶 → BASE_GROUPS → 发帖过滤（广告过滤之后）→ 运行状态行（Debug）→ 液态玻璃插到「通用」前 → 实验组 */
     private List<SettingsGroup> buildSettingsGroups(Activity activity) {
         List<SettingsGroup> groups = new ArrayList<>();
         groups.add(buildBottomTabGroup(activity));
         for (SettingsGroup g : BASE_GROUPS) {
             groups.add(g);
         }
+        insertPostFilterGroup(groups);
         if (BuildFlags.DEBUG) {
             addRuntimeStatusRow(groups);
         }
@@ -247,6 +249,62 @@ public final class SettingsEntryHook {
             }));
         }
         return groups;
+    }
+
+    /** 「广告过滤」分组标题（发帖过滤分组的插入定位点） */
+    private static final String TITLE_AD_FILTER = "广告过滤";
+
+    /** 发帖过滤分组 */
+    private void insertPostFilterGroup(List<SettingsGroup> groups) {
+        int minLevel = 0;
+        try {
+            minLevel = Integer.parseInt(module.getString(App.KEY_POST_MIN_LEVEL, "0").trim());
+        } catch (Throwable ignored) {
+        }
+        int kwCount = 0;
+        for (String s : module.getString(App.KEY_POST_KEYWORDS, "").split("\n")) {
+            if (!s.trim().isEmpty()) {
+                kwCount++;
+            }
+        }
+        String providerId = module.getString(App.KEY_AI_PROVIDER, "");
+        SettingsGroup group = new SettingsGroup("发帖过滤", new SwitchDef[]{
+                new SwitchDef("屏蔽低等级发帖",
+                        minLevel > 0 ? "当前：屏蔽 Lv" + minLevel + " 以下，点击调整"
+                                : "点击选择等级阈值，等级来自帖子自带数据",
+                        null, false, false, true, null, Action.POST_LEVEL),
+                new SwitchDef("屏蔽无等级用户",
+                        "无等级徽章的账号也按低等级屏蔽",
+                        App.KEY_POST_NO_LEVEL, false, false),
+                new SwitchDef("关键词屏蔽",
+                        kwCount > 0 ? "已配置 " + kwCount + " 个，点击编辑"
+                                : "匹配标题与正文，一行一个；regex: 前缀为正则",
+                        null, false, false, true, null, Action.POST_KEYWORDS),
+                new SwitchDef("AI 标题党识别",
+                        "AI 判定标题党并屏蔽；帖子标题会发送到你配置的 AI 服务商",
+                        App.KEY_POST_AI_ENABLED, false, false),
+                new SwitchDef("AI 提供商",
+                        "当前：" + AIClickbaitChecker.providerLabel(providerId) + "，点击切换",
+                        null, false, false, true, null, Action.AI_PROVIDER),
+                new SwitchDef("API 地址", "OpenAI 兼容接口地址，选提供商后自动填充",
+                        null, false, false, true, App.KEY_AI_BASE_URL, Action.EDIT_LINK),
+                new SwitchDef("模型", "OpenAI 兼容模型名", null, false, false,
+                        true, App.KEY_AI_MODEL, Action.EDIT_LINK),
+                new SwitchDef("API Token", "服务商控制台获取，本地模型可留空",
+                        null, false, false, true, App.KEY_AI_TOKEN, Action.EDIT_LINK),
+                new SwitchDef("判定提示词", "自定义 AI 判定规则，留空用内置默认",
+                        null, false, false, true, null, Action.AI_PROMPT),
+                new SwitchDef("测试 AI 连接", null, null, false, false,
+                        true, null, Action.AI_TEST),
+        });
+        int insertAt = groups.size();
+        for (int i = 0; i < groups.size(); i++) {
+            if (TITLE_AD_FILTER.equals(groups.get(i).title)) {
+                insertAt = i + 1;
+                break;
+            }
+        }
+        groups.add(insertAt, group);
     }
 
     /**
@@ -990,6 +1048,21 @@ public final class SettingsEntryHook {
                     case CHOOSE_GLASS:
                         setRowClick(itemCls, item, v -> showGlassProviderDialog(activity));
                         break;
+                    case POST_LEVEL:
+                        setRowClick(itemCls, item, v -> showPostLevelDialog(activity));
+                        break;
+                    case POST_KEYWORDS:
+                        setRowClick(itemCls, item, v -> showPostKeywordsDialog(activity));
+                        break;
+                    case AI_PROVIDER:
+                        setRowClick(itemCls, item, v -> showAiProviderDialog(activity));
+                        break;
+                    case AI_PROMPT:
+                        setRowClick(itemCls, item, v -> showAiPromptDialog(activity));
+                        break;
+                    case AI_TEST:
+                        setRowClick(itemCls, item, v -> testAiConnection(activity));
+                        break;
                     case EDIT_LINK:
                     default:
                         setRowClick(itemCls, item, v -> showEditLinkDialog(activity, def.title, editKey));
@@ -1240,6 +1313,200 @@ public final class SettingsEntryHook {
         }
         // 复用小黑盒自带重启提示（含重启入口）
         showRestartAppDialog(activity, activity.getClassLoader());
+    }
+
+    // ---------- 发帖过滤（#15） ----------
+
+    private static final String[] POST_LEVEL_VALUES = {
+            "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"};
+    private static final String[] POST_LEVEL_LABELS = {
+            "关闭", "Lv1", "Lv2", "Lv3", "Lv4", "Lv5", "Lv6", "Lv7", "Lv8", "Lv9", "Lv10"};
+
+    /** 面板已打开时重建以刷新描述 */
+    private void refreshEmbeddedPanel(Activity activity) {
+        View panel = mSettingsPanel == null ? null : mSettingsPanel.get();
+        if (panel != null && panel.getParent() != null) {
+            showEmbeddedSettings(activity);
+        }
+    }
+
+    private void showPostLevelDialog(final Activity activity) {
+        final int checked = Math.min(Math.max(currentPostMinLevel(), 0),
+                POST_LEVEL_VALUES.length - 1);
+        withHeyboxDialog(activity, spec -> {
+            LinearLayout list = buildOptionRowList(activity, POST_LEVEL_LABELS, checked);
+            Dialog dialog = spec.buildAndShow(activity, "屏蔽低等级发帖", list, null, null,
+                    "取消", (d, w) -> d.dismiss());
+            bindOptionRows(dialog, list, index -> {
+                HeyboxPrefs.setString(App.KEY_POST_MIN_LEVEL, POST_LEVEL_VALUES[index]);
+                LogRecorder.recordEvent("发帖等级阈值已设置: " + POST_LEVEL_VALUES[index]);
+                refreshEmbeddedPanel(activity);
+            });
+        }, () -> showSingleChoiceFallback(activity, "屏蔽低等级发帖", POST_LEVEL_LABELS,
+                checked, index -> {
+                    HeyboxPrefs.setString(App.KEY_POST_MIN_LEVEL, POST_LEVEL_VALUES[index]);
+                    refreshEmbeddedPanel(activity);
+                }));
+    }
+
+    private int currentPostMinLevel() {
+        try {
+            return Integer.parseInt(module.getString(App.KEY_POST_MIN_LEVEL, "0").trim());
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
+    private void showPostKeywordsDialog(Activity activity) {
+        showMultilineEditDialog(activity, "屏蔽关键词", App.KEY_POST_KEYWORDS,
+                "一行一个，命中标题或正文即屏蔽；regex: 前缀为正则", false);
+    }
+
+    private void showAiPromptDialog(Activity activity) {
+        showMultilineEditDialog(activity, "判定提示词", App.KEY_AI_PROMPT,
+                "留空使用内置默认提示词", true);
+    }
+
+    /** 多行编辑弹窗 */
+    private void showMultilineEditDialog(Activity activity, String title, String key,
+                                         String hint, boolean resetToDefault) {
+        withHeyboxDialog(activity,
+                spec -> showMultilineEditNative(activity, title, key, hint, resetToDefault, spec),
+                () -> showMultilineEditFallback(activity, title, key, hint, resetToDefault));
+    }
+
+    private EditText buildMultilineInput(Activity activity, String key, String hint) {
+        EditText input = new EditText(activity);
+        int pad = module.dp(activity, 10);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(0, pad, 0, pad * 2);
+        input.setLayoutParams(lp);
+        input.setPadding(pad, pad, pad, pad);
+        input.setGravity(Gravity.TOP | Gravity.START);
+        input.setMinLines(5);
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        input.setHint(hint);
+        input.setText(HeyboxPrefs.getString(key, ""));
+        input.setSelection(input.getText().length());
+        int bgId = hostResId(activity, "bg_dialog_edit", "drawable", 0);
+        if (bgId != 0) {
+            input.setBackgroundResource(bgId);
+        }
+        int textColor = hostColor(activity, "color_text_primary_day_night", 0);
+        if (textColor != 0) {
+            input.setTextColor(textColor);
+        }
+        return input;
+    }
+
+    private void showMultilineEditNative(final Activity activity, final String title,
+                                         final String key, final String hint,
+                                         final boolean resetToDefault,
+                                         DexKitResolver.HeyboxDialogSpec spec) throws Exception {
+        final EditText input = buildMultilineInput(activity, key, hint);
+        DialogInterface.OnClickListener negative = resetToDefault
+                ? (d, w) -> {
+                    saveMultiline(activity, key, "", title);
+                    Toast.makeText(activity, "已恢复默认", Toast.LENGTH_SHORT).show();
+                    d.dismiss();
+                }
+                : (d, w) -> d.dismiss();
+        spec.buildAndShow(activity, title, input, "保存",
+                (d, w) -> {
+                    saveMultiline(activity, key, input.getText().toString(), title);
+                    d.dismiss();
+                },
+                resetToDefault ? "恢复默认" : "取消", negative);
+    }
+
+    private void showMultilineEditFallback(final Activity activity, final String title,
+                                           final String key, final String hint,
+                                           final boolean resetToDefault) {
+        try {
+            final EditText input = buildMultilineInput(activity, key, hint);
+            AlertDialog.Builder builder = new AlertDialog.Builder(activity)
+                    .setTitle(title)
+                    .setView(input)
+                    .setPositiveButton("保存", (d, w) ->
+                            saveMultiline(activity, key, input.getText().toString(), title));
+            if (resetToDefault) {
+                builder.setNegativeButton("恢复默认", (d, w) -> {
+                    saveMultiline(activity, key, "", title);
+                    Toast.makeText(activity, "已恢复默认", Toast.LENGTH_SHORT).show();
+                });
+            } else {
+                builder.setNegativeButton("取消", null);
+            }
+            builder.show();
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "多行编辑框失败(" + title + "): " + t);
+        }
+    }
+
+    private void saveMultiline(Activity activity, String key, String raw, String title) {
+        String normalized;
+        if (App.KEY_POST_KEYWORDS.equals(key)) {
+            StringBuilder sb = new StringBuilder();
+            for (String line : raw.split("\n")) {
+                String k = line.trim();
+                if (!k.isEmpty()) {
+                    if (sb.length() > 0) {
+                        sb.append('\n');
+                    }
+                    sb.append(k);
+                }
+            }
+            normalized = sb.toString();
+        } else {
+            normalized = raw.trim();
+        }
+        HeyboxPrefs.setString(key, normalized);
+        LogRecorder.recordEvent(title + " 已保存");
+        Toast.makeText(activity, "已保存，立即生效", Toast.LENGTH_SHORT).show();
+        refreshEmbeddedPanel(activity);
+    }
+
+    private void showAiProviderDialog(final Activity activity) {
+        String current = module.getString(App.KEY_AI_PROVIDER, "");
+        final int checked = Math.max(AIClickbaitChecker.providerIndex(current), 0);
+        withHeyboxDialog(activity, spec -> {
+            LinearLayout list = buildOptionRowList(activity,
+                    AIClickbaitChecker.PROVIDER_LABELS, checked);
+            Dialog dialog = spec.buildAndShow(activity, "选择 AI 提供商", list, null, null,
+                    "取消", (d, w) -> d.dismiss());
+            bindOptionRows(dialog, list, index -> applyAiProvider(activity, index));
+        }, () -> showSingleChoiceFallback(activity, "选择 AI 提供商",
+                AIClickbaitChecker.PROVIDER_LABELS, checked,
+                index -> applyAiProvider(activity, index)));
+    }
+
+    /** 选预设自动填充地址与模型 */
+    private void applyAiProvider(Activity activity, int index) {
+        try {
+            HeyboxPrefs.setString(App.KEY_AI_PROVIDER, AIClickbaitChecker.PROVIDER_IDS[index]);
+            String base = AIClickbaitChecker.PROVIDER_BASE_URLS[index];
+            String model = AIClickbaitChecker.PROVIDER_MODELS[index];
+            if (!base.isEmpty()) {
+                HeyboxPrefs.setString(App.KEY_AI_BASE_URL, base);
+            }
+            if (!model.isEmpty()) {
+                HeyboxPrefs.setString(App.KEY_AI_MODEL, model);
+            }
+            LogRecorder.recordEvent("AI 提供商已选择: " + AIClickbaitChecker.PROVIDER_IDS[index]);
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "保存 AI 提供商失败: " + t);
+            return;
+        }
+        refreshEmbeddedPanel(activity);
+    }
+
+    private void testAiConnection(Activity activity) {
+        Toast.makeText(activity, "正在测试 AI 连接…", Toast.LENGTH_SHORT).show();
+        AIClickbaitChecker.testConnection(module, (ok, message) -> Toast.makeText(activity,
+                ok ? "AI 连接成功：" + message : "AI 连接失败：" + message,
+                Toast.LENGTH_LONG).show());
     }
 
     /** 未选择提供方时弹实现选择（触发点：MainActivity 启动）；sLaunchPromptShown 保证每次进程启动至多一次 */

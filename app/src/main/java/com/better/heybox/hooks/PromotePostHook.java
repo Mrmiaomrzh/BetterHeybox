@@ -1,12 +1,8 @@
 package com.better.heybox.hooks;
 
 import android.util.Log;
-import android.view.View;
-import android.view.ViewGroup;
 
-import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.util.WeakHashMap;
 
 import com.better.heybox.App;
 import com.better.heybox.MainModule;
@@ -23,8 +19,6 @@ import com.better.heybox.MainModule;
 public final class PromotePostHook {
 
     private final MainModule module;
-    /** 被隐藏 itemView 的原始高度（复用给正常帖子时恢复），弱引用避免泄漏 */
-    private final WeakHashMap<View, Integer> hiddenHeights = new WeakHashMap<>();
 
     public PromotePostHook(MainModule module) {
         this.module = module;
@@ -44,29 +38,33 @@ public final class PromotePostHook {
                         && "BBSLinkObj".equals(p[1].getSimpleName())) {
                     final boolean hasUserArg = "L".equals(methodName);
                     module.hook(m).intercept(chain -> {
+                        Object bbsLink = chain.getArg(1);
+                        Object viewHolder = chain.getArg(hasUserArg ? 3 : 0);
                         try {
-                            if (!module.isEnabled(App.KEY_PROMOTE_AD, true)) {
-                                return chain.proceed();
+                            if (module.isEnabled(App.KEY_PROMOTE_AD, true)) {
+                                String ct = getContentType(bbsLink);
+                                if ("28".equals(ct) || "29".equals(ct)) {
+                                    module.logd(Log.INFO, module.TAG, "屏蔽推广贴 (content_type=" + ct + ")");
+                                    hideItemView(viewHolder);
+                                    return null; // 跳过原渲染
+                                }
+                                Object userInfo = hasUserArg ? chain.getArg(2) : getUser(bbsLink);
+                                String username = getUsername(userInfo);
+                                if ("小黑盒推广".equals(username) || "商城看板娘".equals(username)) {
+                                    module.logd(Log.INFO, module.TAG, "屏蔽账号帖子: " + username);
+                                    hideItemView(viewHolder);
+                                    return null;
+                                }
                             }
-                            Object bbsLink = chain.getArg(1);
-                            Object viewHolder = chain.getArg(hasUserArg ? 3 : 0);
-                            String ct = getContentType(bbsLink);
-                            if ("28".equals(ct) || "29".equals(ct)) {
-                                module.logd(Log.INFO, module.TAG, "屏蔽推广贴 (content_type=" + ct + ")");
-                                hideItemView(viewHolder);
-                                return null; // 跳过原渲染
-                            }
-                            Object userInfo = hasUserArg ? chain.getArg(2) : getUser(bbsLink);
-                            String username = getUsername(userInfo);
-                            if ("小黑盒推广".equals(username) || "商城看板娘".equals(username)) {
-                                module.logd(Log.INFO, module.TAG, "屏蔽账号帖子: " + username);
-                                hideItemView(viewHolder);
-                                return null;
-                            }
-                            restoreItemView(viewHolder);
                         } catch (Throwable t) {
                             module.logd(Log.WARN, module.TAG, "推广贴判断异常，放行: " + t);
                         }
+                        // 委托发帖过滤
+                        PostFilterHook postFilter = PostFilterHook.get();
+                        if (postFilter != null && postFilter.onRenderBind(bbsLink, viewHolder)) {
+                            return null;
+                        }
+                        restoreItemView(viewHolder);
                         return chain.proceed();
                     });
                     module.logd(Log.INFO, module.TAG, "✔ 推广贴屏蔽 Hook 已安装（" + methodName + "）");
@@ -110,48 +108,12 @@ public final class PromotePostHook {
         }
     }
 
-    private View getItemView(Object viewHolder) {
-        try {
-            Object v = viewHolder.getClass().getField("itemView").get(viewHolder);
-            return v instanceof View ? (View) v : null;
-        } catch (Throwable t) {
-            return null;
-        }
-    }
-
     private void hideItemView(Object viewHolder) {
-        try {
-            View itemView = getItemView(viewHolder);
-            if (itemView == null) {
-                return;
-            }
-            if (!hiddenHeights.containsKey(itemView)) {
-                ViewGroup.LayoutParams lp = itemView.getLayoutParams();
-                hiddenHeights.put(itemView, lp != null ? lp.height : null);
-            }
-            itemView.setVisibility(View.GONE);
-            ViewGroup.LayoutParams lp = itemView.getLayoutParams();
-            if (lp != null) {
-                lp.height = 0;
-                itemView.setLayoutParams(lp);
-            }
-        } catch (Throwable t) {
-            module.logd(Log.WARN, module.TAG, "隐藏 itemView 失败: " + t);
-        }
+        FeedItemHider.hide(FeedItemHider.getItemView(viewHolder));
     }
 
     /** 被隐藏的 ViewHolder 复用给正常帖子时恢复可见性，否则该帖子连带消失 */
     private void restoreItemView(Object viewHolder) {
-        View itemView = getItemView(viewHolder);
-        if (itemView == null || !hiddenHeights.containsKey(itemView)) {
-            return;
-        }
-        Integer height = hiddenHeights.remove(itemView);
-        itemView.setVisibility(View.VISIBLE);
-        ViewGroup.LayoutParams lp = itemView.getLayoutParams();
-        if (lp != null && height != null) {
-            lp.height = height;
-            itemView.setLayoutParams(lp);
-        }
+        FeedItemHider.restore(viewHolder);
     }
 }

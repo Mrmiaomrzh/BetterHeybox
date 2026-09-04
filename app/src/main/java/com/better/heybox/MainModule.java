@@ -19,6 +19,7 @@ import com.better.heybox.hooks.DailyTaskHook;
 import com.better.heybox.hooks.GeneralHook;
 import com.better.heybox.hooks.ImageShareHook;
 import com.better.heybox.hooks.PromotePostHook;
+import com.better.heybox.hooks.PostFilterHook;
 import com.better.heybox.hooks.SettingsEntryHook;
 import com.better.heybox.hooks.ShareLinkPurifyHook;
 import com.better.heybox.hooks.SingleColumnFeedHook;
@@ -78,6 +79,8 @@ public class MainModule extends XposedModule {
         Checkpoint.mark(">>> 开始安装 Hook");
         long t0 = SystemClock.elapsedRealtime();
 
+        // 先构造发帖过滤，供其他 hook 委托
+        PostFilterHook postFilter = new PostFilterHook(this);
         installHook("通用", new GeneralHook(this)::install, cl);
         installHook("广告过滤", new AdFilterHook(this)::install, cl);
         installHook("设置入口", new SettingsEntryHook(this)::install, cl);
@@ -86,6 +89,7 @@ public class MainModule extends XposedModule {
         // 由运行时挂载点（scheduleInstall / 玻璃长按入口）按选择门控
         installHook("液态玻璃底栏", new LiquidGlassBottomBarHook(this)::install, cl);
         installHook("推广贴", new PromotePostHook(this)::install, cl);
+        installHook("发帖过滤", postFilter::install, cl);
         installHook("单列信息流", new SingleColumnFeedHook(this)::install, cl);
         installHook("文本选择", new TextSelectHook(this)::install, cl);
         installHook("图片分享", new ImageShareHook(this)::install, cl);
