@@ -2,27 +2,492 @@ name: Issue triage
 
 on:
   issues:
-    types: [opened, edited, reopened]
+    types:
+      - opened
+      - edited
+      - reopened
+
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: "Issues to scan"
+        required: true
+        default: "open"
+        type: choice
+        options:
+          - open
+          - closed
+          - all
+
+      limit:
+        description: "Maximum issues to process (0 = unlimited)"
+        required: true
+        default: "0"
+        type: string
+
+      dry_run:
+        description: "Preview only, do not change labels"
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   issues: write
 
-# Per-issue lock so rapid open/edit events can't race on the label set.
 concurrency:
-  group: issue-triage-${{ github.event.issue.number }}
+  group: issue-triage-${{ github.event.issue.number || github.run_id }}
   cancel-in-progress: false
 
 jobs:
   label:
     name: Auto label
     runs-on: ubuntu-latest
+
     steps:
-      - name: Classify and label issue
-        uses: github/issue-labeler@v5
+      - name: Classify issues
+        uses: actions/github-script@v9
+        env:
+          TRIAGE_SCOPE: ${{ inputs.scope }}
+          TRIAGE_LIMIT: ${{ inputs.limit }}
+          TRIAGE_DRY_RUN: ${{ inputs.dry_run }}
         with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          configuration-path: .github/issue-labeler.yml
-          enable-versioned-regex: 0
-          include-title: 1
-          body-min-length: 0
-          sync-labels: 1
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+          script: |
+            const rules = {
+              bug: {
+                color: 'd73a4a',
+                description: 'Something is not working correctly',
+                patterns: [
+                  /\bbug\b/i,
+                  /崩溃|闪退|白屏|黑屏|卡死|卡住|无响应|死机/i,
+                  /报错|出错|错误|异常|坏掉/i,
+                  /失效|不生效|没效果|无效果|不起作用|没有反应|没反应|用不了/i,
+                  /无法|下载失败|安装失败|登录失败|恢复失败/i,
+                  /\bcrash(?:ed|ing)?\b/i,
+                  /\bfreeze|frozen\b/i,
+                  /\bbroken\b/i,
+                  /\bnot\s+work(?:ing)?\b/i,
+                  /\berror\b/i,
+                  /\bfail(?:ure|ed|ing)?\b/i
+                ]
+              },
+
+              enhancement: {
+                color: 'a2eeef',
+                description: 'New feature or improvement request',
+                patterns: [
+                  /希望|建议|期待|需求|提议|能否|可否|能不能|可不可以|求支持|支持一下/i,
+                  /新增|新功能|增加|添加|适配|优化/i,
+                  /feature\s+(request|suggestion)/i,
+                  /please\s+(add|support)/i,
+                  /it\s+would\s+be\s+(nice|great)/i
+                ]
+              },
+
+              question: {
+                color: 'd876e3',
+                description: 'Question or request for help',
+                patterns: [
+                  /请问|想问|想知道|咨询|帮我看/i,
+                  /怎么|如何|为什么|什么原因|什么情况|啥情况|啥原因|是不是|有没有|是否/i,
+                  /\bhow\s+(do|to|can)\b/i,
+                  /\bwhy\s+(is|does|do)\b/i,
+                  /\bquestion\b/i,
+                  /\bhelp\s+(me|with)\b/i
+                ]
+              },
+
+              accessibility: {
+                color: '7057ff',
+                description: 'Accessibility related issue or request',
+                patterns: [
+                  /无障碍|读屏|盲人|视障|低视力|色盲|色弱/i,
+                  /\btalkback\b/i,
+                  /\baccessib(?:ility|le|ly)?\b/i,
+                  /\bscreen\s+reader\b/i
+                ]
+              },
+
+              performance: {
+                color: 'fbca04',
+                description: 'Performance related issue',
+                patterns: [
+                  /卡顿|掉帧|帧率|延迟|很慢|缓慢/i,
+                  /内存占用|内存泄漏|内存暴涨|CPU占用|CPU过高|耗电|发热/i,
+                  /性能|性能问题/i,
+                  /\blag(?:ging)?\b/i,
+                  /\bstutter(?:ing)?\b/i,
+                  /\bperformance\b/i,
+                  /\bmemory\s+leak\b/i,
+                  /\bhigh\s+cpu\b/i,
+                  /\boverheat(?:ing)?\b/i,
+                  /\bbattery\s+drain\b/i
+                ]
+              },
+
+              ui: {
+                color: '1f6feb',
+                description: 'UI or UX related issue',
+                patterns: [
+                  /界面|UI|布局|样式|按钮|弹窗|对话框|页面|控件/i,
+                  /显示异常|显示不全|显示错误|排版|字体|图标|颜色/i,
+                  /主题|深色模式|暗色模式|浅色模式|夜间模式/i,
+                  /\bui\b|\bux\b/i,
+                  /\blayout\b|\bbutton\b|\bdialog\b|\bpopup\b/i,
+                  /\btheme\b|\bdark\s+mode\b|\blight\s+mode\b/i
+                ]
+              },
+
+              download: {
+                color: '0e8a16',
+                description: 'Download related issue',
+                patterns: [
+                  /下载|下载不了|下载失败|下载速度|下载链接|下载任务/i,
+                  /保存视频|保存文件|下载文件|下载图片/i,
+                  /\bdownload\b|\bdownloader\b/i
+                ]
+              },
+
+              installation: {
+                color: '0366d6',
+                description: 'Installation or update issue',
+                patterns: [
+                  /安装|卸载|更新|升级|安装包|安装失败|无法安装/i,
+                  /更新失败|升级失败|安装不上|装不上/i,
+                  /\binstall(?:ation)?\b|\buninstall\b/i,
+                  /\bupdate\b|\bupgrade\b/i,
+                  /\bapk\b|\baab\b/i
+                ]
+              },
+
+              compatibility: {
+                color: '5319e7',
+                description: 'Device or compatibility issue',
+                patterns: [
+                  /兼容|适配|不兼容|无法运行|运行不了/i,
+                  /安卓|Android|系统版本|手机版本|设备/i,
+                  /MIUI|HyperOS|OneUI|ColorOS|OriginOS|鸿蒙|HarmonyOS/i,
+                  /\bandroid\b|\bapi\s*(?:level)?\b/i,
+                  /\bROM\b|\bfirmware\b|\bdevice\b|\bcompatib/i
+                ]
+              },
+
+              network: {
+                color: '0075ca',
+                description: 'Network or API related issue',
+                patterns: [
+                  /网络|联网|连接|连接失败|无法连接|网络异常/i,
+                  /超时|请求失败|请求超时|连接超时|服务器/i,
+                  /代理|VPN|DNS|域名|HTTP|HTTPS|接口/i,
+                  /\bnetwork\b|\bconnection\b|\btimeout\b/i,
+                  /\bproxy\b|\bvpn\b|\bdns\b|\bapi\b/i
+                ]
+              },
+
+              account: {
+                color: 'cfd3d7',
+                description: 'Account or authentication issue',
+                patterns: [
+                  /登录|登陆|账号|帐号|账户|用户|验证码|密码/i,
+                  /登录失败|无法登录|登录不上|登不上/i,
+                  /授权|认证|验证|身份验证|Token/i,
+                  /\blogin\b|\bsign\s*in\b|\baccount\b/i,
+                  /\bauth(?:entication|orization)?\b|\btoken\b/i
+                ]
+              },
+
+              media: {
+                color: 'e99695',
+                description: 'Video, audio or media issue',
+                patterns: [
+                  /视频|音频|声音|播放|播放器|画面|媒体/i,
+                  /播放失败|无法播放|播放不了|视频加载/i,
+                  /视频下载|视频解析|视频清晰度|字幕/i,
+                  /\bvideo\b|\baudio\b|\bmedia\b|\bplayer\b/i,
+                  /\bplayback\b|\bsubtitle\b|\bcodec\b/i
+                ]
+              },
+
+              localization: {
+                color: 'bfdadc',
+                description: 'Translation or localization issue',
+                patterns: [
+                  /翻译|语言|多语言|国际化|本地化/i,
+                  /中文|英文|日文|韩文|繁体|简体/i,
+                  /翻译错误|翻译不准确|语言错误/i,
+                  /\btranslation\b|\blocalization\b|\bi18n\b/i
+                ]
+              },
+
+              documentation: {
+                color: '0075ca',
+                description: 'Documentation or README issue',
+                patterns: [
+                  /文档|说明文档|教程|使用说明|README|说明书/i,
+                  /文档错误|文档过时|文档缺失|补充文档/i,
+                  /示例|示例代码|使用方法/i,
+                  /\bdocumentation\b|\bdocs?\b|\breadme\b/i,
+                  /\btutorial\b|\bguide\b/i
+                ]
+              },
+
+              security: {
+                color: 'b60205',
+                description: 'Security related issue',
+                patterns: [
+                  /安全|漏洞|隐私|泄露|权限|越权/i,
+                  /安全漏洞|隐私泄露|数据泄露|敏感信息/i,
+                  /\bsecurity\b|\bvulnerability\b|\bprivacy\b/i,
+                  /\bpermission\b|\bauthorization\b/i
+                ]
+              },
+
+              build: {
+                color: 'ededed',
+                description: 'Build or CI related issue',
+                patterns: [
+                  /编译|构建|打包|构建失败|编译失败|打包失败/i,
+                  /GitHub Actions|Actions|CI|CD|流水线/i,
+                  /Gradle|CMake|Ninja|MSVC|Maven/i,
+                  /\bbuild\b|\bcompile\b|\bcompilation\b/i,
+                  /\bgithub\s+actions\b|\bci\b|\bcd\b/i
+                ]
+              },
+
+              dependencies: {
+                color: '0366d6',
+                description: 'Dependency or library issue',
+                patterns: [
+                  /依赖|依赖库|第三方库|库版本|版本冲突/i,
+                  /依赖冲突|依赖更新|依赖升级/i,
+                  /\bdependency\b|\bdependencies\b|\blibrary\b/i,
+                  /\bpackage\b|\bversion\s+conflict\b/i
+                ]
+              },
+
+              'good-first-issue': {
+                color: '7057ff',
+                description: 'Issue suitable for newcomers',
+                patterns: [
+                  /新手|萌新|简单修改|简单修复|入门/i,
+                  /\bgood\s+first\s+issue\b/i,
+                  /\bbeginner\b|\bnewcomer\b/i
+                ]
+              }
+            };
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            async function ensureLabels() {
+              for (const [name, rule] of Object.entries(rules)) {
+                try {
+                  await github.rest.issues.getLabel({
+                    owner,
+                    repo,
+                    name
+                  });
+                } catch (error) {
+                  if (error.status !== 404) {
+                    throw error;
+                  }
+
+                  core.info(`Creating label: ${name}`);
+
+                  await github.rest.issues.createLabel({
+                    owner,
+                    repo,
+                    name,
+                    color: rule.color,
+                    description: rule.description
+                  });
+                }
+              }
+            }
+
+            async function processIssue(issue) {
+              const text =
+                `${issue.title || ''}\n${issue.body || ''}`;
+
+              const wanted = [];
+
+              for (const [name, rule] of Object.entries(rules)) {
+                if (rule.patterns.some(regex => regex.test(text))) {
+                  wanted.push(name);
+                }
+              }
+
+              const { data: current } =
+                await github.rest.issues.listLabelsOnIssue({
+                  owner,
+                  repo,
+                  issue_number: issue.number
+                });
+
+              const currentNames =
+                current.map(label => label.name);
+
+              const managed = Object.keys(rules);
+
+              const add = wanted.filter(
+                name => !currentNames.includes(name)
+              );
+
+              const remove = currentNames.filter(
+                name =>
+                  managed.includes(name) &&
+                  !wanted.includes(name)
+              );
+
+              core.info(
+                `#${issue.number}: ` +
+                `add=[${add.join(', ')}] ` +
+                `remove=[${remove.join(', ')}]`
+              );
+
+              if (dryRun) {
+                return {
+                  add,
+                  remove
+                };
+              }
+
+              for (const name of remove) {
+                await github.rest.issues.removeLabel({
+                  owner,
+                  repo,
+                  issue_number: issue.number,
+                  name
+                });
+              }
+
+              if (add.length > 0) {
+                await github.rest.issues.addLabels({
+                  owner,
+                  repo,
+                  issue_number: issue.number,
+                  labels: add
+                });
+              }
+
+              return {
+                add,
+                remove
+              };
+            }
+
+            const dryRun =
+              process.env.TRIAGE_DRY_RUN === 'true';
+
+            /*
+             * Automatic issue event.
+             */
+            if (context.eventName === 'issues') {
+              await ensureLabels();
+
+              const result =
+                await processIssue(context.payload.issue);
+
+              core.summary
+                .addHeading(
+                  `Issue #${context.payload.issue.number}`
+                )
+                .addTable([
+                  ['Added', result.add.join(', ') || 'None'],
+                  ['Removed', result.remove.join(', ') || 'None'],
+                  ['Dry run', dryRun ? 'Yes' : 'No']
+                ])
+                .write();
+
+              return;
+            }
+
+            /*
+             * Manual bulk run.
+             */
+            await ensureLabels();
+
+            const scope =
+              process.env.TRIAGE_SCOPE || 'open';
+
+            const rawLimit =
+              Number(process.env.TRIAGE_LIMIT || '0');
+
+            const limit =
+              rawLimit > 0 ? rawLimit : Infinity;
+
+            let processed = 0;
+            let added = 0;
+            let removed = 0;
+            let page = 1;
+
+            while (processed < limit) {
+              const perPage =
+                limit === Infinity
+                  ? 100
+                  : Math.min(100, limit - processed);
+
+              const { data: issues } =
+                await github.rest.issues.listForRepo({
+                  owner,
+                  repo,
+                  state: scope,
+                  per_page: perPage,
+                  page,
+                  sort: 'created',
+                  direction: 'desc'
+                });
+
+              if (issues.length === 0) {
+                break;
+              }
+
+              for (const issue of issues) {
+                /*
+                 * GitHub's Issue API also returns Pull Requests.
+                 * Skip them.
+                 */
+                if (issue.pull_request) {
+                  continue;
+                }
+
+                const result =
+                  await processIssue(issue);
+
+                processed++;
+                added += result.add.length;
+                removed += result.remove.length;
+
+                if (processed >= limit) {
+                  break;
+                }
+              }
+
+              if (issues.length < perPage) {
+                break;
+              }
+
+              page++;
+            }
+
+            core.summary
+              .addHeading('Bulk Issue Triage')
+              .addTable([
+                ['Scope', scope],
+                [
+                  'Limit',
+                  limit === Infinity
+                    ? 'Unlimited'
+                    : String(limit)
+                ],
+                ['Processed', String(processed)],
+                ['Labels added', String(added)],
+                ['Labels removed', String(removed)],
+                ['Dry run', dryRun ? 'Yes' : 'No']
+              ])
+              .write();
+
+            core.info(
+              `Finished: ${processed} issues processed`
+            );
