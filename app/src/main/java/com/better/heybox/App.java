@@ -64,6 +64,9 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     /** 每日任务：分享渠道（QQ=QQ/QQ空间，WECHAT=微信好友/朋友圈；默认 QQ） */
     public static final String KEY_SHARE_CHANNEL = "daily_task_channel_type";
 
+    /** 每日任务：三种分享全部完成后自动退回首页（默认开） */
+    public static final String KEY_DAILY_TASK_BACK_HOME = "daily_task_back_home";
+
     /** 伪装授予通知权限：让小黑盒认为通知已开启，获得签到加成（不真正申请权限） */
     public static final String KEY_FAKE_NOTIFICATION = "fake_notification";
 
@@ -136,6 +139,7 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
         m.put(KEY_PURIFY_SHARE_LINK, true);
         m.put(KEY_BLOCK_UPDATE, false);
         m.put(KEY_DAILY_TASK_ENABLED, false);
+        m.put(KEY_DAILY_TASK_BACK_HOME, true);
         m.put(KEY_FAKE_NOTIFICATION, false);
         m.put(KEY_LOG, false);
         m.put(KEY_WEBVIEW_DEVTOOLS, false);

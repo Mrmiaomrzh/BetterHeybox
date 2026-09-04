@@ -179,6 +179,7 @@ public final class SettingsEntryHook {
             }),
             new SettingsGroup("每日任务", new SwitchDef[]{
                     new SwitchDef("自动完成每日分享任务", null, App.KEY_DAILY_TASK_ENABLED, false, false),
+                    new SwitchDef("完成后返回首页", "三种分享全部完成后自动退回首页", App.KEY_DAILY_TASK_BACK_HOME, true, false),
                     new SwitchDef("帖子链接", "任务一：分享任意帖子", null, false, false, true, App.KEY_DAILY_TASK_PICTURE),
                     new SwitchDef("游戏详情链接", "任务二：分享游戏详情", null, false, false, true, App.KEY_DAILY_TASK_NORMAL),
                     new SwitchDef("游戏评价链接", "任务三：分享游戏评价", null, false, false, true, App.KEY_DAILY_TASK_CHANNEL),

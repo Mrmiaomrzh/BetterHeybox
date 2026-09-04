@@ -668,12 +668,33 @@ public final class DailyTaskHook {
         module.logd(Log.INFO, module.TAG, "每日任务：3 种分享类型全部完成，已记录今日状态");
         // 微信/微博回调 context 为 null，用缓存兜底
         Context ctx = context != null ? context : autoContext;
-        if (ctx != null) {
-            try {
-                Toast.makeText(ctx.getApplicationContext(),
-                        "每日分享任务已完成", Toast.LENGTH_SHORT).show();
-            } catch (Throwable ignored) {
-            }
+        if (ctx == null) {
+            return;
+        }
+        try {
+            Toast.makeText(ctx.getApplicationContext(),
+                    "每日分享任务已完成", Toast.LENGTH_SHORT).show();
+        } catch (Throwable ignored) {
+        }
+        if (module.isEnabled(App.KEY_DAILY_TASK_BACK_HOME, true)) {
+            // 延迟等分享面板收起，避免页面切换压在弹窗动画上
+            mainHandler.postDelayed(() -> backToHome(ctx), 800L);
+        }
+    }
+
+    /** 退回 MainActivity：CLEAR_TOP 清掉自动化途中打开的帖子页，首页停留在原 tab */
+    private void backToHome(Context context) {
+        try {
+            ClassLoader cl = targetCl != null ? targetCl : context.getClassLoader();
+            Class<?> main = Class.forName("com.max.xiaoheihe.MainActivity", false, cl);
+            Intent intent = new Intent(context, main)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                            | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                            | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            context.startActivity(intent);
+            module.logd(Log.INFO, module.TAG, "每日任务：已自动退回首页");
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "每日任务：退回首页失败: " + t);
         }
     }
     private String getLinkForStep(int step) {
