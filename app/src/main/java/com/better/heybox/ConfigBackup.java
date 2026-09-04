@@ -27,8 +27,19 @@ public final class ConfigBackup {
             App.KEY_GLASS_LIGHT_ALPHA,
             App.KEY_GLASS_BAR_HEIGHT,
             App.KEY_GLASS_BAR_OFFSET,
+            App.KEY_GLASS_BAR_WIDTH_MODE,
+            App.KEY_GLASS_BAR_WIDTH_PCT,
+            App.KEY_GLASS_TAB_WIDTH_PCT,
+            App.KEY_GLASS_BAR_LAYOUT,
             App.KEY_GLASS_DARK_PRESET,
             App.KEY_GLASS_LIGHT_PRESET,
+            App.KEY_POST_MIN_LEVEL,
+            App.KEY_POST_KEYWORDS,
+            App.KEY_AI_PROVIDER,
+            App.KEY_AI_BASE_URL,
+            App.KEY_AI_MODEL,
+            App.KEY_AI_PROMPT,
+            // KEY_AI_TOKEN 刻意不备份：导出文件可能被分享，避免泄露密钥
     };
     private static final String[] RESTART_KEYS = {
             App.KEY_HIDE_TAB_HOME,

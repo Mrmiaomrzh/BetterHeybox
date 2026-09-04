@@ -17,6 +17,10 @@ final class GlassConfig {
     private static final boolean DEFAULT_FIT_TABS = false;
     private static final int DEFAULT_BAR_HEIGHT = 0;
     private static final int DEFAULT_BAR_OFFSET = 16;
+    private static final int DEFAULT_BAR_WIDTH_MODE = 0;
+    private static final int DEFAULT_BAR_WIDTH_PCT = 100;
+    private static final int DEFAULT_TAB_WIDTH_PCT = 100;
+    private static final int DEFAULT_BAR_LAYOUT = 0;
 
     static volatile int darkColor = DEFAULT_DARK_COLOR;
     static volatile int darkAlphaPct = DEFAULT_DARK_ALPHA;
@@ -27,6 +31,14 @@ final class GlassConfig {
     static volatile boolean fitTabs = DEFAULT_FIT_TABS;
     static volatile int barHeightDp = DEFAULT_BAR_HEIGHT;
     static volatile int barOffsetDp = DEFAULT_BAR_OFFSET;
+    /** 玻璃条宽度：0=自适应（按 tab 内容取宽并居中）1=占满 2=自定义百分比 */
+    static volatile int barWidthMode = DEFAULT_BAR_WIDTH_MODE;
+    /** 自定义宽度：占父容器宽度百分比（50-100） */
+    static volatile int barWidthPct = DEFAULT_BAR_WIDTH_PCT;
+    /** tab 项宽度缩放，等分默认值的百分比（50-150） */
+    static volatile int tabWidthPct = DEFAULT_TAB_WIDTH_PCT;
+    /** 底栏形态：0=自动（tab 奇数→右侧圆钮）1=经典居中加号 2=右侧圆钮 */
+    static volatile int barLayoutMode = DEFAULT_BAR_LAYOUT;
 
     private GlassConfig() {
     }
@@ -57,6 +69,10 @@ final class GlassConfig {
             fitTabs = HeyboxPrefs.getBoolean(App.KEY_GLASS_FIT_TABS, fitTabs);
             barHeightDp = parseInt(HeyboxPrefs.getString(App.KEY_GLASS_BAR_HEIGHT, null), barHeightDp);
             barOffsetDp = parseInt(HeyboxPrefs.getString(App.KEY_GLASS_BAR_OFFSET, null), barOffsetDp);
+            barWidthMode = parseInt(HeyboxPrefs.getString(App.KEY_GLASS_BAR_WIDTH_MODE, null), barWidthMode);
+            barWidthPct = parseInt(HeyboxPrefs.getString(App.KEY_GLASS_BAR_WIDTH_PCT, null), barWidthPct);
+            tabWidthPct = parseInt(HeyboxPrefs.getString(App.KEY_GLASS_TAB_WIDTH_PCT, null), tabWidthPct);
+            barLayoutMode = parseInt(HeyboxPrefs.getString(App.KEY_GLASS_BAR_LAYOUT, null), barLayoutMode);
         } catch (Throwable t) {
             LiquidGlassLog.logErr("config load failed", t);
         }
@@ -74,6 +90,10 @@ final class GlassConfig {
             HeyboxPrefs.setString(App.KEY_GLASS_LIGHT_ALPHA, String.valueOf(lightAlphaPct));
             HeyboxPrefs.setString(App.KEY_GLASS_BAR_HEIGHT, String.valueOf(barHeightDp));
             HeyboxPrefs.setString(App.KEY_GLASS_BAR_OFFSET, String.valueOf(barOffsetDp));
+            HeyboxPrefs.setString(App.KEY_GLASS_BAR_WIDTH_MODE, String.valueOf(barWidthMode));
+            HeyboxPrefs.setString(App.KEY_GLASS_BAR_WIDTH_PCT, String.valueOf(barWidthPct));
+            HeyboxPrefs.setString(App.KEY_GLASS_TAB_WIDTH_PCT, String.valueOf(tabWidthPct));
+            HeyboxPrefs.setString(App.KEY_GLASS_BAR_LAYOUT, String.valueOf(barLayoutMode));
         } catch (Throwable t) {
             LiquidGlassLog.logErr("config save failed", t);
         }
@@ -89,6 +109,10 @@ final class GlassConfig {
         barOffsetDp = DEFAULT_BAR_OFFSET;
         immersiveGestureNavigation = DEFAULT_IMMERSIVE;
         fitTabs = DEFAULT_FIT_TABS;
+        barWidthMode = DEFAULT_BAR_WIDTH_MODE;
+        barWidthPct = DEFAULT_BAR_WIDTH_PCT;
+        tabWidthPct = DEFAULT_TAB_WIDTH_PCT;
+        barLayoutMode = DEFAULT_BAR_LAYOUT;
     }
 
     private static int parseColor(String raw, int fallback) {

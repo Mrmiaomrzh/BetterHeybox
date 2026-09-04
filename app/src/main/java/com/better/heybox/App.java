@@ -101,11 +101,43 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
 
     public static final String KEY_GLASS_FIT_TABS = "glass_fit_tabs";
 
+    /** 玻璃条宽度模式：0=自适应（按内容居中）1=占满 2=自定义百分比（glass_bar_width_pct） */
+    public static final String KEY_GLASS_BAR_WIDTH_MODE = "glass_bar_width_mode";
+    public static final String KEY_GLASS_BAR_WIDTH_PCT = "glass_bar_width_pct";
+    /** Tab 项宽度缩放，等分默认值的百分比（50-150） */
+    public static final String KEY_GLASS_TAB_WIDTH_PCT = "glass_tab_width_pct";
+    /** 底栏形态：0=自动 1=经典居中加号 2=右侧圆形玻璃钮 */
+    public static final String KEY_GLASS_BAR_LAYOUT = "glass_bar_layout";
+
     /** 液态玻璃提供方：GlassProvider.PROVIDER_*；空串为未选择（默认自带实现） */
     public static final String KEY_GLASS_PROVIDER = "glass_provider";
 
     /** 实验性功能：屏蔽双列瀑布流（社区信息流恢复单列，仅 1.3.394 生效） */
     public static final String KEY_SINGLE_COLUMN_FEED = "single_column_feed";
+
+    /** 发帖过滤：屏蔽 LvN 以下用户发帖（"0"=关闭，#15） */
+    public static final String KEY_POST_MIN_LEVEL = "post_min_level";
+
+    /** 发帖过滤：自定义关键词，一行一个，regex: 前缀为正则（空=关闭） */
+    public static final String KEY_POST_KEYWORDS = "post_filter_keywords";
+
+    /** 发帖过滤：AI 标题党识别（默认关，标题会发往用户配置的 AI 服务商） */
+    public static final String KEY_POST_AI_ENABLED = "post_filter_ai_enabled";
+
+    /** AI 标题党：提供商预设 id（AIClickbaitChecker.PROVIDER_*，选中时自动填充地址与模型） */
+    public static final String KEY_AI_PROVIDER = "ai_provider";
+
+    /** AI 标题党：OpenAI 兼容接口地址 */
+    public static final String KEY_AI_BASE_URL = "ai_base_url";
+
+    /** AI 标题党：模型名 */
+    public static final String KEY_AI_MODEL = "ai_model";
+
+    /** AI 标题党：API Token（敏感，刻意不进配置备份） */
+    public static final String KEY_AI_TOKEN = "ai_token";
+
+    /** AI 标题党：判定提示词（空=内置默认） */
+    public static final String KEY_AI_PROMPT = "ai_prompt";
 
     /** 参考项目玻璃颜色预设/透明度/布局参数 */
     public static final String KEY_GLASS_DARK_PRESET = "glass_dark_preset";
@@ -148,6 +180,7 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
         m.put(KEY_GLASS_ADAPTIVE, true);
         m.put(KEY_GLASS_FIT_TABS, false);
         m.put(KEY_SINGLE_COLUMN_FEED, false);
+        m.put(KEY_POST_AI_ENABLED, false);
         return m;
     }
 

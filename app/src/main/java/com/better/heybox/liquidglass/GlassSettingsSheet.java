@@ -167,8 +167,8 @@ public final class GlassSettingsSheet {
                     LiquidGlassInstaller.refreshGlass();
                 }));
         switchCard.addView(divider(activity, divider, density));
-        switchCard.addView(switchRow(activity, "玻璃宽度自适应",
-                "隐藏标签后底栏宽度随可见标签数收缩，选中项加长",
+        switchCard.addView(switchRow(activity, "加长选中 Tab",
+                "隐藏标签后选中项加长，底栏随可见数量收缩；建议隐藏加号后使用",
                 GlassConfig.fitTabs, textPrimary, textSecondary, accent, density,
                 (buttonView, isChecked) -> {
                     GlassConfig.fitTabs = isChecked;
@@ -228,7 +228,160 @@ public final class GlassSettingsSheet {
                     LiquidGlassInstaller.applyBarGeometry();
                     return value + "dp";
                 }));
+        layoutCard.addView(divider(activity, divider, density));
+        layoutCard.addView(widthModeGroup(activity, textPrimary, textSecondary,
+                accent, divider, density));
+        layoutCard.addView(divider(activity, divider, density));
+        layoutCard.addView(sliderRow(activity, "Tab 宽度",
+                GlassConfig.tabWidthPct + "%", textPrimary, textSecondary, accent,
+                50, 150, GlassConfig.tabWidthPct, density, value -> {
+                    GlassConfig.tabWidthPct = value;
+                    GlassConfig.save(activity);
+                    LiquidGlassInstaller.applyBarGeometry();
+                    return value + "%";
+                }));
+        layoutCard.addView(divider(activity, divider, density));
+        layoutCard.addView(barLayoutGroup(activity, textPrimary, textSecondary,
+                accent, divider, density));
         return layoutCard;
+    }
+
+    private static final int[] WIDTH_MODE_VALUES = {0, 1, 2};
+
+    /** 玻璃条宽度三模式 chips（自适应/占满/自定义）+ 仅自定义模式可见的百分比滑杆 */
+    private static View widthModeGroup(Activity activity, int textPrimary,
+                                       int textSecondary, int accent, int hairline,
+                                       float density) {
+        LinearLayout group = new LinearLayout(activity);
+        group.setOrientation(LinearLayout.VERTICAL);
+        group.setPadding(0, (int) (10f * density), 0, (int) (6f * density));
+        TextView title = new TextView(activity);
+        title.setText("玻璃条宽度");
+        title.setTextColor(textPrimary);
+        title.setTextSize(15f);
+        group.addView(title, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        View slider = sliderRow(activity, "自定义宽度",
+                GlassConfig.barWidthPct + "%", textPrimary, textSecondary, accent,
+                50, 100, GlassConfig.barWidthPct, density, value -> {
+                    GlassConfig.barWidthPct = value;
+                    GlassConfig.save(activity);
+                    LiquidGlassInstaller.applyBarGeometry();
+                    return value + "%";
+                });
+        LinearLayout chips = new LinearLayout(activity);
+        chips.setOrientation(LinearLayout.HORIZONTAL);
+        chips.setPadding(0, (int) (10f * density), 0, 0);
+        final String[] names = {"自适应", "占满", "自定义"};
+        final Runnable sync = () -> {
+            boolean custom = GlassConfig.barWidthMode == 2;
+            slider.setVisibility(custom ? View.VISIBLE : View.GONE);
+            markChips(chips, WIDTH_MODE_VALUES, GlassConfig.barWidthMode,
+                    accent, hairline, density);
+        };
+        for (int i = 0; i < names.length; i++) {
+            final int index = i;
+            TextView chip = chip(activity, names[i], textPrimary, density);
+            chip.setOnClickListener(v -> {
+                GlassConfig.barWidthMode = WIDTH_MODE_VALUES[index];
+                GlassConfig.save(activity);
+                LiquidGlassInstaller.applyBarGeometry();
+                sync.run();
+            });
+            chips.addView(chip, chipParams(density));
+        }
+        group.addView(chips, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        TextView hint = new TextView(activity);
+        hint.setText("自适应：按标签数量取合适宽度并居中；自定义时可用下方滑杆");
+        hint.setTextColor(textSecondary);
+        hint.setTextSize(12f);
+        hint.setPadding(0, (int) (6f * density), 0, 0);
+        group.addView(hint, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        group.addView(slider, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        sync.run();
+        return group;
+    }
+
+    private static final int[] BAR_LAYOUT_VALUES = {1, 2, 0};
+
+    /** 底栏形态 chips（经典居中/右侧圆钮/自动） */
+    private static View barLayoutGroup(Activity activity, int textPrimary,
+                                       int textSecondary, int accent, int hairline,
+                                       float density) {
+        LinearLayout group = new LinearLayout(activity);
+        group.setOrientation(LinearLayout.VERTICAL);
+        group.setPadding(0, (int) (10f * density), 0, (int) (6f * density));
+        TextView title = new TextView(activity);
+        title.setText("底栏形态");
+        title.setTextColor(textPrimary);
+        title.setTextSize(15f);
+        group.addView(title, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        LinearLayout chips = new LinearLayout(activity);
+        chips.setOrientation(LinearLayout.HORIZONTAL);
+        chips.setPadding(0, (int) (10f * density), 0, 0);
+        final String[] names = {"经典居中", "右侧圆钮", "自动"};
+        for (int i = 0; i < names.length; i++) {
+            final int index = i;
+            TextView chip = chip(activity, names[i], textPrimary, density);
+            chip.setOnClickListener(v -> {
+                GlassConfig.barLayoutMode = BAR_LAYOUT_VALUES[index];
+                GlassConfig.save(activity);
+                LiquidGlassInstaller.applyBarGeometry();
+                markChips(chips, BAR_LAYOUT_VALUES, GlassConfig.barLayoutMode,
+                        accent, hairline, density);
+            });
+            chips.addView(chip, chipParams(density));
+        }
+        group.addView(chips, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        TextView hint = new TextView(activity);
+        hint.setText("自动：tab 为奇数时自动切到右侧圆钮形态");
+        hint.setTextColor(textSecondary);
+        hint.setTextSize(12f);
+        hint.setPadding(0, (int) (6f * density), 0, 0);
+        group.addView(hint, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        markChips(chips, BAR_LAYOUT_VALUES, GlassConfig.barLayoutMode,
+                accent, hairline, density);
+        return group;
+    }
+
+    private static TextView chip(Activity activity, String text, int textPrimary,
+                                 float density) {
+        TextView chip = new TextView(activity);
+        chip.setText(text);
+        chip.setTextSize(13f);
+        chip.setTextColor(textPrimary);
+        chip.setPadding((int) (12f * density), (int) (6f * density),
+                (int) (12f * density), (int) (6f * density));
+        return chip;
+    }
+
+    private static LinearLayout.LayoutParams chipParams(float density) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.rightMargin = (int) (8f * density);
+        return lp;
+    }
+
+    private static void markChips(LinearLayout chips, int[] values, int current,
+                                  int accent, int hairline, float density) {
+        for (int i = 0; i < chips.getChildCount(); i++) {
+            View c = chips.getChildAt(i);
+            GradientDrawable gd = new GradientDrawable();
+            gd.setCornerRadius(14f * density);
+            boolean selected = i < values.length && values[i] == current;
+            gd.setColor(selected ? (0x14000000 | (accent & 0x00FFFFFF))
+                    : android.graphics.Color.TRANSPARENT);
+            gd.setStroke(Math.max(1, (int) (1f * density)),
+                    selected ? accent : hairline);
+            c.setBackground(gd);
+        }
     }
 
     private static LinearLayout buildResetCard(Activity activity, int cardBg, float density) {
