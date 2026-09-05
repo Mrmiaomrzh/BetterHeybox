@@ -82,6 +82,27 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     /** 净化分享链接：复制链接 / 系统分享时去掉 sid、share_app_id 等追踪参数（默认开） */
     public static final String KEY_PURIFY_SHARE_LINK = "purify_share_link";
 
+    /** 浏览器重定向：内置网页中的外部链接改由系统浏览器打开（默认关） */
+    public static final String KEY_BROWSER_REDIRECT = "browser_redirect";
+
+    /** 浏览器重定向：已知小黑盒域名也重定向（登录/支付等敏感页仍强制内置） */
+    public static final String KEY_BROWSER_REDIRECT_KNOWN = "browser_redirect_known_hosts";
+
+    /** 浏览器重定向：强制重定向域名，一行一个（优先级最高，开了重定向才生效） */
+    public static final String KEY_BROWSER_REDIRECT_FORCE = "browser_redirect_force_domains";
+
+    /** 浏览器重定向：强制内置域名，一行一个（优先级最高） */
+    public static final String KEY_BROWSER_REDIRECT_BLOCK = "browser_redirect_block_domains";
+
+    /** 浏览器重定向：指定打开用的浏览器包名（空=跟随系统默认，未设默认时系统会弹选择框） */
+    public static final String KEY_BROWSER_TARGET = "browser_redirect_package";
+
+    /** 网页日志：记录内置浏览器打开的页面与标题 */
+    public static final String KEY_WEB_LOG = "web_log";
+
+    /** 网页日志数据：最近 N 条页面记录（hook 侧写入，设置页查看） */
+    public static final String KEY_WEB_LOG_DATA = "web_log_data";
+
     /** 日志开关：开启后自动记录模块日志到文件 */
     public static final String KEY_LOG = "log";
 
@@ -172,6 +193,9 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
         m.put(KEY_VIDEO_DOWNLOAD, true);
         m.put(KEY_VIDEO_TO_MP4, true);
         m.put(KEY_PURIFY_SHARE_LINK, true);
+        m.put(KEY_BROWSER_REDIRECT, false);
+        m.put(KEY_BROWSER_REDIRECT_KNOWN, false);
+        m.put(KEY_WEB_LOG, false);
         m.put(KEY_BLOCK_UPDATE, false);
         m.put(KEY_DAILY_TASK_ENABLED, false);
         m.put(KEY_DAILY_TASK_BACK_HOME, true);

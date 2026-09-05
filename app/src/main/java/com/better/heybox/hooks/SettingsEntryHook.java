@@ -113,7 +113,8 @@ public final class SettingsEntryHook {
     enum Action {
         NONE, EDIT_LINK, CLEAR_DAILY, CHANNEL, EXPORT, IMPORT,
         EXPORT_LOG, RUNTIME_STATUS, OPEN_WEB, PICK_DIR, RESET_GLASS, CHOOSE_GLASS,
-        POST_LEVEL, POST_KEYWORDS, AI_PROVIDER, AI_PROMPT, AI_TEST
+        POST_LEVEL, POST_KEYWORDS, AI_PROVIDER, AI_PROMPT, AI_TEST,
+        REDIRECT_FORCE, REDIRECT_BLOCK, REDIRECT_TARGET, WEB_LOG
     }
 
     private static class SwitchDef {
@@ -191,9 +192,6 @@ public final class SettingsEntryHook {
                     new SwitchDef("伪装通知权限", "让小黑盒认为通知已开启，获得签到加成", App.KEY_FAKE_NOTIFICATION, false, false),
                     new SwitchDef("屏蔽更新", "屏蔽小黑盒更新入口", App.KEY_BLOCK_UPDATE, false, false),
                     new SwitchDef("记录日志", null, App.KEY_LOG, false, false),
-                    new SwitchDef("网页 DevTools", "为小黑盒内置网页开启 Chrome 远程调试", App.KEY_WEBVIEW_DEVTOOLS, false, false),
-                    new SwitchDef("打开网页", "使用小黑盒内置浏览器打开指定网页", null, false, false,
-                            true, App.KEY_WEBVIEW_ENTRY_URL, Action.OPEN_WEB),
                     new SwitchDef("导出日志", null, null, false, false, true, null, Action.EXPORT_LOG),
             }),
             new SettingsGroup("配置备份", new SwitchDef[]{
@@ -213,13 +211,10 @@ public final class SettingsEntryHook {
         });
     }
 
-    /** 「通用」分组标题（BASE_GROUPS 中的插入定位点，勿随意改名） */
     private static final String TITLE_GENERAL = "通用";
-    /** 实验性功能（屏蔽双列）目标构建：1.3.394 (1127)，其余版本不显示开关 */
     private static final String EXPERIMENTAL_HEYBOX_VERSION = "1.3.394";
     private static final long EXPERIMENTAL_HEYBOX_CODE = 1127L;
 
-    /** 顺序组装全部分组：底部导航栏隐藏置顶 → BASE_GROUPS → 发帖过滤（广告过滤之后）→ 运行状态行（Debug）→ 液态玻璃插到「通用」前 → 实验组 */
     private List<SettingsGroup> buildSettingsGroups(Activity activity) {
         List<SettingsGroup> groups = new ArrayList<>();
         groups.add(buildBottomTabGroup(activity));
@@ -227,6 +222,7 @@ public final class SettingsEntryHook {
             groups.add(g);
         }
         insertPostFilterGroup(groups);
+        insertBrowserRedirectGroup(activity, groups);
         if (BuildFlags.DEBUG) {
             addRuntimeStatusRow(groups);
         }
@@ -251,10 +247,8 @@ public final class SettingsEntryHook {
         return groups;
     }
 
-    /** 「广告过滤」分组标题（发帖过滤分组的插入定位点） */
     private static final String TITLE_AD_FILTER = "广告过滤";
 
-    /** 发帖过滤分组 */
     private void insertPostFilterGroup(List<SettingsGroup> groups) {
         int minLevel = 0;
         try {
@@ -307,10 +301,55 @@ public final class SettingsEntryHook {
         groups.add(insertAt, group);
     }
 
-    /**
-     * 液态玻璃分组动态组装：提供方切换行仅在检测到独立模块（或已做过选择）时出现，
-     * 自带玻璃各选项仅在自带实现生效时出现，避免选外部模块后残留无效选项
-     */
+    private static final String TITLE_SHARE_PURIFY = "分享净化";
+
+    private void insertBrowserRedirectGroup(Activity activity, List<SettingsGroup> groups) {
+        int forceCount = countConfiguredLines(module.getString(App.KEY_BROWSER_REDIRECT_FORCE, ""));
+        int blockCount = countConfiguredLines(module.getString(App.KEY_BROWSER_REDIRECT_BLOCK, ""));
+        SettingsGroup group = new SettingsGroup("网页", new SwitchDef[]{
+                new SwitchDef("重定向外部链接",
+                        "内置网页中的外部链接改用系统浏览器打开", App.KEY_BROWSER_REDIRECT, false, false),
+                new SwitchDef("包含小黑盒域名",
+                        "已知小黑盒域名也重定向；敏感页仍强制内置",
+                        App.KEY_BROWSER_REDIRECT_KNOWN, false, false),
+                new SwitchDef("重定向浏览器",
+                        "当前：" + browserTargetLabel(activity) + "，点击选择",
+                        null, false, false, true, null, Action.REDIRECT_TARGET),
+                new SwitchDef("强制重定向域名",
+                        forceCount > 0 ? "已配置 " + forceCount + " 个，点击编辑"
+                                : "一行一个，总是用外部浏览器打开",
+                        null, false, false, true, null, Action.REDIRECT_FORCE),
+                new SwitchDef("强制内置域名",
+                        blockCount > 0 ? "已配置 " + blockCount + " 个，点击编辑"
+                                : "一行一个，总是留在内置浏览器",
+                        null, false, false, true, null, Action.REDIRECT_BLOCK),
+                new SwitchDef("网页 DevTools", "为内置网页开启 Chrome 远程调试", App.KEY_WEBVIEW_DEVTOOLS, false, false),
+                new SwitchDef("打开网页", "使用小黑盒内置浏览器打开指定网页", null, false, false,
+                        true, App.KEY_WEBVIEW_ENTRY_URL, Action.OPEN_WEB),
+                new SwitchDef("网页日志",
+                        "记录内置浏览器打开的页面与标题", App.KEY_WEB_LOG, false, false),
+                new SwitchDef("查看网页日志", null, null, false, false, true, null, Action.WEB_LOG),
+        });
+        int insertAt = groups.size();
+        for (int i = 0; i < groups.size(); i++) {
+            if (TITLE_SHARE_PURIFY.equals(groups.get(i).title)) {
+                insertAt = i + 1;
+                break;
+            }
+        }
+        groups.add(insertAt, group);
+    }
+
+    private static int countConfiguredLines(String raw) {
+        int count = 0;
+        for (String line : raw.split("\n")) {
+            if (!line.trim().isEmpty()) {
+                count++;
+            }
+        }
+        return count;
+    }
+
     private SettingsGroup buildGlassGroup(Activity activity) {
         boolean switchable = GlassProvider.isHbmodInstalled(activity)
                 || GlassProvider.prefersHbmod(module);
@@ -360,7 +399,6 @@ public final class SettingsEntryHook {
             Class<?> clazz = Class.forName("com.max.xiaoheihe.module.account.GeneralSettingsActivity", false, cl);
             Method setupMethod = findSetupMethod(clazz);
             if (setupMethod == null) {
-                // 混淆名全部失效时的兜底：挂生命周期方法，靠重试循环等待列表构建完成
                 setupMethod = findLifecycleFallback(clazz);
             }
             if (setupMethod == null) {
@@ -372,7 +410,6 @@ public final class SettingsEntryHook {
                 Object result = chain.proceed();
                 try {
                     Object thisObj = chain.getThisObject();
-                    // 兜底走生命周期方法时可能命中父类实现，仅对设置页 Activity 生效
                     if (thisObj instanceof Activity && entryClass.isInstance(thisObj)) {
                         final Activity activity = (Activity) thisObj;
                         activity.getWindow().getDecorView().post(new Runnable() {
@@ -387,14 +424,12 @@ public final class SettingsEntryHook {
                 }
                 return result;
             });
-            // 内嵌面板导入/导出依赖文件选择结果
             hookActivityResult(clazz);
             module.logd(Log.INFO, module.TAG, "✔ 设置页入口 Hook 已安装 (" + setupMethod.getName() + "+retry)");
         } catch (Throwable t) {
             module.logd(Log.ERROR, module.TAG, "✘ 设置页入口 Hook 失败", t);
         }
     }
-    /** 入口方法解析：先按已知混淆名快速匹配，跨版本失效后由 {@link #findLifecycleFallback} 兜底 */
     private Method findSetupMethod(Class<?> clazz) {
         for (String name : new String[]{"G1", "L1"}) {
             try {
@@ -405,7 +440,6 @@ public final class SettingsEntryHook {
         return null;
     }
 
-    /** 沿继承链找 onResume（框架方法名永不混淆） */
     private Method findLifecycleFallback(Class<?> clazz) {
         Class<?> c = clazz;
         while (c != null && c != Object.class) {
@@ -462,7 +496,6 @@ public final class SettingsEntryHook {
         return null;
     }
 
-    /** 文件选择结果分发：仅处理内嵌面板的请求码，其余原样放行 */
     private void handleEmbeddedPickResult(int requestCode, int resultCode, Intent data) {
         if (requestCode == REQUEST_PICK_SAVE_DIR) {
             handleSaveDirResult(resultCode, data);
@@ -484,7 +517,6 @@ public final class SettingsEntryHook {
         }
     }
 
-    /** 保存位置选择结果：持久化授权并写入配置（空值 = 恢复默认 Movies/BetterHeybox） */
     private void handleSaveDirResult(int resultCode, Intent data) {
         Context context = mSettingsPanel != null && mSettingsPanel.get() != null
                 ? ((View) mSettingsPanel.get()).getContext() : null;
@@ -508,7 +540,6 @@ public final class SettingsEntryHook {
         LogRecorder.recordEvent("视频保存位置已设置: " + treeUri);
     }
 
-    /** 查询文件夹显示名（查询失败返回 null） */
     private String queryDirDisplayName(Context context, Uri treeUri) {
         try {
             android.database.Cursor c = context.getContentResolver().query(
@@ -529,7 +560,6 @@ public final class SettingsEntryHook {
         return null;
     }
 
-    /** 原生确认弹窗正文：主文字色 + 弹窗内边距（保存位置/导入确认共用） */
     private TextView buildDialogMessage(Activity activity, String text) {
         TextView message = new TextView(activity);
         int pad = module.dp(activity, 10);
@@ -571,7 +601,6 @@ public final class SettingsEntryHook {
         void call(DexKitResolver.HeyboxDialogSpec spec) throws Throwable;
     }
 
-    /** 未设置时直接打开选择器，已设置时给换目录/恢复默认选项 */
     private void showSaveDirDialog(final Activity activity) {
         String current = HeyboxPrefs.getString(App.KEY_VIDEO_DIR, null);
         if (current == null || !current.startsWith("content:")) {
@@ -601,7 +630,6 @@ public final class SettingsEntryHook {
         module.logd(Log.INFO, module.TAG, "✔ 使用小黑盒原生弹窗管理保存位置");
     }
 
-    /** 保存位置展示名：优先查 DocumentsProvider 显示名，失败则取 URI 末段，再不行给通用描述 */
     private String describeSaveDir(Activity activity, String current) {
         String name = queryDirDisplayName(activity, Uri.parse(current));
         if (name == null || name.isEmpty()) {
@@ -637,7 +665,6 @@ public final class SettingsEntryHook {
         }
     }
 
-    /** 调起系统文件夹选择器（SAF），结果经 onActivityResult Hook 回调 */
     private void startDirPicker(Activity activity) {
         try {
             Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
@@ -1063,6 +1090,22 @@ public final class SettingsEntryHook {
                     case AI_TEST:
                         setRowClick(itemCls, item, v -> testAiConnection(activity));
                         break;
+                    case REDIRECT_FORCE:
+                        setRowClick(itemCls, item, v -> showMultilineEditDialog(activity,
+                                "强制重定向域名", App.KEY_BROWSER_REDIRECT_FORCE,
+                                "一行一个域名或完整链接，总是用外部浏览器打开", false));
+                        break;
+                    case REDIRECT_BLOCK:
+                        setRowClick(itemCls, item, v -> showMultilineEditDialog(activity,
+                                "强制内置域名", App.KEY_BROWSER_REDIRECT_BLOCK,
+                                "一行一个域名或完整链接，总是留在内置浏览器", false));
+                        break;
+                    case REDIRECT_TARGET:
+                        setRowClick(itemCls, item, v -> showBrowserTargetDialog(activity));
+                        break;
+                    case WEB_LOG:
+                        setRowClick(itemCls, item, v -> showWebLogDialog(activity));
+                        break;
                     case EDIT_LINK:
                     default:
                         setRowClick(itemCls, item, v -> showEditLinkDialog(activity, def.title, editKey));
@@ -1081,6 +1124,7 @@ public final class SettingsEntryHook {
             }
             boolean cur = readEmbeddedBoolean(def.key, def.def);
             itemCls.getMethod("setChecked", boolean.class, boolean.class).invoke(item, cur, false);
+            registerSwitchItem(def.key, item);
             Class<?> listenerCls = Class.forName(
                     "android.widget.CompoundButton$OnCheckedChangeListener", false, cl);
             Object listener = new CompoundButton.OnCheckedChangeListener() {
@@ -1095,6 +1139,7 @@ public final class SettingsEntryHook {
                                 || App.KEY_COPY_POST.equals(def.key)) {
                             TextSelectHook.refresh();
                         }
+                        applySwitchMutex(activity, def.key, isChecked);
                     } catch (Throwable t) {
                         module.logd(Log.ERROR, module.TAG, "开关监听回调异常: " + def.title, t);
                     }
@@ -1110,6 +1155,64 @@ public final class SettingsEntryHook {
             return null;
         }
     }
+    /** 已建开关行的登记表（key → 视图弱引用），供联动原地翻转，避免整页重建 */
+    private final java.util.HashMap<String, WeakReference<Object>> sSwitchItems = new java.util.HashMap<>();
+
+    private void registerSwitchItem(String key, Object item) {
+        synchronized (sSwitchItems) {
+            sSwitchItems.put(key, new WeakReference<>(item));
+        }
+    }
+
+    /**
+     * 开关联动（互斥/主从），原地更新联动开关：
+     * 重定向外部链接 ↔ 网页 DevTools 互斥；包含小黑盒域名为从开关，跟随重定向主开关
+     */
+    private void applySwitchMutex(Activity activity, String key, boolean checked) {
+        if (App.KEY_BROWSER_REDIRECT.equals(key)) {
+            if (checked) {
+                // 重定向开启：页面转出内置浏览器，DevTools 失去意义
+                setSwitchPref(activity, App.KEY_WEBVIEW_DEVTOOLS, false);
+            } else {
+                // 主开关关闭：从开关一并关闭
+                setSwitchPref(activity, App.KEY_BROWSER_REDIRECT_KNOWN, false);
+            }
+        } else if (App.KEY_WEBVIEW_DEVTOOLS.equals(key)) {
+            if (checked) {
+                setSwitchPref(activity, App.KEY_BROWSER_REDIRECT, false);
+                setSwitchPref(activity, App.KEY_BROWSER_REDIRECT_KNOWN, false);
+            }
+        } else if (App.KEY_BROWSER_REDIRECT_KNOWN.equals(key) && checked) {
+            // 从开关打开时主开关必须开启
+            setSwitchPref(activity, App.KEY_BROWSER_REDIRECT, true);
+        }
+    }
+
+    /** 写值并原地翻转面板上对应开关；与当前值一致则不动，返回是否实际写入 */
+    private boolean setSwitchPref(Activity activity, String key, boolean value) {
+        boolean current = readEmbeddedBoolean(key,
+                Boolean.TRUE.equals(App.BOOLEAN_DEFAULTS.get(key)));
+        if (current == value) {
+            return false;
+        }
+        writeEmbeddedBoolean(activity, key, value);
+        WeakReference<Object> ref;
+        synchronized (sSwitchItems) {
+            ref = sSwitchItems.get(key);
+        }
+        Object item = ref == null ? null : ref.get();
+        if (item != null) {
+            try {
+                // 程序化 setChecked 会再触发一次监听器，但值已收敛，联动为空操作不会循环
+                item.getClass().getMethod("setChecked", boolean.class, boolean.class)
+                        .invoke(item, value, false);
+            } catch (Throwable t) {
+                module.logd(Log.WARN, module.TAG, "联动开关原地更新失败: " + key, t);
+            }
+        }
+        return true;
+    }
+
     /** 「标题下描述」可见性开关（SettingItemView.f(boolean)），每进程解析一次 */
     private static Method sDescToggle;
     private static final String DESC_PROBE_TEXT = "BH_DESC_PROBE";
@@ -1276,7 +1379,6 @@ public final class SettingsEntryHook {
                 () -> showGlassProviderDialogFallback(activity));
     }
 
-    /** 样式与「分享渠道」弹窗一致：小黑盒原生框 + 选项行，当前项高亮 */
     private void showGlassProviderDialogNative(final Activity activity,
                                                DexKitResolver.HeyboxDialogSpec spec) throws Exception {
         String current = module.getString(App.KEY_GLASS_PROVIDER, "");
@@ -1311,23 +1413,45 @@ public final class SettingsEntryHook {
             }
         } catch (Throwable ignored) {
         }
-        // 复用小黑盒自带重启提示（含重启入口）
-        showRestartAppDialog(activity, activity.getClassLoader());
+                showRestartAppDialog(activity, activity.getClassLoader());
     }
-
-    // ---------- 发帖过滤（#15） ----------
 
     private static final String[] POST_LEVEL_VALUES = {
             "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"};
     private static final String[] POST_LEVEL_LABELS = {
             "关闭", "Lv1", "Lv2", "Lv3", "Lv4", "Lv5", "Lv6", "Lv7", "Lv8", "Lv9", "Lv10"};
 
-    /** 面板已打开时重建以刷新描述 */
     private void refreshEmbeddedPanel(Activity activity) {
         View panel = mSettingsPanel == null ? null : mSettingsPanel.get();
-        if (panel != null && panel.getParent() != null) {
-            showEmbeddedSettings(activity);
+        if (panel == null || panel.getParent() == null) {
+            return;
         }
+        ScrollView old = findScroller(panel);
+        final int scrollY = old == null ? 0 : old.getScrollY();
+        showEmbeddedSettings(activity);
+        View fresh = mSettingsPanel == null ? null : mSettingsPanel.get();
+        if (fresh != null) {
+            ScrollView scroller = findScroller(fresh);
+            if (scroller != null) {
+                scroller.post(() -> scroller.scrollTo(0, scrollY));
+            }
+        }
+    }
+
+    private static ScrollView findScroller(View root) {
+        if (root instanceof ScrollView) {
+            return (ScrollView) root;
+        }
+        if (root instanceof ViewGroup) {
+            ViewGroup vg = (ViewGroup) root;
+            for (int i = 0; i < vg.getChildCount(); i++) {
+                ScrollView found = findScroller(vg.getChildAt(i));
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
     }
 
     private void showPostLevelDialog(final Activity activity) {
@@ -1459,6 +1583,32 @@ public final class SettingsEntryHook {
                 }
             }
             normalized = sb.toString();
+        } else if (App.KEY_BROWSER_REDIRECT_FORCE.equals(key)
+                || App.KEY_BROWSER_REDIRECT_BLOCK.equals(key)) {
+            StringBuilder sb = new StringBuilder();
+            java.util.Set<String> seen = new java.util.HashSet<>();
+            for (String line : raw.split("\n")) {
+                String d = line.trim().toLowerCase();
+                if (d.isEmpty()) {
+                    continue;
+                }
+                if (d.startsWith("http://")) {
+                    d = d.substring(7);
+                } else if (d.startsWith("https://")) {
+                    d = d.substring(8);
+                }
+                int slash = d.indexOf('/');
+                if (slash >= 0) {
+                    d = d.substring(0, slash);
+                }
+                if (!d.isEmpty() && seen.add(d)) {
+                    if (sb.length() > 0) {
+                        sb.append('\n');
+                    }
+                    sb.append(d);
+                }
+            }
+            normalized = sb.toString();
         } else {
             normalized = raw.trim();
         }
@@ -1482,7 +1632,6 @@ public final class SettingsEntryHook {
                 index -> applyAiProvider(activity, index)));
     }
 
-    /** 选预设自动填充地址与模型 */
     private void applyAiProvider(Activity activity, int index) {
         try {
             HeyboxPrefs.setString(App.KEY_AI_PROVIDER, AIClickbaitChecker.PROVIDER_IDS[index]);
@@ -1509,7 +1658,6 @@ public final class SettingsEntryHook {
                 Toast.LENGTH_LONG).show());
     }
 
-    /** 未选择提供方时弹实现选择（触发点：MainActivity 启动）；sLaunchPromptShown 保证每次进程启动至多一次 */
     private void maybePromptGlassProvider(final Activity activity) {
         try {
             if (sLaunchPromptShown) {
@@ -1786,8 +1934,179 @@ public final class SettingsEntryHook {
         }
     }
 
-    private void showEmbeddedRuntimeStatus(Activity activity) {
+    /** 网页日志弹窗（小黑盒原生样式）：展示 / 全部复制 / 清空（hook 与面板同进程，直读 HeyboxPrefs） */
+    private void showWebLogDialog(Activity activity) {
+        withHeyboxDialog(activity,
+                spec -> showWebLogDialogNative(activity, spec),
+                () -> showWebLogDialogFallback(activity));
+    }
+
+    private TextView buildWebLogText(Activity activity) {
+        String data = HeyboxPrefs.getString(App.KEY_WEB_LOG_DATA, "");
+        TextView text = buildDialogMessage(activity, data.isEmpty()
+                ? "暂无记录，开启「网页日志」后访问内置网页即开始记录" : data);
+        text.setTextIsSelectable(true);
+        return text;
+    }
+
+    private void showWebLogDialogNative(final Activity activity,
+                                        DexKitResolver.HeyboxDialogSpec spec) throws Exception {
+        int pad = module.dp(activity, 10);
+        ScrollView scroller = new ScrollView(activity);
+        LinearLayout box = new LinearLayout(activity);
+        box.setOrientation(LinearLayout.VERTICAL);
+        TextView copyRow = new TextView(activity);
+        copyRow.setText("全部复制");
+        copyRow.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        copyRow.setPadding(pad, pad, pad, 0);
+        copyRow.setTextColor(hostColor(activity, "color_text_link_day_night", 0xFF1677FF));
+        copyRow.setClickable(true);
+        copyRow.setOnClickListener(v -> copyWebLog(activity));
+        box.addView(copyRow, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        box.addView(buildWebLogText(activity));
+        // 中心视图必须给定宽高，否则被对话框容器按 wrap_content 收成窄列
+        scroller.addView(box, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        scroller.setLayoutParams(new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, module.dp(activity, 400)));
+        spec.buildAndShow(activity, "网页日志", scroller,
+                "清空", (d, w) -> {
+                    BrowserRedirectHook.clearLog();
+                    Toast.makeText(activity, "网页日志已清空", Toast.LENGTH_SHORT).show();
+                    d.dismiss();
+                },
+                "关闭", (d, w) -> d.dismiss());
+    }
+
+    private void showWebLogDialogFallback(final Activity activity) {
         try {
+            ScrollView scroller = new ScrollView(activity);
+            scroller.addView(buildWebLogText(activity));
+            new AlertDialog.Builder(activity)
+                    .setTitle("网页日志")
+                    .setView(scroller)
+                    .setPositiveButton("清空", (d, w) -> {
+                        BrowserRedirectHook.clearLog();
+                        Toast.makeText(activity, "网页日志已清空", Toast.LENGTH_SHORT).show();
+                    })
+                    .setNeutralButton("全部复制", (d, w) -> copyWebLog(activity))
+                    .setNegativeButton("关闭", null)
+                    .show();
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "网页日志弹窗失败: " + t);
+        }
+    }
+
+    private void copyWebLog(Activity activity) {
+        try {
+            android.content.ClipboardManager cm = (android.content.ClipboardManager)
+                    activity.getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm != null) {
+                cm.setPrimaryClip(android.content.ClipData.newPlainText(
+                        "BetterHeybox 网页日志", HeyboxPrefs.getString(App.KEY_WEB_LOG_DATA, "")));
+                Toast.makeText(activity, "已复制全部日志", Toast.LENGTH_SHORT).show();
+            }
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "网页日志复制失败", t);
+        }
+    }
+
+    /** 当前重定向浏览器描述（跟随系统 / 应用名） */
+    private String browserTargetLabel(Activity activity) {
+        String pkg = module.getString(App.KEY_BROWSER_TARGET, "");
+        if (pkg.isEmpty()) {
+            return "跟随系统";
+        }
+        try {
+            android.content.pm.PackageManager pm = activity.getPackageManager();
+            return pm.getApplicationLabel(
+                    pm.getApplicationInfo(pkg, 0)).toString() + "（" + pkg + "）";
+        } catch (Throwable t) {
+            return pkg;
+        }
+    }
+
+    /** 枚举已装浏览器（排除小黑盒自身；宿主声明 QUERY_ALL_PACKAGES，可直接查询） */
+    private List<String[]> installedBrowsers(Activity activity) {
+        List<String[]> out = new ArrayList<>();
+        try {
+            android.content.pm.PackageManager pm = activity.getPackageManager();
+            List<android.content.pm.ResolveInfo> infos = pm.queryIntentActivities(
+                    new Intent(Intent.ACTION_VIEW, Uri.parse("http://www.example.com/")), 0);
+            java.util.LinkedHashMap<String, android.content.pm.ResolveInfo> byPkg =
+                    new java.util.LinkedHashMap<>();
+            for (android.content.pm.ResolveInfo info : infos) {
+                if (info.activityInfo == null) {
+                    continue;
+                }
+                String pkg = info.activityInfo.packageName;
+                if (pkg == null || MainModule.TARGET_PKG.equals(pkg)) {
+                    continue;
+                }
+                byPkg.putIfAbsent(pkg, info);
+            }
+            for (android.content.pm.ResolveInfo info : byPkg.values()) {
+                String label;
+                try {
+                    label = info.loadLabel(pm).toString();
+                } catch (Throwable t) {
+                    label = info.activityInfo.packageName;
+                }
+                out.add(new String[]{label, info.activityInfo.packageName});
+            }
+            out.sort((a, b) -> a[0].compareToIgnoreCase(b[0]));
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "枚举浏览器失败: " + t);
+        }
+        return out;
+    }
+
+    private void showBrowserTargetDialog(Activity activity) {
+        List<String[]> browsers = installedBrowsers(activity);
+        if (browsers.isEmpty()) {
+            showEditLinkDialog(activity, "重定向浏览器包名", App.KEY_BROWSER_TARGET);
+            return;
+        }
+        String[] values = new String[browsers.size() + 1];
+        String[] labels = new String[browsers.size() + 1];
+        values[0] = "";
+        labels[0] = "跟随系统";
+        for (int i = 0; i < browsers.size(); i++) {
+            values[i + 1] = browsers.get(i)[1];
+            labels[i + 1] = browsers.get(i)[0] + "（" + browsers.get(i)[1] + "）";
+        }
+        String cur = module.getString(App.KEY_BROWSER_TARGET, "");
+        int checked = 0;
+        for (int i = 0; i < values.length; i++) {
+            if (values[i].equals(cur)) {
+                checked = i;
+                break;
+            }
+        }
+        final int checkedIndex = checked;
+        withHeyboxDialog(activity, spec -> {
+            LinearLayout list = buildOptionRowList(activity, labels, checkedIndex);
+            Dialog dialog = spec.buildAndShow(activity, "选择重定向浏览器", list, null, null,
+                    "取消", (d, w) -> d.dismiss());
+            bindOptionRows(dialog, list, index -> applyBrowserTarget(activity, values[index], labels[index]));
+        }, () -> showSingleChoiceFallback(activity, "选择重定向浏览器", labels, checkedIndex,
+                index -> applyBrowserTarget(activity, values[index], labels[index])));
+    }
+
+    private void applyBrowserTarget(Activity activity, String pkg, String label) {
+        try {
+            HeyboxPrefs.init(activity);
+            HeyboxPrefs.setString(App.KEY_BROWSER_TARGET, pkg);
+            LogRecorder.recordEvent("重定向浏览器已选择: " + pkg);
+            Toast.makeText(activity, "重定向浏览器已设为 " + label, Toast.LENGTH_SHORT).show();
+            refreshEmbeddedPanel(activity);
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "保存重定向浏览器失败: " + t);
+        }
+    }
+
+    private void showEmbeddedRuntimeStatus(Activity activity) {        try {
             StringBuilder sb = new StringBuilder();
             sb.append("构建类型: ").append(BuildFlags.DEBUG ? "debug" : "release").append('\n');
             sb.append('\n').append("—— 本进程（小黑盒）运行检查点 ——\n")

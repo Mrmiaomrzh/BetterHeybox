@@ -14,6 +14,7 @@ import io.github.libxposed.api.XposedModule;
 
 import com.better.heybox.hooks.AdFilterHook;
 import com.better.heybox.hooks.BottomTabHook;
+import com.better.heybox.hooks.BrowserRedirectHook;
 import com.better.heybox.hooks.LiquidGlassBottomBarHook;
 import com.better.heybox.hooks.DailyTaskHook;
 import com.better.heybox.hooks.GeneralHook;
@@ -94,6 +95,7 @@ public class MainModule extends XposedModule {
         installHook("文本选择", new TextSelectHook(this)::install, cl);
         installHook("图片分享", new ImageShareHook(this)::install, cl);
         installHook("分享链接净化", new ShareLinkPurifyHook(this)::install, cl);
+        installHook("浏览器重定向", new BrowserRedirectHook(this)::install, cl);
         installHook("视频下载", new VideoDownloadHook(this)::install, cl);
         installHook("网页 DevTools", new WebViewDevToolsHook(this)::install, cl);
         installHook("每日任务", ignored -> {
