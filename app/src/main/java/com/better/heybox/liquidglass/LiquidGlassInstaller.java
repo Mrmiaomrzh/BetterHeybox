@@ -365,8 +365,9 @@ public final class LiquidGlassInstaller {
             });
             installRepeatClickRefresh(tabBar);
 
-            // 初始主题以 activity uiMode 为准（text-color 探测跨皮肤不可靠）
-            applyTabBarOverLight(tabBar, isSystemNight(activity));
+            boolean darkSeed = isSystemNight(activity);
+            sChromeLight = !darkSeed;
+            applyTabBarOverLight(tabBar, darkSeed);
 
             mountCenterButton(activity, host, midTab, tips);
             rebuildTabBar(tabBar);
@@ -592,7 +593,7 @@ public final class LiquidGlassInstaller {
                 }
                 applyTabWidths(selected);
                 tabBar.setSelectedIndex(selected);
-                applyTabBarOverLight(tabBar, sChromeLight);
+                applyTabBarOverLight(tabBar, !sChromeLight);
                 tabBar.requestLayout();
             } finally {
                 sSyncing = false;
