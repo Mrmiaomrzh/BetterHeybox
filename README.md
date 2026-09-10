@@ -17,6 +17,9 @@
 > [!WARNING]
 > 使用免Root框架`「NPatch」`时，需要把`破解签名校验`改成`Extreme`，不然会有缺少参数闪退的问题
 
+> [!Note]
+> [频道](https://t.me/Betterheybox)
+
 ## 功能
 
 所有功能开关均可在小黑盒「我的 → 设置 → 通用设置」中的 `BetterHeybox 设置` 入口直接打开模块面板，
