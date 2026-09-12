@@ -426,7 +426,13 @@ public final class PostFilterHook {
         }
         Integer level = readUserLevel(item);
         if (level == null) {
-            return module.isEnabled(App.KEY_POST_NO_LEVEL, false);
+            if (!module.isEnabled(App.KEY_POST_NO_LEVEL, false)) {
+                return false;
+            }
+            if (isPostFlowModel(item)) {
+                return true;
+            }
+            return safeInvoke(item, "getUser") != null;
         }
         return level < min;
     }
