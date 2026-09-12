@@ -223,8 +223,8 @@ public final class SettingsEntryHook {
     }
 
     private static final String TITLE_GENERAL = "通用";
-    private static final String EXPERIMENTAL_HEYBOX_VERSION = "1.3.394";
-    private static final long EXPERIMENTAL_HEYBOX_CODE = 1127L;
+    private static final String EXPERIMENTAL_HEYBOX_VERSION = "1.3.395";
+    private static final long EXPERIMENTAL_HEYBOX_CODE = 1131L;
 
     private List<SettingsGroup> buildSettingsGroups(Activity activity) {
         List<SettingsGroup> groups = new ArrayList<>();
@@ -417,7 +417,7 @@ public final class SettingsEntryHook {
                 setupMethod = findLifecycleFallback(clazz);
             }
             if (setupMethod == null) {
-                module.logd(Log.ERROR, module.TAG, "✘ 未找到设置页入口方法（G1/L1/onResume 均不可用）");
+                module.logd(Log.ERROR, module.TAG, "✘ 未找到设置页入口方法（N1/L1/G1/onResume 均不可用）");
                 return;
             }
             final Class<?> entryClass = clazz;
@@ -445,8 +445,17 @@ public final class SettingsEntryHook {
             module.logd(Log.ERROR, module.TAG, "✘ 设置页入口 Hook 失败", t);
         }
     }
+    /**
+     * 设置页初始化方法的混淆名，逐版本变化，这里按版本倒序尝试：
+     *   1.3.393 → G1
+     *   1.3.394 → L1（Robust idx 0x9169）
+     *   1.3.395 → N1（Robust idx 0x9202，字节码结构与 394 的 L1 一致）
+     * 全部落空时由 {@link #findLifecycleFallback} 回退到 onResume。
+     */
+    private static final String[] SETUP_METHOD_CANDIDATES = {"N1", "L1", "G1"};
+
     private Method findSetupMethod(Class<?> clazz) {
-        for (String name : new String[]{"G1", "L1"}) {
+        for (String name : SETUP_METHOD_CANDIDATES) {
             try {
                 return clazz.getDeclaredMethod(name);
             } catch (NoSuchMethodException ignored) {

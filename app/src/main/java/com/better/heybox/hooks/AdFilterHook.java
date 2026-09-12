@@ -118,40 +118,82 @@ public final class AdFilterHook {
     }
 
     private void hookBubbleAndCornerAds(ClassLoader cl) {
+        Class<?> clazz;
+        Class<?> callback;
         try {
-            Class<?> clazz = Class.forName("com.max.xiaoheihe.module.ads.h", false, cl);
-            Class<?> callback = Class.forName("com.max.xiaoheihe.utils.x0$g", false, cl);
-
-            // 气泡展示检查入口：l() 的参数是内部类 h$g（注意：不是 x0$g）
-            try {
-                Class<?> innerG = Class.forName("com.max.xiaoheihe.module.ads.h$g", false, cl);
-                Method l = clazz.getDeclaredMethod("l", innerG);
-                module.hook(l).intercept(chain -> {
-                    if (module.isEnabled(App.KEY_BUBBLE_AD, true)) {
-                        module.logd(Log.INFO, module.TAG, "拦截气泡广告 h.l()");
-                        return null;
-                    }
-                    return chain.proceed();
-                });
-                module.logd(Log.INFO, module.TAG, "✔ 气泡广告 Hook 已安装");
-            } catch (NoSuchMethodException ignored) {
-            }
-
-            // 广告拉取入口：阻断后 f86785b 恒为 null，角标数据源消失
-            try {
-                Method h = clazz.getDeclaredMethod("h", callback);
-                module.hook(h).intercept(chain -> {
-                    if (module.isEnabled(App.KEY_CORNER_AD, true)) {
-                        module.logd(Log.INFO, module.TAG, "拦截广告拉取 h.h()");
-                        return null;
-                    }
-                    return chain.proceed();
-                });
-                module.logd(Log.INFO, module.TAG, "✔ 角标广告拉取 Hook 已安装");
-            } catch (NoSuchMethodException ignored) {
-            }
+            clazz = Class.forName("com.max.xiaoheihe.module.ads.h", false, cl);
+            callback = Class.forName("com.max.xiaoheihe.utils.x0$g", false, cl);
         } catch (Throwable t) {
-            module.logd(Log.ERROR, module.TAG, "✘ 气泡/角标广告 Hook 失败", t);
+            module.logd(Log.ERROR, module.TAG, "✘ 未找到 module.ads.h / x0$g，气泡与角标广告 Hook 跳过", t);
+            return;
         }
+        hookBubbleAd(clazz, cl);
+        hookCornerAd(clazz, callback);
+    }
+
+    /**
+     * 跨版本候选：{方法名, 回调内部类全名}
+     * <p>1.3.395 做了一次成段混淆重排，module.ads.h 的方法从 10 个扩到 30 个：
+     * <pre>
+     *   394 h(x0$g)  -> 395 i(x0$g)      广告拉取（签名不变，可靠）
+     *   394 l(h$g)   -> 395 s(h$i)       气泡展示（方法名与内部类同时改名）
+     * </pre>
+     * 注意 395 里 h$g 仍然存在，但已是角标广告相关的新类型，因此旧签名不会误命中，只会落空。
+     */
+    private void hookBubbleAd(Class<?> clazz, ClassLoader cl) {
+        final String[][] candidates = {
+                {"s", "com.max.xiaoheihe.module.ads.h$i"},   // 1.3.395
+                {"l", "com.max.xiaoheihe.module.ads.h$g"},   // 1.3.393 / 1.3.394
+        };
+        for (String[] cand : candidates) {
+            final String methodName = cand[0];
+            final String innerName = cand[1];
+            try {
+                Class<?> inner = Class.forName(innerName, false, cl);
+                Method m = clazz.getDeclaredMethod(methodName, inner);
+                module.hook(m).intercept(chain -> {
+                    if (module.isEnabled(App.KEY_BUBBLE_AD, true)) {
+                        module.logd(Log.INFO, module.TAG, "拦截气泡广告 h." + methodName + "()");
+                        return null;
+                    }
+                    return chain.proceed();
+                });
+                module.logd(Log.INFO, module.TAG, "✔ 气泡广告 Hook 已安装 ("
+                        + methodName + "(" + inner.getSimpleName() + "))");
+                return;
+            } catch (ClassNotFoundException | NoSuchMethodException e) {
+                // 该版本没有这个候选，继续试下一个
+            } catch (Throwable t) {
+                module.logd(Log.WARN, module.TAG, "气泡广告候选 " + methodName + " 安装异常: " + t);
+            }
+        }
+        module.logd(Log.WARN, module.TAG,
+                "✘ 气泡广告 Hook 未安装：s(h$i) / l(h$g) 均不可用，该版本可能又改名了，气泡广告过滤将失效");
+    }
+
+    /** 广告拉取入口：阻断后角标数据源消失。394 = h(x0$g)，395 = i(x0$g) */
+    private void hookCornerAd(Class<?> clazz, Class<?> callback) {
+        final String[] candidates = {"i", "h"};
+        for (String cand : candidates) {
+            final String methodName = cand;
+            try {
+                Method m = clazz.getDeclaredMethod(methodName, callback);
+                module.hook(m).intercept(chain -> {
+                    if (module.isEnabled(App.KEY_CORNER_AD, true)) {
+                        module.logd(Log.INFO, module.TAG, "拦截广告拉取 h." + methodName + "()");
+                        return null;
+                    }
+                    return chain.proceed();
+                });
+                module.logd(Log.INFO, module.TAG, "✔ 角标广告拉取 Hook 已安装 (" + methodName + "(x0$g))");
+                return;
+            } catch (NoSuchMethodException e) {
+                // 该版本没有这个候选，继续试下一个
+            } catch (Throwable t) {
+                module.logd(Log.WARN, module.TAG, "角标广告候选 " + methodName + " 安装异常: " + t);
+            }
+        }
+        module.logd(Log.WARN, module.TAG,
+                "✘ 角标广告 Hook 未安装：i(x0$g) / h(x0$g) 均不可用，该版本可能又改名了，角标广告过滤将失效");
     }
 }

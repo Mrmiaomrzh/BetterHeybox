@@ -46,7 +46,8 @@ public class MainModule extends XposedModule {
     public static final Set<String> SUPPORTED_HEYBOX_VERSIONS =
             Collections.unmodifiableSet(new LinkedHashSet<>(Arrays.asList(
                     "1.3.393",
-                    "1.3.394"
+                    "1.3.394",
+                    "1.3.395"
             )));
 
     @Override
