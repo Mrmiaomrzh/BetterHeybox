@@ -62,9 +62,6 @@ public final class PostFilterHook {
         hookRecommendFlowController(cl);
     }
 
-    // ---------- 首页流列表层（覆盖缓存/数据库来源的全部条目） ----------
-
-    /** buildModels 入口直接从列表移除命中条目，新拉取与本地缓存一视同仁 */
     private void hookRecommendFlowController(ClassLoader cl) {
         try {
             Class<?> c = Class.forName(
@@ -244,8 +241,6 @@ public final class PostFilterHook {
 
     /**
      * 旧渲染链（b.L/b.N）bind 时由 PromotePostHook 委托调用。
-     *
-     * @return true = 已隐藏，调用方跳过原渲染
      */
     public boolean onRenderBind(Object bbsLink, Object viewHolder) {
         try {
@@ -334,7 +329,6 @@ public final class PostFilterHook {
 
     // ---------- news.adapter.a 列表 ----------
 
-    /** 跳过原绑定需配合隐藏，复用时恢复 */
     private void hookNewsListAdapter(ClassLoader cl) {
         try {
             Class<?> a = Class.forName("com.max.xiaoheihe.module.news.adapter.a", false, cl);
@@ -375,7 +369,6 @@ public final class PostFilterHook {
 
     // ---------- 同步过滤判定 ----------
 
-    /** @return true = 命中等级或关键词 */
     private boolean applySyncFilters(Object item) {
         if (levelBlocked(item)) {
             module.logd(Log.INFO, module.TAG, "屏蔽低等级发帖 (ct=" + getContentType(item) + ")");

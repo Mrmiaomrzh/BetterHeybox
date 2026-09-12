@@ -218,19 +218,14 @@ public final class LiquidGlassInstaller {
                 });
     }
 
-    /** 中央加号槽位的权重：与普通 tab 等权（原生底栏 5 等分，加号占 1/5） */
     private static final float CENTER_GAP_WEIGHT = 1.0f;
     private static final float FIT_TAB_MAX_WIDTH_DP = 96f;
     private static final float SELECTED_TAB_WEIGHT = 1.4f;
     private static final float OTHER_TAB_WEIGHT = 0.9f;
-    /** 宽度过渡借用库自身水滴落定节奏（380ms / Overshoot(1.1)），标签与水滴同一拍运动 */
     private static final long FIT_ANIM_MS = 380L;
     private static final float FIT_ANIM_TENSION = 1.1f;
     private static volatile boolean sTabBarActive;
 
-    /**
-     * API 33+ 用 QWEA0 LiquidGlassTabBar 渲染器替换 RadioGroup（采样 fl_container）；API<33 走 legacy frost 路径
-     */
     private static void attachGlassRenderer(Activity activity, ViewGroup host,
                                             ViewGroup bar, ViewGroup tips, View midTab,
                                             ViewGroup content, int barHeightSpec, int navPad) {
@@ -287,10 +282,6 @@ public final class LiquidGlassInstaller {
         glass.setEnableAdaptiveTint(adaptiveTint);
     }
 
-    /**
-     * QWEA0 LiquidGlassTabBar 整体替换可见 RadioGroup：自身是 LiquidGlassView（水滴滑动/拉伸选中动画），原 RadioGroup 保留但不可见。
-     * 双向同步：tab 点击 → rb.performClick()；app 选中 → 监听包装 → tabBar.setSelectedIndex
-     */
     private static void attachQwea0TabBar(Activity activity, ViewGroup host,
                                           android.widget.RadioGroup bar,
                                           ViewGroup tips, View midTab,
@@ -302,7 +293,6 @@ public final class LiquidGlassInstaller {
             sDensity = host.getResources().getDisplayMetrics().density;
             sRadioBarRef = new java.lang.ref.WeakReference<>(bar);
             sContentViewRef = new java.lang.ref.WeakReference<>(content);
-            // tab-bar 模式偏移 0 必须贴物理屏底：剥掉通用路径加的导航 inset padding
             int flushPad = Math.max(host.getPaddingBottom() - navPad, 0);
             host.setPadding(host.getPaddingLeft(), host.getPaddingTop(),
                     host.getPaddingRight(), flushPad);
@@ -331,17 +321,14 @@ public final class LiquidGlassInstaller {
                         "tabbar: no radio buttons found");
                 return;
             }
-            // 关闭逐像素自适应染色（对亮背景反色且绕过 hook）；玻璃体用 currentTintColor override，标签色由 BackdropLuminanceMeter 驱动
             applyQwea0Params(tabBar, content, density, false);
             installTintOverride();
 
-            // 高度随 tab 内容（图标+文字）自适应，贴合行而非固定高框
             host.addView(tabBar, host.getChildCount(), new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT,
                     android.view.Gravity.TOP | android.view.Gravity.FILL_HORIZONTAL));
 
-            // bar -> app: forward taps to the hidden radio buttons
             tabBar.setOnTabSelected(new kotlin.jvm.functions.Function1<Integer, kotlin.Unit>() {
                 @Override
                 public kotlin.Unit invoke(Integer index) {
@@ -377,15 +364,11 @@ public final class LiquidGlassInstaller {
 
             startBackdropMeter(tabBar);
 
-            // hide the original radio row visually (keeps state mechanics alive)
             bar.setVisibility(View.INVISIBLE);
 
-            // app -> bar: extend the existing checked-listener wrapper
             setupTabSelectionSync(bar, tabBar);
-            // 500ms 兜底轮询：宿主自行改 tab 集合/加号可见性时也能收敛
             startTabVisibilitySync(bar, tabBar);
 
-            // uiMode 推送只播种初始态，亮度计预热后接管 chrome 颜色
             ((LiquidGlassHostLayout) host).setExternalRendererActive(true);
 
             LiquidGlassLog.log(android.util.Log.INFO,
@@ -396,10 +379,6 @@ public final class LiquidGlassInstaller {
         }
     }
 
-    /**
-     * 发布按钮须挂在 tab bar 之外（其吞掉全部触摸）。始终挂载，可见性由 applyBarMode
-     * 按 hide_add/tab 联动与底栏形态动态裁决；preDraw 每帧兜底强制，宿主自行改可见性也会被纠正
-     */
     private static void mountCenterButton(Activity activity, ViewGroup host,
                                           View midTab, ViewGroup tips) {
         View centerHost = null;
@@ -409,7 +388,6 @@ public final class LiquidGlassInstaller {
 
             final FrameLayout center = new FrameLayout(activity);
             center.setClickable(true);
-            // 加号保持自然尺寸居中于中央槽内（点击区为整槽）
             center.addView(midTab, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -417,7 +395,6 @@ public final class LiquidGlassInstaller {
             center.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    // 与选中 tab 图标同款弹跳，加号响应自己的点击
                     if (host instanceof LiquidGlassHostLayout) {
                         ((LiquidGlassHostLayout) host).popChild(midTab);
                     }
@@ -469,7 +446,6 @@ public final class LiquidGlassInstaller {
                             public kotlin.Unit invoke(Float luma) {
                                 try {
                                     if (!GlassConfig.adaptiveChrome) {
-                                        // 用户关闭自适应反色：标签色固定跟随应用主题
                                         boolean uiDark = (tabBar.getResources()
                                                 .getConfiguration().uiMode
                                                 & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
@@ -525,7 +501,6 @@ public final class LiquidGlassInstaller {
                         }
                     }
                 });
-        // bar 可能已 attach（onAttach 监听不会触发），直接启动
         if (tabBar.isAttachedToWindow()) {
             try {
                 meter.start();
@@ -581,7 +556,6 @@ public final class LiquidGlassInstaller {
             sSyncing = true;
             try {
                 tabBar.setTabs(items);
-                // 形态仲裁：加号/圆钮可见性、中央槽增删、tab 权重全在这里落
                 applyBarMode(bar, tabBar);
                 int checked = bar.getCheckedRadioButtonId();
                 int selected = 0;
@@ -609,7 +583,6 @@ public final class LiquidGlassInstaller {
         }
     }
 
-    /** 500ms 兜底轮询：rebuildTabBar 靠 sig 去重，宿主自行改 tab 集合/加号可见性时在此收敛 */
     private static void startTabVisibilitySync(
             final android.widget.RadioGroup bar,
             final com.example.liquidglass.LiquidGlassTabBar tabBar) {
@@ -634,10 +607,6 @@ public final class LiquidGlassInstaller {
         return applyBarMode(bar, tabBar);
     }
 
-    /**
-     * 底栏形态仲裁：发布按钮隐藏（hide_add/tab 联动）→ 加号 GONE、无中央槽；
-     * 否则按 barLayoutMode 决定经典居中（中央槽）或右侧圆钮（条右留位 + 圆形玻璃钮）
-     */
     private static boolean applyBarMode(android.widget.RadioGroup bar,
             com.example.liquidglass.LiquidGlassTabBar tabBar) {
         View barV = sTabBarRef.get();
@@ -655,7 +624,7 @@ public final class LiquidGlassInstaller {
                 visibleTabs++;
             }
         }
-        // 宿主布局中可能瞬时翻转可见性，连续两轮一致才采纳
+
         if (visibleTabs == sLastTabs) {
             sStableTabs = visibleTabs;
         }
@@ -692,7 +661,6 @@ public final class LiquidGlassInstaller {
             }
         }
         sPlusHidden = wantHidden;
-        // 自适应宽度依赖可见 tab 数与加号态；轮询里只有这里会重推边距
         applyBarSideMargins(host);
         if (tabBar.getChildCount() == 0
                 || !(tabBar.getChildAt(0) instanceof ViewGroup)) {
@@ -806,7 +774,6 @@ public final class LiquidGlassInstaller {
         return changed;
     }
 
-    /** 加长选中 Tab 生效条件：开关开 且 有命名 tab 被隐藏（加号不算，它不是 RadioButton） */
     private static boolean fitVisibleTabsEffective(int visibleTabs) {
         if (!GlassConfig.fitTabs) {
             return false;
@@ -894,11 +861,6 @@ public final class LiquidGlassInstaller {
         return applyTabWidths(selected);
     }
 
-    /**
-     * tab 权重与条宽的单点落位：fit（加长选中）时选中 1.4/其余 0.9，非 fit 全部按
-     * tabWidthPct 缩放的等分权重；条宽 fit 时按内容收窄、非 fit 占满宿主。
-     * 权重与条宽都变化时把布局变化回放成平移动画（glideTabsFrom）
-     */
     private static boolean applyTabWidths(int selectedIndex) {
         boolean changed = false;
         try {
@@ -923,7 +885,6 @@ public final class LiquidGlassInstaller {
             }
             float f = Math.max(50, Math.min(GlassConfig.tabWidthPct, 150)) / 100f;
             boolean fit = fitVisibleTabsEffective(tabs);
-            // 仅自适应模式有动画；宽度滑杆必须即时，否则每次拖动都排一个 380ms 摆动
             boolean glide = fit || sFitActive;
             sFitActive = fit;
             float[] before = glide ? captureTabCenters(row) : null;
@@ -972,7 +933,6 @@ public final class LiquidGlassInstaller {
         return changed;
     }
 
-    /** 重装后的条是新视图：清掉仍指向旧条的动画，避免挂起的目标值压住新条首帧宽度 */
     private static void resetWidthAnimState() {
         if (sTabShiftAnimator != null) {
             sTabShiftAnimator.cancel();
@@ -992,9 +952,6 @@ public final class LiquidGlassInstaller {
         sFitActive = false;
     }
 
-    /** 库的 animateDropletTo 一步到位把水滴缩放到目标 tab 宽再起跑——条宽从窄到宽最显眼的
-     *  跳变就来自这里。条在余下落定过程不再改水滴尺寸（onLayout 只在自身动画空闲时回同步），
-     *  所以由我们在同一拍把水滴拉宽 */
     private static void scheduleDropletGrow(
             final com.example.liquidglass.LiquidGlassTabBar tabBar,
             final int fromWidth) {
@@ -1017,7 +974,6 @@ public final class LiquidGlassInstaller {
                     if (live != null && live.isAlive()) {
                         live.removeOnPreDrawListener(this);
                     }
-                    // 返回 false：起始宽度是布局属性，必须重跑帧而不是按终尺寸直接画
                     return !growDroplet(droplet, fromWidth);
                 }
             });
@@ -1044,7 +1000,6 @@ public final class LiquidGlassInstaller {
             droplet.setLayoutParams(lp);
             android.animation.ValueAnimator anim =
                     android.animation.ValueAnimator.ofFloat(0f, 1f);
-            // 落在条自身 380ms 落定之内，落定后第一次布局发现终宽已就位
             anim.setDuration(Math.max(0L, FIT_ANIM_MS - 40L));
             anim.setInterpolator(
                     new android.view.animation.DecelerateInterpolator(1.6f));
@@ -1078,8 +1033,6 @@ public final class LiquidGlassInstaller {
         }
     }
 
-    /** 每个 tab 当前"看起来"在哪（布局位置 + 在飞的 glide 偏移）的快照，
-     *  让即将发生的布局变化能回放成运动。行未布局过时返回 null */
     private static float[] captureTabCenters(ViewGroup row) {
         if (row.getWidth() <= 0) {
             return null;
@@ -1095,8 +1048,6 @@ public final class LiquidGlassInstaller {
         return centers;
     }
 
-    /** glide 推迟到 pre-draw：那时新权重已落位（水滴要瞄准最终布局），
-     *  且在绘制前偏移回去，不会闪现终态 */
     private static void scheduleTabGlide(final ViewGroup row,
             final float[] before) {
         try {
@@ -1119,8 +1070,6 @@ public final class LiquidGlassInstaller {
         }
     }
 
-    /** tab 槽位是透明的——用户看到的只是居中的图标+文字栈。所以宽度变化的做法是：
-     *  布局直接落到终态（syncDroplet/animateDropletTo 读它），把内容平移回原位再归位 */
     private static void glideTabsFrom(ViewGroup row, float[] before) {
         try {
             if (before == null || row.getChildCount() != before.length) {
@@ -1130,7 +1079,6 @@ public final class LiquidGlassInstaller {
                 return;
             }
             if (sBarWidthAnimator != null && sBarWidthAnimator.isRunning()) {
-                // 药丸自身正在动画真实布局；tab 跟着它走，不能再叠加偏移
                 return;
             }
             final View[] kids = new View[before.length];
@@ -1226,8 +1174,6 @@ public final class LiquidGlassInstaller {
                 available);
     }
 
-    /** 药丸自身宽度是可见边缘，必须走真实布局动画。调用方比较挂起目标而非实时参数，
-     *  500ms 轮询才不会跟已在飞的动画打架 */
     private static boolean setBarWidth(View barV, FrameLayout.LayoutParams lp,
             int width, int left, int gravity, int available) {
         boolean animating = sBarWidthAnimator != null
@@ -1267,7 +1213,6 @@ public final class LiquidGlassInstaller {
         final int endLeft = left;
         final int endGravity = gravity;
         final int finalWidth = width;
-        // 固定宽 + FILL_HORIZONTAL 会拉回全宽，动画期间钉在 START，结束时还原
         flp.gravity = android.view.Gravity.TOP | android.view.Gravity.START;
         android.animation.ValueAnimator anim =
                 android.animation.ValueAnimator.ofFloat(0f, 1f);
@@ -1307,7 +1252,6 @@ public final class LiquidGlassInstaller {
             com.example.liquidglass.LiquidGlassTabBar tabBar,
             int selectedIndex) {
         try {
-            // 在条重新选中之前取：水滴还是旧 tab 的宽度，animateDropletTo 马上要换成新宽
             View droplet = findDroplet(tabBar);
             int dropletWidth = droplet == null ? 0 : droplet.getWidth();
             if (!applyTabWidths(selectedIndex)) {
@@ -1332,9 +1276,6 @@ public final class LiquidGlassInstaller {
         }
     }
 
-    /** 选中变化让 tab 权重立即重排（标签靠 translationX 滑动），中央槽随之移动。
-     *  加号原本要等 500ms 轮询的 placeCenterNow，读起来是"卡一下再跳"。
-     *  改成与标签同一 380ms 拍滑动 */
     private static void glideCenterTo(
             com.example.liquidglass.LiquidGlassTabBar tabBar) {
         try {
@@ -1446,8 +1387,6 @@ public final class LiquidGlassInstaller {
             final com.example.liquidglass.LiquidGlassTabBar tabBar) {
         try {
             if (sBarWidthAnimator != null && sBarWidthAnimator.isRunning()) {
-                // 条宽动画每一帧都是布局 pass，条在自身落定动画空闲时才在布局里回同步
-                // 水滴——此处再起一个会把水滴冻在中间目标值上，结束时猛跳
                 return;
             }
             tabBar.getViewTreeObserver().addOnGlobalLayoutListener(
@@ -1479,10 +1418,6 @@ public final class LiquidGlassInstaller {
         }
     }
 
-    /**
- * 向 QWEA0 tab bar 前景（图标/文字）推主题色，玻璃体保持白色 REGULAR 染色不变。
- * 主路径直写 TabHolder 视图，另尝试私有 updateTabStyles() 刷新
- */
     private static void applyTabBarOverLight(
             com.example.liquidglass.LiquidGlassTabBar tabBar, boolean darkBar) {
         int selectedColor = darkBar ? 0xFFFFFFFF : 0xE6000000;
@@ -1547,7 +1482,6 @@ public final class LiquidGlassInstaller {
         return mode == android.content.res.Configuration.UI_MODE_NIGHT_YES;
     }
 
-    /** 中央加号槽：与原生底栏 5 等分一致，加号可见时插入一个等权空槽 */
     private static void insertCenterGap(Context context, ViewGroup tabBar) {
         try {
             if (tabBar.getChildCount() == 0) {
@@ -1599,7 +1533,6 @@ public final class LiquidGlassInstaller {
             int left = tabBar.getLeft() + row.getLeft() + spacer.getLeft();
             if (sCenterAnimator != null && sCenterAnimator.isRunning()
                     && left == sCenterTargetLeft) {
-                // 已在滑向同一位置；此刻吸附会让加号在过渡中抢跑到标签前面
                 return;
             }
             if (center.getWidth() == spacer.getWidth()
@@ -1646,9 +1579,6 @@ public final class LiquidGlassInstaller {
         }
     }
 
-    /** 通过宿主左右对称边距设定药丸宽度：占满=贴边，自定义=父宽百分比，
-     *  自适应=按 tab 内容取宽居中（宽屏上药丸不再横贯全屏）。
-     *  tab 无需单独处理——权重会摊满剩余宽度 */
     private static void applyBarSideMargins(ViewGroup host) {
         try {
             if (!(host.getLayoutParams() instanceof RelativeLayout.LayoutParams)) {
@@ -1692,8 +1622,6 @@ public final class LiquidGlassInstaller {
         }
     }
 
-    /** 自适应模式的内容宽：每个 tab 都按自适应的同款 96dp 上限 × 缩放，
-     *  加号占位时加中央槽；超出父宽则封顶（手机上仍是全宽） */
     private static int adaptiveBarWidth(View host, int parentWidth) {
         float den = sDensity > 0 ? sDensity
                 : host.getResources().getDisplayMetrics().density;
@@ -1760,8 +1688,6 @@ public final class LiquidGlassInstaller {
             final ViewGroup h2 = host;
             final ViewGroup b2 = (ViewGroup) barV;
             host.post(() -> {
-                // 宿主宽度要等布局后才反映新边距，fit 条宽由它推导。
-                // 此处在下方 finally 之后跑，必须重申 snap
                 sSnapWidthChanges = true;
                 try {
                     applyTabWidths();
@@ -1783,9 +1709,6 @@ public final class LiquidGlassInstaller {
         }
     }
 
-    /** 重复点击当前 tab = 宿主自定义的刷新语义。玻璃条吞掉了触摸，这里把同一 tab
-     *  的再点转发回原按钮；不做标题白名单——旧版布局会改 tab 名，白名单总会在
-     *  某些皮肤上漏掉刷新 */
     private static void installRepeatClickRefresh(
             final com.example.liquidglass.LiquidGlassTabBar tabBar) {
         if (tabBar == null) {
@@ -1868,15 +1791,10 @@ public final class LiquidGlassInstaller {
         return -1;
     }
 
-    /** 附加动作异常由包装器兜底吞掉，不影响原监听转发 */
     private interface OnCheckedExtra {
         void onChecked(android.widget.RadioGroup group, int checkedId);
     }
 
-    /**
-     * 包装宿主 RadioGroup 的 mOnCheckedChangeListener：先转发原监听，再执行附加动作。
-     * 选中同步（QWEA0 路径）与 pop 动画（legacy 路径）共用，两路互斥
-     */
     private static void wrapCheckedListener(final android.widget.RadioGroup bar,
                                             final OnCheckedExtra extra) {
         try {
@@ -1917,7 +1835,6 @@ public final class LiquidGlassInstaller {
         });
     }
 
-    /** Installed once per process: theme-driven glass body tint. */
     private static volatile boolean sTintHookInstalled;
     private static volatile boolean sChromeLight;
     private static volatile boolean sChromeForced;
@@ -1946,7 +1863,6 @@ public final class LiquidGlassInstaller {
             new java.util.ArrayList<>();
     private static volatile boolean sSyncing;
     private static volatile String sBuildSig = "";
-    // 宽度过渡状态。仅 UI 线程读写：来源全是触摸/布局/设置/postDelayed 回调
     private static android.animation.ValueAnimator sTabShiftAnimator;
     private static android.animation.ValueAnimator sBarWidthAnimator;
     private static android.animation.ValueAnimator sDropletSizeAnimator;
@@ -1954,12 +1870,10 @@ public final class LiquidGlassInstaller {
     private static int sBarTargetLeft = Integer.MIN_VALUE;
     private static int sBarTargetGravity = Integer.MIN_VALUE;
     private static boolean sFitActive;
-    /** 设置驱动的几何变化即时落位：否则滑杆每档都排一个 380ms 过渡，拖动跟不上手 */
     private static boolean sSnapWidthChanges;
     private static android.animation.ValueAnimator sCenterAnimator;
     private static int sCenterTargetLeft = Integer.MIN_VALUE;
 
-    /** BottomToastLifter / InWindowTipWatcher 的抬升锚点 */
     static View activeGlassHost() {
         ViewGroup host = sHostRef;
         if (host == null || !host.isAttachedToWindow() || host.getHeight() <= 0) {
@@ -1968,10 +1882,6 @@ public final class LiquidGlassInstaller {
         return host;
     }
 
-    /**
- * 覆写渲染器 currentTintColor() 让玻璃体随应用主题（深色→subtle 白，浅色→高不透明白磨砂）。
- * 不碰亮度计的 chrome（图标/文字）适配
- */
     private static void installTintOverride() {
         if (sTintHookInstalled) {
             return;
@@ -1990,7 +1900,6 @@ public final class LiquidGlassInstaller {
                         mode = ((View) thiz).getResources()
                                 .getConfiguration().uiMode
                                 & android.content.res.Configuration.UI_MODE_NIGHT_MASK;
-                        // 水滴叠加在已染色条之上，减淡避免双重加权
                         isBarView = thiz == sTabBarRef.get();
                     }
                     boolean light =
@@ -2001,7 +1910,6 @@ public final class LiquidGlassInstaller {
                         tint = GlassConfig.darkTint();
                     }
                     if (!isBarView) {
-                        // lighten stacked layers to ~60% of the bar's opacity
                         int a = tint >>> 24;
                         int na = Math.round(a * 0.6f);
                         tint = (na << 24) | (tint & 0x00FFFFFF);
@@ -2021,9 +1929,6 @@ public final class LiquidGlassInstaller {
             java.util.Collections.synchronizedMap(
                     new java.util.WeakHashMap<View, Boolean>());
 
-    /**
- * 参考项目同款入口：HomeTitleBar 搜索图标与设置页「通用设置」行长按。只追加长按，不改原有点击行为
- */
     public static void installSettingsEntries(ClassLoader cl) {
         try {
             Class<?> htb = Class.forName(
