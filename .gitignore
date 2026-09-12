@@ -2,6 +2,7 @@
 .gradle/
 build/
 !gradle/wrapper/gradle-wrapper.jar
+.vscode/
 
 # IDE
 .idea/
@@ -34,7 +35,7 @@ Thumbs.db
 .zcode/
 .opensuilla/
 
-# 编辑器锁/备份残留
+# 编辑器
 .LCK*
 *~
 .#*

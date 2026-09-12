@@ -18,7 +18,7 @@
 > 使用免Root框架`「NPatch」`时，需要把`破解签名校验`改成`Extreme`，不然会有缺少参数闪退的问题
 
 > [!Note]
-> [频道](https://t.me/Betterheybox)
+> [Telegram 发布频道](https://t.me/Betterheybox)，欢迎加入交流
 
 ## 功能
 
@@ -156,7 +156,7 @@
 ### 更新兼容（DexKit 自动分析）
 
 小黑盒更新常会打乱混淆名，模块通过 [DexKit](https://github.com/LuckyPray/DexKit) 字节码特征分析
-自动重新定位，不必等模块发版适配：
+自动重新定位：
 
 - **原生弹窗自动定位**：以 HeyBoxDialog 内的品牌常量字符串为锚点定位对话框类；
   Builder 的标题/正文、View 槽位、正向/负向按钮等同签名混淆方法，用 alpha=0 的
