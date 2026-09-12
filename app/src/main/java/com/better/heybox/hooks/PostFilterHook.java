@@ -95,9 +95,9 @@ public final class PostFilterHook {
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
-    private void filterFlowList(Object listObj) {
+    private List<?> filterFlowList(Object listObj) {
         if (!(listObj instanceof List)) {
-            return;
+            return null;
         }
         List list = (List) listObj;
         boolean aiEnabled = module.isEnabled(App.KEY_POST_AI_ENABLED, false)
@@ -115,19 +115,44 @@ public final class PostFilterHook {
             if (levelBlocked(item) || keywordBlockedText(title, desc)) {
                 module.logd(Log.INFO, module.TAG, "发帖过滤命中 (首页流列表, "
                         + (levelBlocked(item) ? "lv" : "kw") + ") " + abbreviate(title));
-                it.remove();
+                try {
+                    it.remove();
+                } catch (Throwable t) {
+                    return filteredCopy(list, aiEnabled);
+                }
+                continue;
+            }
+            if (aiEnabled && !title.isEmpty()
+                    && AIClickbaitChecker.getCached(title) == null) {
+                AIClickbaitChecker.requestVerdicts(module, title, title, listAiCallback);
+            }
+        }
+        return null;
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private List<?> filteredCopy(List list, boolean aiEnabled) {
+        List<Object> keep = new ArrayList<>(list.size());
+        for (Object item : list) {
+            if (item == null || !isPostFlowModel(item)) {
+                keep.add(item);
+                continue;
+            }
+            Object link = safeInvoke(item, "getLinkContent");
+            String title = link == null ? "" : safeGet(link, "getTitle");
+            String desc = link == null ? "" : safeGet(link, "getDescription");
+            if (levelBlocked(item) || keywordBlockedText(title, desc)) {
                 continue;
             }
             if (aiEnabled && !title.isEmpty()
                     && AIClickbaitChecker.getCached(title) == null) {
                 AIClickbaitChecker.requestVerdicts(module, title, title, aiCallback);
             }
+            keep.add(item);
         }
+        return keep;
     }
 
-    // ---------- AdFilterHook 委托（旧 FeedsContentBaseObj 列表） ----------
-
-    /** 返回替换对象；null = 放行 */
     public Object onDeserialized(Object result) {
         try {
             if (applySyncFilters(result)) {

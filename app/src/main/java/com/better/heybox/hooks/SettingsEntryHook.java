@@ -1525,6 +1525,16 @@ public final class SettingsEntryHook {
         return input;
     }
 
+    /** 内容多行时 EditText 会无限长高盖住按钮，包进定高 ScrollView 让其可滚动 (#22)；
+     *  宿主对话框中央视图必须给定宽高，否则按 wrap_content 收成窄列 */
+    private ScrollView wrapScrollableInput(Activity activity, EditText input) {
+        ScrollView scroller = new ScrollView(activity);
+        scroller.addView(input);
+        scroller.setLayoutParams(new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, module.dp(activity, 400)));
+        return scroller;
+    }
+
     private void showMultilineEditNative(final Activity activity, final String title,
                                          final String key, final String hint,
                                          final boolean resetToDefault,
@@ -1537,7 +1547,7 @@ public final class SettingsEntryHook {
                     d.dismiss();
                 }
                 : (d, w) -> d.dismiss();
-        spec.buildAndShow(activity, title, input, "保存",
+        spec.buildAndShow(activity, title, wrapScrollableInput(activity, input), "保存",
                 (d, w) -> {
                     saveMultiline(activity, key, input.getText().toString(), title);
                     d.dismiss();
@@ -1552,7 +1562,7 @@ public final class SettingsEntryHook {
             final EditText input = buildMultilineInput(activity, key, hint);
             AlertDialog.Builder builder = new AlertDialog.Builder(activity)
                     .setTitle(title)
-                    .setView(input)
+                    .setView(wrapScrollableInput(activity, input))
                     .setPositiveButton("保存", (d, w) ->
                             saveMultiline(activity, key, input.getText().toString(), title));
             if (resetToDefault) {
