@@ -179,6 +179,7 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     /** 免责声明 */
     public static final String KEY_DISCLAIMER_ACCEPTED = "disclaimer_accepted";
     public static final String KEY_MODULE_VERSION_FLOOR = "module_version_floor";
+    public static final String KEY_TARGET_HINT_VISIBLE = "target_hint_visible";
 
     /** receiver 白名单与备份列表 */
     public static final java.util.Map<String, Boolean> BOOLEAN_DEFAULTS = buildBooleanDefaults();
@@ -217,6 +218,7 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
         m.put(KEY_POST_AI_ENABLED, false);
         m.put(KEY_POST_NO_LEVEL, false);
         m.put(KEY_DISCLAIMER_ACCEPTED, false);
+        m.put(KEY_TARGET_HINT_VISIBLE, true);
         return m;
     }
 

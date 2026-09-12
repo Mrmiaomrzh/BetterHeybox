@@ -887,11 +887,12 @@ public final class SettingsEntryHook {
                 }
             }
             appendEmbeddedFooter(activity, box);
-            // 目标提示层只在模块设置面板内展示，随面板移除
-            View wm = TargetHintHook.createVisibleHint(activity);
-            wm.setLayoutParams(new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-            overlay.addView(wm);
+            if (HeyboxPrefs.getBoolean(App.KEY_TARGET_HINT_VISIBLE, true)) {
+                View wm = TargetHintHook.createVisibleHint(activity);
+                wm.setLayoutParams(new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                overlay.addView(wm);
+            }
             attachEmbeddedPanel(activity, overlay);
         } catch (Throwable t) {
             module.logd(Log.ERROR, module.TAG, "渲染原生设置面板失败", t);
@@ -931,12 +932,33 @@ public final class SettingsEntryHook {
             int fm = module.dp(activity, 16);
             footerLp.setMargins(fm, module.dp(activity, 12), fm, module.dp(activity, 24));
             footer.setLayoutParams(footerLp);
+            footer.setOnClickListener(v -> handleFooterClick(activity));
             box.addView(footer);
             module.logd(Log.INFO, module.TAG, "✔ 内嵌面板底部版本号已添加: "
                     + (displayVersion == null ? "unknown" : displayVersion));
         } catch (Throwable t) {
             module.logd(Log.WARN, module.TAG, "内嵌面板版本号页脚渲染失败: " + t);
         }
+    }
+
+    private int mHintToggleClicks;
+    private long mHintToggleLastAt;
+
+    private void handleFooterClick(Activity activity) {
+        long now = System.currentTimeMillis();
+        if (now - mHintToggleLastAt > 3000L) {
+            mHintToggleClicks = 0;
+        }
+        mHintToggleLastAt = now;
+        if (++mHintToggleClicks < 7) {
+            return;
+        }
+        mHintToggleClicks = 0;
+        boolean next = !HeyboxPrefs.getBoolean(App.KEY_TARGET_HINT_VISIBLE, true);
+        writeEmbeddedBoolean(activity, App.KEY_TARGET_HINT_VISIBLE, next);
+        Toast.makeText(activity, next ? "Open!" : "Closed!",
+                Toast.LENGTH_SHORT).show();
+        showEmbeddedSettings(activity);
     }
 
     private void attachEmbeddedPanel(Activity activity, FrameLayout overlay) {
