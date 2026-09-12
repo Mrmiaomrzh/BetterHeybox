@@ -38,27 +38,25 @@ public final class LiquidGlassInstaller {
         }
     }
 
-    /**
-     * 一次读齐「发布按钮是否隐藏」：hide_add 或任一 tab 隐藏联动
-     */
-    private static boolean readPublishHidden(Context context) {
+    public static boolean isGlassBarActive() {
         try {
+            View bar = sTabBarRef != null ? sTabBarRef.get() : null;
+            return bar != null && bar.isAttachedToWindow();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static boolean readPublishHidden(Context context) {        try {
             com.better.heybox.HeyboxPrefs.init(context);
             return com.better.heybox.HeyboxPrefs.getBoolean(
-                    com.better.heybox.App.KEY_HIDE_ADD, false)
-                    || com.better.heybox.HeyboxPrefs.getBoolean(
-                    com.better.heybox.App.KEY_HIDE_TAB_HOME, false)
-                    || com.better.heybox.HeyboxPrefs.getBoolean(
-                    com.better.heybox.App.KEY_HIDE_TAB_HOT, false)
-                    || com.better.heybox.HeyboxPrefs.getBoolean(
-                    com.better.heybox.App.KEY_HIDE_TAB_GAME, false);
+                    com.better.heybox.App.KEY_HIDE_ADD, false);
         } catch (Throwable ignored) {
             return false;
         }
     }
 
     public static void scheduleInstall(Activity activity) {
-        // 用户选择由独立液态玻璃模块提供时，自带玻璃（底栏+长按入口）全面让位
         if (!isGlassEnabled(activity) || GlassProvider.prefersHbmod(activity)) {
             return;
         }
@@ -636,6 +634,10 @@ public final class LiquidGlassInstaller {
         if (publishHidden) {
             circle = false;
             wantHidden = true;
+        } else if (com.better.heybox.hooks.BottomTabHook.isAnyTabHidden()
+                && GlassConfig.barLayoutMode == 0) {
+            circle = false;
+            wantHidden = false;
         } else {
             int mode = GlassConfig.barLayoutMode;
             if (mode == 0) {
@@ -1500,7 +1502,9 @@ public final class LiquidGlassInstaller {
             android.widget.LinearLayout.LayoutParams lp =
                     new android.widget.LinearLayout.LayoutParams(0,
                             ViewGroup.LayoutParams.MATCH_PARENT, CENTER_GAP_WEIGHT);
-            ll.addView(spacer, count / 2, lp);
+            // (count+1)/2：奇数个 tab 时槽位也落在正中（3 tab → [t,t,槽,t]），
+            // 且与 glideCenterTo/placeCenterNow 的 n/2 查找一致
+            ll.addView(spacer, (count + 1) / 2, lp);
         } catch (Throwable t) {
             LiquidGlassLog.logErr("center gap failed", t);
         }
@@ -1547,14 +1551,12 @@ public final class LiquidGlassInstaller {
                     android.view.Gravity.TOP | android.view.Gravity.START);
             lp.leftMargin = left;
             lp.topMargin = tabBar.getTop();
+            center.setTranslationX(0);
             center.setLayoutParams(lp);
         } catch (Throwable ignored) {
         }
     }
 
-    /**
- * 库默认以 MATCH_PARENT|WRAP_CONTENT 加 tabsRow 落在 TOP|START，固定高度下贴顶，改为 CENTER_VERTICAL
- */
     private static void centerTabsRow(ViewGroup tabBar) {
         try {
             if (tabBar.getChildCount() == 0) {

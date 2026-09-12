@@ -200,15 +200,22 @@ public final class SettingsEntryHook {
             }),
     };
     private static SettingsGroup buildBottomTabGroup(Activity activity) {
-        String home = MainModule.getHeyboxTabLabel(activity, "discover", "发现");
-        String store = MainModule.getHeyboxTabLabel(activity, "game_store", "游戏库");
-        String bbs = MainModule.getHeyboxTabLabel(activity, "bbs", "社区");
+        String home = labelOr(BottomTabHook.runtimeTabLabel(0),
+                MainModule.getHeyboxTabLabel(activity, "discover", "发现"));
+        String slot2 = labelOr(BottomTabHook.runtimeTabLabel(1),
+                MainModule.getHeyboxTabLabel(activity, "game_store", "游戏库"));
+        String slot4 = labelOr(BottomTabHook.runtimeTabLabel(2),
+                MainModule.getHeyboxTabLabel(activity, "bbs", "社区"));
         return new SettingsGroup("底部导航栏隐藏", new SwitchDef[]{
                 new SwitchDef("隐藏「" + home + "」", null, App.KEY_HIDE_TAB_HOME, false, true),
-                new SwitchDef("隐藏「" + store + "」", null, App.KEY_HIDE_TAB_HOT, false, true),
-                new SwitchDef("隐藏「" + bbs + "」", null, App.KEY_HIDE_TAB_GAME, false, true),
+                new SwitchDef("隐藏「" + slot2 + "」", null, App.KEY_HIDE_TAB_HOT, false, true),
+                new SwitchDef("隐藏「" + slot4 + "」", null, App.KEY_HIDE_TAB_GAME, false, true),
                 new SwitchDef("隐藏「加号」", null, App.KEY_HIDE_ADD, false, true),
         });
+    }
+
+    private static String labelOr(String runtime, String fallback) {
+        return runtime != null && !runtime.trim().isEmpty() ? runtime : fallback;
     }
 
     private static final String TITLE_GENERAL = "通用";

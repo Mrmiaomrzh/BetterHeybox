@@ -3,7 +3,6 @@ package com.better.heybox.hooks;
 import android.app.Activity;
 import android.util.Log;
 import android.view.View;
-import android.view.ViewGroup;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -89,54 +88,185 @@ public final class BottomTabHook {
 
     /** 隐藏 tab 与加号 */
     private void applyBottomTabSettings(Object activityObj) {
+        applyBottomTabSettings(activityObj, true);
+    }
+
+    private void applyBottomTabSettings(Object activityObj, boolean reschedule) {
         try {
+            Activity activity = activityObj instanceof Activity ? (Activity) activityObj : null;
             Object binding = findViewBinding(activityObj);
-            if (binding == null) {
-                module.logd(Log.WARN, module.TAG, "未找到 ViewBinding 字段（fi.i1 / hi.i1）");
+            android.widget.RadioGroup group = findTabGroup(activity, binding);
+            if (group == null) {
+                module.logd(Log.WARN, module.TAG, "未找到底部导航栏 rg_main");
                 return;
             }
-            boolean anyTabHidden = false;
-            // tab 名称按小黑盒资源动态解析（版本自适应：发现/游戏库/社区）
-            String labelHome = MainModule.getHeyboxTabLabel(
-                    activityObj instanceof Activity ? (Activity) activityObj : null, "discover", "发现");
-            String labelHot = MainModule.getHeyboxTabLabel(
-                    activityObj instanceof Activity ? (Activity) activityObj : null, "game_store", "游戏库");
-            String labelBbs = MainModule.getHeyboxTabLabel(
-                    activityObj instanceof Activity ? (Activity) activityObj : null, "bbs", "社区");
+            String labelHome = cacheRuntimeLabel(group, binding, 0, "rb_1", "j");
+            String labelSlot2 = cacheRuntimeLabel(group, binding, 1, "rb_2", "k");
+            String labelSlot4 = cacheRuntimeLabel(group, binding, 2, "rb_4", "m");
+            sAnyTabHidden = false;
             if (module.isEnabled(App.KEY_HIDE_TAB_HOME, false)) {
-                hideTabField(binding, "j", labelHome);
-                anyTabHidden = true;
+                hideTabSlot(group, binding, "rb_1", "j", labelHome);
+                sAnyTabHidden = true;
             }
             if (module.isEnabled(App.KEY_HIDE_TAB_HOT, false)) {
-                hideTabField(binding, "k", labelHot);
-                anyTabHidden = true;
+                hideTabSlot(group, binding, "rb_2", "k", labelSlot2);
+                sAnyTabHidden = true;
             }
             if (module.isEnabled(App.KEY_HIDE_TAB_GAME, false)) {
-                hideTabField(binding, "m", labelBbs);
-                anyTabHidden = true;
+                hideTabSlot(group, binding, "rb_4", "m", labelSlot4);
+                sAnyTabHidden = true;
             }
-            // 加号：独立开关，或隐藏了任意 tab 时联动隐藏（保持底栏布局对称）
-            if (module.isEnabled(App.KEY_HIDE_ADD, false) || anyTabHidden) {
-                hideTabField(binding, "r", "加号");
-                // 同时去掉「推荐」占位（rb_3 在部分版本为 INVISIBLE，隐藏加号后去掉其槽位让剩余 tab 等分）
-                hideTabField(binding, "l", "推荐占位");
+            View plus = findPlusButton(activity, binding);
+            if (module.isEnabled(App.KEY_HIDE_ADD, false)) {
+                hideView(findPlaceholder(activity, binding, group), "推荐占位");
+            } else if (plus != null && plus.getVisibility() == View.VISIBLE
+                    && !LiquidGlassInstaller.isGlassBarActive()) {
+                alignPlusToPlaceholder(activity, binding, group, plus);
             }
-            normalizeVisibleTabs(binding);
-            ViewGroup group = tabGroup(binding);
-            if (group != null) {
+            normalizeVisibleTabs(group);
+            if (reschedule) {
                 group.addOnLayoutChangeListener((v, left, top, right, bottom,
-                        oldLeft, oldTop, oldRight, oldBottom) -> normalizeVisibleTabs(binding));
-                // 小黑盒会在启动/生命周期回调中延迟重新显示 tab，延迟多次重新应用以覆盖
-                retryDelayed(group, () -> normalizeVisibleTabs(binding), 100, 500, 1500, 3000);
+                        oldLeft, oldTop, oldRight, oldBottom) -> normalizeVisibleTabs(group));
+                retryDelayed(group, () -> applyBottomTabSettings(activityObj, false),
+                        100, 500, 1500, 3000);
             }
-            ensureVisibleTabSelected(binding);
+            ensureVisibleTabSelected(group);
             LiquidGlassInstaller.syncTabVisibility();
         } catch (Throwable t) {
             module.logd(Log.WARN, module.TAG, "底部导航栏设置应用失败: " + t);
         }
     }
 
-    /** 反射取绑定里的 tab 组字段 "o"（混淆名） */
+    private static final String[] sRuntimeLabels = new String[3];
+
+    private static volatile boolean sAnyTabHidden;
+
+    public static String runtimeTabLabel(int slot) {
+        return slot >= 0 && slot < sRuntimeLabels.length ? sRuntimeLabels[slot] : null;
+    }
+
+    public static boolean isAnyTabHidden() {
+        return sAnyTabHidden;
+    }
+
+    private String cacheRuntimeLabel(android.widget.RadioGroup group, Object binding,
+                                     int slot, String rbName, String fallbackField) {
+        View v = slotView(group, rbName, fallbackField);
+        if (v == null && binding != null) {
+            v = bindingView(binding, fallbackField);
+        }
+        if (v instanceof android.widget.RadioButton) {
+            CharSequence text = ((android.widget.RadioButton) v).getText();
+            if (text != null && text.length() > 0) {
+                sRuntimeLabels[slot] = text.toString();
+            }
+        }
+        return sRuntimeLabels[slot];
+    }
+
+    private void hideTabSlot(android.widget.RadioGroup group, Object binding,
+                             String rbName, String fallbackField, String label) {
+        View v = slotView(group, rbName, fallbackField);
+        if (v == null && binding != null) {
+            v = bindingView(binding, fallbackField);
+        }
+        if (v != null) {
+            hideView(v, label != null ? label : rbName);
+            return;
+        }
+        module.logd(Log.WARN, module.TAG, "未找到 tab（" + rbName + " / 字段 " + fallbackField + "）");
+    }
+
+    private View slotView(android.widget.RadioGroup group, String rbName, String fallbackField) {
+        try {
+            int id = group.getResources().getIdentifier(rbName, "id", MainModule.TARGET_PKG);
+            if (id != 0) {
+                return group.findViewById(id);
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
+    private int hostId(Activity activity, String name) {
+        if (activity == null) {
+            return 0;
+        }
+        try {
+            return activity.getResources().getIdentifier(name, "id", MainModule.TARGET_PKG);
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
+    private android.widget.RadioGroup findTabGroup(Activity activity, Object binding) {
+        int id = hostId(activity, "rg_main");
+        View v = id != 0 ? activity.findViewById(id) : null;
+        if (v instanceof android.widget.RadioGroup) {
+            return (android.widget.RadioGroup) v;
+        }
+        return tabGroup(binding);
+    }
+
+    private View findPlusButton(Activity activity, Object binding) {
+        int id = hostId(activity, "vg_mid_tab");
+        View v = id != 0 ? activity.findViewById(id) : null;
+        return v != null ? v : bindingView(binding, "r");
+    }
+
+    private View findPlaceholder(Activity activity, Object binding,
+                                 android.widget.RadioGroup group) {
+        int id = hostId(activity, "rb_3");
+        View v = id != 0 ? group.findViewById(id) : null;
+        return v != null ? v : bindingView(binding, "l");
+    }
+
+    private View bindingView(Object binding, String fieldName) {
+        try {
+            Field field = binding.getClass().getDeclaredField(fieldName);
+            field.setAccessible(true);
+            Object obj = field.get(binding);
+            return obj instanceof View ? (View) obj : null;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private void hideView(View v, String label) {
+        if (v == null) {
+            return;
+        }
+        v.setVisibility(View.GONE);
+        retryDelayed(v, () -> v.setVisibility(View.GONE), 500, 1500, 3000);
+        module.logd(Log.INFO, module.TAG, "隐藏 " + label + ": " + v.getVisibility());
+    }
+
+    private void alignPlusToPlaceholder(Activity activity, Object binding,
+                                        android.widget.RadioGroup group, View plus) {
+        View slot = findPlaceholder(activity, binding, group);
+        plus.post(() -> {
+            try {
+                if (LiquidGlassInstaller.isGlassBarActive()
+                        || slot == null || slot.getVisibility() == View.GONE
+                        || plus.getVisibility() != View.VISIBLE
+                        || plus.getWidth() == 0 || slot.getWidth() == 0) {
+                    plus.setTranslationX(0);
+                    return;
+                }
+                int[] slotLoc = new int[2];
+                slot.getLocationOnScreen(slotLoc);
+                int[] plusLoc = new int[2];
+                plus.getLocationOnScreen(plusLoc);
+                float target = slotLoc[0] + slot.getWidth() / 2f;
+                float current = plusLoc[0] - plus.getTranslationX() + plus.getWidth() / 2f;
+                if (Math.abs(target - current) > 1f) {
+                    plus.setTranslationX(target - current);
+                }
+            } catch (Throwable ignored) {
+            }
+        });
+    }
+
     private android.widget.RadioGroup tabGroup(Object binding) {
         try {
             Field f = binding.getClass().getDeclaredField("o");
@@ -148,9 +278,8 @@ public final class BottomTabHook {
         }
     }
 
-    private void normalizeVisibleTabs(Object binding) {
+    private void normalizeVisibleTabs(android.widget.RadioGroup group) {
         try {
-            android.widget.RadioGroup group = tabGroup(binding);
             if (group == null) return;
             int visible = 0;
             for (int i = 0; i < group.getChildCount(); i++) if (group.getChildAt(i).getVisibility() == View.VISIBLE) visible++;
@@ -166,9 +295,8 @@ public final class BottomTabHook {
         } catch (Throwable ignored) { }
     }
 
-    private void ensureVisibleTabSelected(Object binding) {
+    private void ensureVisibleTabSelected(android.widget.RadioGroup group) {
         try {
-            android.widget.RadioGroup group = tabGroup(binding);
             if (group == null) return;
             int checkedId = group.getCheckedRadioButtonId();
             if (checkedId != -1) {
@@ -222,7 +350,6 @@ public final class BottomTabHook {
             if (obj instanceof View) {
                 final View v = (View) obj;
                 v.setVisibility(View.GONE);
-                // 小黑盒会延迟重新显示 tab/加号，延迟多次重新隐藏覆盖（否则 tab 与加号重合）
                 retryDelayed(v, () -> v.setVisibility(View.GONE), 500, 1500, 3000);
                 module.logd(Log.INFO, module.TAG, "隐藏 " + label + ": " + v.getVisibility());
             }
