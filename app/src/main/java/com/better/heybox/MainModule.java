@@ -72,8 +72,81 @@ public class MainModule extends XposedModule {
 
         if (TARGET_PKG.equals(packageName)) {
             logd(Log.INFO, TAG, ">>> 命中小黑盒，安装 Hook");
+            deferInstallForDowngradeCheck(param);
+        }
+    }
+
+    private void deferInstallForDowngradeCheck(PackageReadyParam param) {
+        try {
+            Class<?> appCls = Class.forName("android.app.Application", false, param.getClassLoader());
+            java.lang.reflect.Method onCreate = appCls.getDeclaredMethod("onCreate");
+            java.util.concurrent.atomic.AtomicBoolean decided =
+                    new java.util.concurrent.atomic.AtomicBoolean(false);
+            hook(onCreate).intercept(chain -> {
+                chain.proceed();
+                if (decided.compareAndSet(false, true)) {
+                    activateIfNotDowngraded(param, chain.getThisObject());
+                }
+                return null;
+            });
+        } catch (Throwable t) {
+            logd(Log.WARN, TAG, "检查决策点 Hook 失败", t);
             installHooks(param);
         }
+    }
+    private void activateIfNotDowngraded(PackageReadyParam param, Object app) {
+        long own = ownVersionCode();
+        long floor = -1;
+        try {
+            Context appContext = app instanceof Context ? (Context) app : null;
+            if (appContext != null) {
+                HeyboxPrefs.init(appContext);
+                String stored = HeyboxPrefs.getString(App.KEY_MODULE_VERSION_FLOOR, null);
+                if (stored != null && !stored.trim().isEmpty()) {
+                    floor = Long.parseLong(stored.trim());
+                }
+                if (own > 0) {
+                    long next = Math.max(floor, own);
+                    HeyboxPrefs.setString(App.KEY_MODULE_VERSION_FLOOR, String.valueOf(next));
+                    if (next != floor) {
+                        logd(Log.INFO, TAG, "版本下限: " + next);
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            logd(Log.WARN, TAG, "检查读取失败，常规处理", t);
+            floor = -1;
+        }
+        boolean downgraded = floor > 0 && own > 0 && own < floor && !BuildFlags.DEBUG;
+        if (downgraded) {
+            GeneralHook.notifyDowngraded(app);
+            Checkpoint.mark("检测到模块过时: own=%d floor=%d，已停用", own, floor);
+            logd(Log.WARN, TAG, "检测到模块过时 own=" + own + " < floor=" + floor + "，拒绝激活");
+            return;
+        }
+        installHooks(param);
+    }
+
+    private long ownVersionCode() {
+        try {
+            android.content.pm.ApplicationInfo info = getModuleApplicationInfo();
+            android.content.pm.PackageInfo pkg = getPackageArchiveInfoCompat(info.sourceDir);
+            if (pkg == null) {
+                return -1L;
+            }
+            return android.os.Build.VERSION.SDK_INT >= 28 ? pkg.getLongVersionCode() : pkg.versionCode;
+        } catch (Throwable t) {
+            logd(Log.WARN, TAG, "读取模块自身版本失败", t);
+            return -1L;
+        }
+    }
+
+    private android.content.pm.PackageInfo getPackageArchiveInfoCompat(String sourceDir) {
+        Context ctx = App.resolveAppContext();
+        if (ctx != null) {
+            return ctx.getPackageManager().getPackageArchiveInfo(sourceDir, 0);
+        }
+        return null;
     }
     private void installHooks(PackageReadyParam param) {
         ClassLoader cl = param.getClassLoader();

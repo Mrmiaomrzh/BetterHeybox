@@ -108,8 +108,58 @@ public final class GeneralHook {
         module.logd(Log.WARN, module.TAG, message);
     }
 
-    private void hookUpdateBlocking(ClassLoader cl) {
-        try {
+    private static final AtomicBoolean DOWNGRADE_NOTICE_SHOWN = new AtomicBoolean(false);
+
+    public static void notifyDowngraded(Object app) {
+        if (!(app instanceof android.app.Application)) {
+            return;
+        }
+        ((android.app.Application) app).registerActivityLifecycleCallbacks(
+                new android.app.Application.ActivityLifecycleCallbacks() {
+                    @Override
+                    public void onActivityCreated(Activity activity, android.os.Bundle savedInstanceState) {
+                    }
+
+                    @Override
+                    public void onActivityStarted(Activity activity) {
+                    }
+
+                    @Override
+                    public void onActivityResumed(Activity activity) {
+                        if (!DOWNGRADE_NOTICE_SHOWN.compareAndSet(false, true)) {
+                            return;
+                        }
+                        String message = "BetterHeybox 已停用：模块过时，请更新模块后重启小黑盒";
+                        try {
+                            Class<?> toastUtil = Class.forName("com.max.hbutils.utils.f", false,
+                                    activity.getClassLoader());
+                            Method showBottomHint = toastUtil.getDeclaredMethod("d", String.class);
+                            showBottomHint.invoke(null, message);
+                        } catch (Throwable t) {
+                            Toast.makeText(activity.getApplicationContext(), message,
+                                    Toast.LENGTH_LONG).show();
+                        }
+                    }
+
+                    @Override
+                    public void onActivityPaused(Activity activity) {
+                    }
+
+                    @Override
+                    public void onActivityStopped(Activity activity) {
+                    }
+
+                    @Override
+                    public void onActivitySaveInstanceState(Activity activity, android.os.Bundle outState) {
+                    }
+
+                    @Override
+                    public void onActivityDestroyed(Activity activity) {
+                    }
+                });
+    }
+
+    private void hookUpdateBlocking(ClassLoader cl) {        try {
             Class<?> manager = Class.forName(
                     "com.max.xiaoheihe.utils.AppUpdateManager", false, cl);
             Method updateEntry = null;

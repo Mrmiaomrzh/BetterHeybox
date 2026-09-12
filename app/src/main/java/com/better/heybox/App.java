@@ -21,10 +21,10 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
 
     private static final String TAG = "BetterHeybox";
 
-    /** RemotePreferences 分组名（Hook 侧用同名读取） */
+    /** RemotePreferences 分组名 */
     public static final String PREFS_GROUP = "betterheybox";
 
-    /** 本地待提交缓存（框架服务未连接时的开关写缓冲） */
+    /** 本地待提交缓存 */
     public static final String PENDING_PREFS = "betterheybox_pending";
 
     public static final String KEY_OPEN_SCREEN = "open_screen";
@@ -100,7 +100,7 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     /** 网页日志：记录内置浏览器打开的页面与标题 */
     public static final String KEY_WEB_LOG = "web_log";
 
-    /** 网页日志数据：最近 N 条页面记录（hook 侧写入，设置页查看） */
+    /** 网页日志数据：最近 N 条页面记录 */
     public static final String KEY_WEB_LOG_DATA = "web_log_data";
 
     /** 日志开关：开启后自动记录模块日志到文件 */
@@ -130,10 +130,10 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     /** 底栏形态：0=自动 1=经典居中加号 2=右侧圆形玻璃钮 */
     public static final String KEY_GLASS_BAR_LAYOUT = "glass_bar_layout";
 
-    /** 液态玻璃提供方：GlassProvider.PROVIDER_*；空串为未选择（默认自带实现） */
+    /** 液态玻璃提供方：GlassProvider.PROVIDER_* */
     public static final String KEY_GLASS_PROVIDER = "glass_provider";
 
-    /** 实验性功能：屏蔽双列瀑布流（社区信息流恢复单列，仅 1.3.394 生效） */
+    /** 实验性功能：屏蔽双列瀑布流 */
     public static final String KEY_SINGLE_COLUMN_FEED = "single_column_feed";
 
     /** 发帖过滤：等级阈值，0 为关闭 */
@@ -173,13 +173,14 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     /** 设置页「打开网页」入口保存的 URL */
     public static final String KEY_WEBVIEW_ENTRY_URL = "webview_entry_url";
 
-    /** 运行状态检查点（Debug 构建：小黑盒进程 Hook 安装完成后写入，设置页跨进程读取查看/导出） */
+    /** 运行状态检查点 */
     public static final String KEY_RUNTIME_STATUS = "runtime_status";
 
-    /** 免责声明已同意；false 时 MainActivity 启动即弹 */
+    /** 免责声明 */
     public static final String KEY_DISCLAIMER_ACCEPTED = "disclaimer_accepted";
+    public static final String KEY_MODULE_VERSION_FLOOR = "module_version_floor";
 
-    /** 布尔 key 单一来源：receiver 白名单与备份列表由此派生；LinkedHashMap 保证派生顺序稳定 */
+    /** receiver 白名单与备份列表 */
     public static final java.util.Map<String, Boolean> BOOLEAN_DEFAULTS = buildBooleanDefaults();
 
     private static java.util.Map<String, Boolean> buildBooleanDefaults() {
