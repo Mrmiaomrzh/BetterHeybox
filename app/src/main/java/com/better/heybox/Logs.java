@@ -3,7 +3,7 @@ package com.better.heybox;
 import android.util.Log;
 
 /**
- * 统一日志出口：Release 只放行 error 级，Debug 全量；模块内请勿直接调用 Log
+ * 统一日志出口：Release 放行 warn 及以上（异常与降级需可排查），Debug 全量；模块内请勿直接调用 Log
  */
 public final class Logs {
 
@@ -17,9 +17,7 @@ public final class Logs {
     }
 
     public static void w(String tag, String msg) {
-        if (BuildFlags.DEBUG) {
-            Log.w(tag, msg);
-        }
+        Log.w(tag, msg);
     }
 
     public static void e(String tag, String msg) {
@@ -31,6 +29,6 @@ public final class Logs {
     }
 
     public static boolean shouldLog(int level) {
-        return BuildFlags.DEBUG || level >= Log.ERROR;
+        return BuildFlags.DEBUG || level >= Log.WARN;
     }
 }
