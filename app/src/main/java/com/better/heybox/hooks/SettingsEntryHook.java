@@ -82,7 +82,7 @@ public final class SettingsEntryHook {
                         final Activity activity = (Activity) self;
                         // 等首帧渲染完成再弹，避免盖在启动画面上
                         activity.getWindow().getDecorView().postDelayed(
-                                () -> maybePromptGlassProvider(activity), 1000L);
+                                () -> maybeShowDisclaimer(activity), 1000L);
                     }
                 } catch (Throwable t) {
                     module.logd(Log.WARN, module.TAG, "液态玻璃实现启动提示调度失败: " + t);
@@ -114,7 +114,7 @@ public final class SettingsEntryHook {
         NONE, EDIT_LINK, CLEAR_DAILY, CHANNEL, EXPORT, IMPORT,
         EXPORT_LOG, RUNTIME_STATUS, OPEN_WEB, PICK_DIR, RESET_GLASS, CHOOSE_GLASS,
         POST_LEVEL, POST_KEYWORDS, AI_PROVIDER, AI_PROMPT, AI_TEST, AI_MAX_TOKENS,
-        REDIRECT_FORCE, REDIRECT_BLOCK, REDIRECT_TARGET, WEB_LOG
+        REDIRECT_FORCE, REDIRECT_BLOCK, REDIRECT_TARGET, WEB_LOG, ABOUT
     }
 
     private static class SwitchDef {
@@ -197,6 +197,10 @@ public final class SettingsEntryHook {
             new SettingsGroup("配置备份", new SwitchDef[]{
                     new SwitchDef("导出配置", null, null, false, false, true, null, Action.EXPORT),
                     new SwitchDef("导入配置", null, null, false, false, true, null, Action.IMPORT),
+            }),
+            new SettingsGroup("关于", new SwitchDef[]{
+                    new SwitchDef("关于 BetterHeybox", "版本信息与 GitHub 仓库",
+                            null, false, false, true, null, Action.ABOUT),
             }),
     };
     private static SettingsGroup buildBottomTabGroup(Activity activity) {
@@ -883,6 +887,11 @@ public final class SettingsEntryHook {
                 }
             }
             appendEmbeddedFooter(activity, box);
+            // 目标提示层只在模块设置面板内展示，随面板移除
+            View wm = TargetHintHook.createVisibleHint(activity);
+            wm.setLayoutParams(new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            overlay.addView(wm);
             attachEmbeddedPanel(activity, overlay);
         } catch (Throwable t) {
             module.logd(Log.ERROR, module.TAG, "渲染原生设置面板失败", t);
@@ -912,22 +921,8 @@ public final class SettingsEntryHook {
     private void appendEmbeddedFooter(Activity activity, LinearLayout box) {
         try {
             TextView footer = new TextView(activity);
-            String moduleVersion = null;
-            try {
-                android.content.pm.ApplicationInfo moduleInfo = module.getModuleApplicationInfo();
-                android.content.pm.PackageInfo pkgInfo = activity.getPackageManager()
-                        .getPackageArchiveInfo(moduleInfo.sourceDir, 0);
-                if (pkgInfo != null) {
-                    moduleVersion = pkgInfo.versionName;
-                }
-            } catch (Throwable ignored) {
-            }
-            String displayVersion = moduleVersion;
-            if (displayVersion != null && displayVersion.startsWith("v")) {
-                displayVersion = displayVersion.substring(1);
-            }
-            footer.setText("BetterHeybox v"
-                    + (displayVersion == null ? "unknown" : displayVersion));
+            String displayVersion = moduleVersionName(activity);
+            footer.setText("BetterHeybox v" + displayVersion);
             footer.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12);
             footer.setGravity(android.view.Gravity.CENTER);
             footer.setTextColor(hostColor(activity, "color_text_tertiary_day_night", 0xFF8A8A8A));
@@ -1119,6 +1114,9 @@ public final class SettingsEntryHook {
                         break;
                     case WEB_LOG:
                         setRowClick(itemCls, item, v -> showWebLogDialog(activity));
+                        break;
+                    case ABOUT:
+                        setRowClick(itemCls, item, v -> showAboutDialog(activity));
                         break;
                     case EDIT_LINK:
                     default:
@@ -1718,9 +1716,78 @@ public final class SettingsEntryHook {
                 Toast.LENGTH_LONG).show());
     }
 
+    /** 免责声明未同意前不展示任何功能引导（含玻璃提供方选择） */
+    private static final String DISCLAIMER_TEXT =
+            "本应用与清枫(北京)科技有限公司无任何关联，亦未经其授权或认可\n\n"
+                    + "本项目仅用于学习与研究小黑盒 APP 的部分技术原理，严禁用于任何商业或非法用途\n\n"
+                    + "请在下载后 24 小时内删除本应用及相关文件\n\n"
+                    + "禁止在 小黑盒 / HeyBox 平台内发布、讨论或传播本模块的内容，违者后果自负";
+
+    /** 首次启动且未同意免责声明时强弹；同意后放行玻璃提供方引导 */
+    private void maybeShowDisclaimer(final Activity activity) {
+        try {
+            if (HeyboxPrefs.getBoolean(App.KEY_DISCLAIMER_ACCEPTED, false)) {
+                maybePromptGlassProvider(activity);
+                return;
+            }
+            withHeyboxDialog(activity, spec -> showDisclaimerNative(activity, spec),
+                    () -> showDisclaimerFallback(activity));
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "免责声明弹窗调度失败: " + t);
+        }
+    }
+
+    private void showDisclaimerNative(final Activity activity,
+                                      DexKitResolver.HeyboxDialogSpec spec) throws Exception {
+        TextView message = buildDialogMessage(activity, DISCLAIMER_TEXT);
+        // HeyBoxDialog 点按不自动关闭，须显式 dismiss
+        Dialog dialog = spec.buildAndShow(activity, "免责声明", message, "同意并继续",
+                (d, w) -> {
+                    d.dismiss();
+                    acceptDisclaimer(activity);
+                },
+                "不同意并退出", (d, w) -> {
+                    d.dismiss();
+                    exitWithoutConsent(activity);
+                });
+        dialog.setCancelable(false);
+        dialog.setCanceledOnTouchOutside(false);
+    }
+
+    private void showDisclaimerFallback(final Activity activity) {
+        try {
+            new AlertDialog.Builder(activity)
+                    .setTitle("免责声明")
+                    .setMessage(DISCLAIMER_TEXT)
+                    .setCancelable(false)
+                    .setPositiveButton("同意并继续", (d, w) -> acceptDisclaimer(activity))
+                    .setNegativeButton("不同意并退出", (d, w) -> exitWithoutConsent(activity))
+                    .show();
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "免责声明系统弹窗失败: " + t);
+        }
+    }
+
+    private void acceptDisclaimer(final Activity activity) {
+        writeEmbeddedBoolean(activity, App.KEY_DISCLAIMER_ACCEPTED, true);
+        activity.getWindow().getDecorView().postDelayed(
+                () -> maybePromptGlassProvider(activity), 600L);
+    }
+
+    private void exitWithoutConsent(Activity activity) {
+        try {
+            activity.finishAffinity();
+        } catch (Throwable t) {
+            activity.finish();
+        }
+    }
+
     private void maybePromptGlassProvider(final Activity activity) {
         try {
             if (sLaunchPromptShown) {
+                return;
+            }
+            if (!HeyboxPrefs.getBoolean(App.KEY_DISCLAIMER_ACCEPTED, false)) {
                 return;
             }
             if (!GlassProvider.isHbmodInstalled(activity)) {
@@ -1784,6 +1851,79 @@ public final class SettingsEntryHook {
                     .setView(input).setPositiveButton("打开", (d, w) -> saveAndOpenWeb(activity, input.getText().toString()))
                     .setNegativeButton("取消", null).show();
         } catch (Throwable t) { module.logd(Log.WARN, module.TAG, "打开网页编辑框失败", t); }
+    }
+
+    private void showAboutDialog(final Activity activity) {
+        withHeyboxDialog(activity, spec -> showAboutDialogNative(activity, spec),
+                () -> showAboutDialogFallback(activity));
+    }
+
+    private void showAboutDialogNative(final Activity activity,
+                                       DexKitResolver.HeyboxDialogSpec spec) throws Exception {
+        spec.buildAndShow(activity, "关于 BetterHeybox", buildAboutContent(activity), "打开 GitHub 仓库",
+                (d, w) -> {
+                    d.dismiss();
+                    openNativeWeb(activity, DEFAULT_WEBVIEW_ENTRY_URL);
+                },
+                "关闭", (d, w) -> d.dismiss());
+    }
+
+    private void showAboutDialogFallback(final Activity activity) {
+        try {
+            new AlertDialog.Builder(activity)
+                    .setTitle("关于 BetterHeybox")
+                    .setMessage("版本 " + moduleVersionName(activity)
+                            + "\nGitHub：" + DEFAULT_WEBVIEW_ENTRY_URL)
+                    .setPositiveButton("打开 GitHub 仓库",
+                            (d, w) -> openNativeWeb(activity, DEFAULT_WEBVIEW_ENTRY_URL))
+                    .setNegativeButton("关闭", null)
+                    .show();
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "关于弹窗失败: " + t);
+        }
+    }
+
+    private View buildAboutContent(Activity activity) {
+        LinearLayout box = new LinearLayout(activity);
+        box.setOrientation(LinearLayout.VERTICAL);
+        int pad = module.dp(activity, 10);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(0, pad, 0, pad * 2);
+        box.setLayoutParams(lp);
+        box.setPadding(pad, pad, pad, pad);
+
+        TextView version = new TextView(activity);
+        version.setText("版本 " + moduleVersionName(activity));
+        version.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        int textColor = hostColor(activity, "color_text_primary_day_night", 0);
+        if (textColor != 0) {
+            version.setTextColor(textColor);
+        }
+        box.addView(version);
+
+        TextView link = new TextView(activity);
+        link.setText(DEFAULT_WEBVIEW_ENTRY_URL);
+        link.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        int linkColor = hostColor(activity, "color_text_link_day_night", 0xFF3B78E7);
+        link.setTextColor(linkColor);
+        box.addView(link);
+        link.setOnClickListener(v -> openNativeWeb(activity, DEFAULT_WEBVIEW_ENTRY_URL));
+        return box;
+    }
+
+    private String moduleVersionName(Activity activity) {
+        try {
+            android.content.pm.ApplicationInfo info = module.getModuleApplicationInfo();
+            android.content.pm.PackageInfo pkg = activity.getPackageManager()
+                    .getPackageArchiveInfo(info.sourceDir, 0);
+            if (pkg != null && pkg.versionName != null) {
+                String v = pkg.versionName;
+                return v.startsWith("v") ? v.substring(1) : v;
+            }
+        } catch (Throwable ignored) {
+        }
+        return "unknown";
     }
 
     private void openNativeWeb(Activity activity, String url) {

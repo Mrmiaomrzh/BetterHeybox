@@ -176,6 +176,9 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     /** 运行状态检查点（Debug 构建：小黑盒进程 Hook 安装完成后写入，设置页跨进程读取查看/导出） */
     public static final String KEY_RUNTIME_STATUS = "runtime_status";
 
+    /** 免责声明已同意；false 时 MainActivity 启动即弹 */
+    public static final String KEY_DISCLAIMER_ACCEPTED = "disclaimer_accepted";
+
     /** 布尔 key 单一来源：receiver 白名单与备份列表由此派生；LinkedHashMap 保证派生顺序稳定 */
     public static final java.util.Map<String, Boolean> BOOLEAN_DEFAULTS = buildBooleanDefaults();
 
@@ -212,6 +215,7 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
         m.put(KEY_SINGLE_COLUMN_FEED, false);
         m.put(KEY_POST_AI_ENABLED, false);
         m.put(KEY_POST_NO_LEVEL, false);
+        m.put(KEY_DISCLAIMER_ACCEPTED, false);
         return m;
     }
 

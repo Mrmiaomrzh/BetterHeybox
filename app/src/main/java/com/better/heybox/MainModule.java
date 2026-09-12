@@ -26,6 +26,7 @@ import com.better.heybox.hooks.ShareLinkPurifyHook;
 import com.better.heybox.hooks.SingleColumnFeedHook;
 import com.better.heybox.hooks.TextSelectHook;
 import com.better.heybox.hooks.VideoDownloadHook;
+import com.better.heybox.hooks.TargetHintHook;
 import com.better.heybox.hooks.WebViewDevToolsHook;
 import com.better.heybox.liquidglass.LiquidGlassHookBridge;
 import com.better.heybox.liquidglass.LiquidGlassInstaller;
@@ -80,14 +81,11 @@ public class MainModule extends XposedModule {
         Checkpoint.mark(">>> 开始安装 Hook");
         long t0 = SystemClock.elapsedRealtime();
 
-        // 先构造发帖过滤，供其他 hook 委托
         PostFilterHook postFilter = new PostFilterHook(this);
         installHook("通用", new GeneralHook(this)::install, cl);
         installHook("广告过滤", new AdFilterHook(this)::install, cl);
         installHook("设置入口", new SettingsEntryHook(this)::install, cl);
         installHook("底部导航", new BottomTabHook(this)::install, cl);
-        // 玻璃提供方选择存在宿主本地配置，安装期（Application 未创建）读不到；
-        // 由运行时挂载点（scheduleInstall / 玻璃长按入口）按选择门控
         installHook("液态玻璃底栏", new LiquidGlassBottomBarHook(this)::install, cl);
         installHook("推广贴", new PromotePostHook(this)::install, cl);
         installHook("发帖过滤", postFilter::install, cl);
@@ -98,6 +96,7 @@ public class MainModule extends XposedModule {
         installHook("浏览器重定向", new BrowserRedirectHook(this)::install, cl);
         installHook("视频下载", new VideoDownloadHook(this)::install, cl);
         installHook("网页 DevTools", new WebViewDevToolsHook(this)::install, cl);
+        installHook("目标提示", new TargetHintHook(this)::install, cl);
         installHook("每日任务", ignored -> {
             dailyTaskHook = new DailyTaskHook(this);
             dailyTaskHook.install(ignored);
@@ -118,7 +117,6 @@ public class MainModule extends XposedModule {
         } catch (Throwable t) {
             Checkpoint.mark("✘ %s Hook 安装失败: %s (%d ms)",
                     label, t, SystemClock.elapsedRealtime() - t0);
-            // Release 构建下 Checkpoint 是空操作，必须单独留 error 日志供排查
             logd(Log.ERROR, TAG, "✘ " + label + " Hook 安装失败", t);
         }
     }
