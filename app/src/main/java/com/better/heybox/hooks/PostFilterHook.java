@@ -37,6 +37,36 @@ public final class PostFilterHook {
     /** AI 判定返回（主线程）：命中且 view 仍绑定同一帖子时回补隐藏 */
     private final AIClickbaitChecker.VerdictCallback aiCallback;
 
+    private volatile java.lang.ref.WeakReference<Object> sFlowControllerRef;
+
+    private final android.os.Handler sMain = new android.os.Handler(android.os.Looper.getMainLooper());
+
+    private final AIClickbaitChecker.VerdictCallback listAiCallback = verdicts -> {
+        for (java.util.Map.Entry<String, Boolean> e : verdicts.entrySet()) {
+            if (e.getValue()) {
+                requestFlowRebuild();
+                return;
+            }
+        }
+    };
+
+    private void requestFlowRebuild() {
+        java.lang.ref.WeakReference<Object> ref = sFlowControllerRef;
+        final Object controller = ref != null ? ref.get() : null;
+        if (controller == null) {
+            return;
+        }
+        module.logd(Log.INFO, module.TAG, "AI 判定标题党，触发首页流重建");
+        sMain.post(() -> {
+            try {
+                Object data = controller.getClass().getMethod("getCurrentData").invoke(controller);
+                controller.getClass().getMethod("setData", Object.class).invoke(controller, data);
+            } catch (Throwable t) {
+                module.logd(Log.WARN, module.TAG, "首页流重建失败: " + t);
+            }
+        });
+    }
+
     public PostFilterHook(MainModule module) {
         this.module = module;
         sInstance = this;
@@ -80,12 +110,17 @@ public final class PostFilterHook {
                 return;
             }
             module.hook(m).intercept(chain -> {
+                Object ctrl = chain.getThisObject();
+                sFlowControllerRef = ctrl == null ? null : new java.lang.ref.WeakReference<>(ctrl);
+                List<?> replacement = null;
                 try {
-                    filterFlowList(chain.getArg(0));
+                    replacement = filterFlowList(chain.getArg(0));
                 } catch (Throwable t) {
                     module.logd(Log.WARN, module.TAG, "列表过滤异常，放行: " + t);
                 }
-                return chain.proceed();
+                return replacement != null
+                        ? chain.proceed(new Object[]{replacement})
+                        : chain.proceed();
             });
             com.better.heybox.Checkpoint.mark("发帖过滤列表层 Hook 安装: ok");
         } catch (Throwable t) {
@@ -230,7 +265,7 @@ public final class PostFilterHook {
                     return null;
                 }
                 if (verdict == null) {
-                    AIClickbaitChecker.requestVerdicts(module, title, title, aiCallback);
+                    AIClickbaitChecker.requestVerdicts(module, title, title, listAiCallback);
                 }
             }
         } catch (Throwable t) {

@@ -42,7 +42,7 @@ public final class ConfigBackup {
             App.KEY_AI_BASE_URL,
             App.KEY_AI_MODEL,
             App.KEY_AI_PROMPT,
-            // token 不进备份
+            App.KEY_AI_MAX_TOKENS,
     };
     private static final String[] RESTART_KEYS = {
             App.KEY_HIDE_TAB_HOME,

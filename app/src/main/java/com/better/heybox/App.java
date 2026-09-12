@@ -163,6 +163,9 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     /** AI 判定提示词，空用默认 */
     public static final String KEY_AI_PROMPT = "ai_prompt";
 
+    /** AI 单次请求输出 token 上限 */
+    public static final String KEY_AI_MAX_TOKENS = "ai_max_tokens";
+
     /** 参考项目玻璃颜色预设/透明度/布局参数 */
     public static final String KEY_GLASS_DARK_PRESET = "glass_dark_preset";
     public static final String KEY_GLASS_LIGHT_PRESET = "glass_light_preset";

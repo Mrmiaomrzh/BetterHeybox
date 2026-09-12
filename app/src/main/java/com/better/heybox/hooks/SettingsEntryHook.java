@@ -113,7 +113,7 @@ public final class SettingsEntryHook {
     enum Action {
         NONE, EDIT_LINK, CLEAR_DAILY, CHANNEL, EXPORT, IMPORT,
         EXPORT_LOG, RUNTIME_STATUS, OPEN_WEB, PICK_DIR, RESET_GLASS, CHOOSE_GLASS,
-        POST_LEVEL, POST_KEYWORDS, AI_PROVIDER, AI_PROMPT, AI_TEST,
+        POST_LEVEL, POST_KEYWORDS, AI_PROVIDER, AI_PROMPT, AI_TEST, AI_MAX_TOKENS,
         REDIRECT_FORCE, REDIRECT_BLOCK, REDIRECT_TARGET, WEB_LOG
     }
 
@@ -295,6 +295,10 @@ public final class SettingsEntryHook {
                         null, false, false, true, App.KEY_AI_TOKEN, Action.EDIT_LINK),
                 new SwitchDef("判定提示词", "自定义 AI 判定规则，留空用内置默认",
                         null, false, false, true, null, Action.AI_PROMPT),
+                new SwitchDef("输出 Token 上限",
+                        "当前：" + AIClickbaitChecker.maxTokens(module) + "，点击选择；"
+                                + "过小会导致判定 JSON 被截断失效",
+                        null, false, false, true, null, Action.AI_MAX_TOKENS),
                 new SwitchDef("测试 AI 连接", null, null, false, false,
                         true, null, Action.AI_TEST),
         });
@@ -1094,6 +1098,9 @@ public final class SettingsEntryHook {
                     case AI_PROMPT:
                         setRowClick(itemCls, item, v -> showAiPromptDialog(activity));
                         break;
+                    case AI_MAX_TOKENS:
+                        setRowClick(itemCls, item, v -> showAiMaxTokensDialog(activity));
+                        break;
                     case AI_TEST:
                         setRowClick(itemCls, item, v -> testAiConnection(activity));
                         break;
@@ -1665,6 +1672,42 @@ public final class SettingsEntryHook {
             module.logd(Log.WARN, module.TAG, "保存 AI 提供商失败: " + t);
             return;
         }
+        refreshEmbeddedPanel(activity);
+    }
+
+    private void showAiMaxTokensDialog(final Activity activity) {
+        int current = AIClickbaitChecker.maxTokens(module);
+        String[] labelArr = new String[AIClickbaitChecker.MAX_TOKEN_OPTIONS.length];
+        int checkedIdx = 0;
+        for (int i = 0; i < labelArr.length; i++) {
+            int v = AIClickbaitChecker.MAX_TOKEN_OPTIONS[i];
+            labelArr[i] = v + (v == 700 ? "（推荐）" : "");
+            if (v == current) {
+                checkedIdx = i;
+            }
+        }
+        final String[] labels = labelArr;
+        final int checked = checkedIdx;
+        withHeyboxDialog(activity, spec -> {
+            LinearLayout list = buildOptionRowList(activity, labels, checked);
+            Dialog dialog = spec.buildAndShow(activity, "输出 Token 上限", list, null, null,
+                    "取消", (d, w) -> d.dismiss());
+            bindOptionRows(dialog, list, index -> applyAiMaxTokens(activity, index));
+        }, () -> showSingleChoiceFallback(activity, "输出 Token 上限", labels, checked,
+                index -> applyAiMaxTokens(activity, index)));
+    }
+
+    private void applyAiMaxTokens(Activity activity, int index) {
+        try {
+            HeyboxPrefs.setString(App.KEY_AI_MAX_TOKENS,
+                    String.valueOf(AIClickbaitChecker.MAX_TOKEN_OPTIONS[index]));
+            LogRecorder.recordEvent("AI 输出上限已选择: "
+                    + AIClickbaitChecker.MAX_TOKEN_OPTIONS[index]);
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "保存 AI 输出上限失败: " + t);
+            return;
+        }
+        Toast.makeText(activity, "已保存，立即生效", Toast.LENGTH_SHORT).show();
         refreshEmbeddedPanel(activity);
     }
 

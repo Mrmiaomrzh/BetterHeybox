@@ -73,6 +73,10 @@ public final class AIClickbaitChecker {
     private static final long COOLDOWN_IO_MS = 60_000;
     private static final long COOLDOWN_AUTH_MS = 300_000;
 
+    /** 输出 token 上限可选值（设置页选择行） */
+    public static final int[] MAX_TOKEN_OPTIONS = {300, 500, 700, 1000, 1500};
+    private static final int DEFAULT_MAX_TOKENS = 700;
+
     private static final LruCache<String, Boolean> sVerdictCache = new LruCache<>(512);
     private static final Object sLock = new Object();
     private static final LinkedHashMap<String, String> sPending = new LinkedHashMap<>();
@@ -90,6 +94,19 @@ public final class AIClickbaitChecker {
 
     public static Boolean getCached(String key) {
         return key == null ? null : sVerdictCache.get(key);
+    }
+
+    /** 单次请求输出 token 上限（设置页可选）；非法值回落默认 */
+    public static int maxTokens(MainModule module) {
+        try {
+            int v = Integer.parseInt(
+                    module.getString(App.KEY_AI_MAX_TOKENS, "").trim());
+            if (v >= 100 && v <= 4000) {
+                return v;
+            }
+        } catch (Throwable ignored) {
+        }
+        return DEFAULT_MAX_TOKENS;
     }
 
     public static int providerIndex(String id) {
@@ -227,7 +244,7 @@ public final class AIClickbaitChecker {
             JSONObject body = new JSONObject();
             body.put("model", model);
             body.put("temperature", 0);
-            body.put("max_tokens", 400);
+            body.put("max_tokens", maxTokens(module));
             JSONArray messages = new JSONArray();
             messages.put(new JSONObject().put("role", "system").put("content", prompt));
             messages.put(new JSONObject().put("role", "user").put("content", user.toString()));
@@ -246,6 +263,13 @@ public final class AIClickbaitChecker {
         }
         // 解析失败放行
         Map<String, Boolean> verdicts = parseVerdicts(response.toString(), batch);
+        if (verdicts.isEmpty()) {
+            // 整批无判定：多半是 max_tokens 截断或模型没按 JSON 输出，留痕供排查
+            String snippet = response.length() > 160
+                    ? response.substring(response.length() - 160) : response.toString();
+            module.logd(Log.WARN, module.TAG,
+                    "AI 判定解析为空（batch=" + batch.size() + "），响应尾: " + snippet);
+        }
         for (String[] item : batch) {
             Boolean v = verdicts.get(item[0]);
             if (v != null) {
