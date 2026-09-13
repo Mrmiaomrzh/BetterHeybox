@@ -50,11 +50,6 @@
 
 ### 变更
 
-- **预览版独立包名**：`applicationId` 改为 `com.better.heybox.preview`，模块名显示为
-  「BetterHeybox 预览」，可与正式版同时安装、在 LSPosed 里分别授权
-  （⚠️ 不要把两份模块同时启用在同一作用域，否则同一进程会安装两遍 Hook）
-- **临时停用模块版本检测**：低于历史版本下限时不再拒绝激活，便于本地自编译版本安装；
-  原逻辑已整段注释保留在 `MainModule.activateIfNotDowngraded`，取消注释即可恢复
 - 跨进程开关广播（`PreferenceReceiver`）改为运行时解析模块包名，不再写死 `com.better.heybox`
 
 ## 0.7.7
