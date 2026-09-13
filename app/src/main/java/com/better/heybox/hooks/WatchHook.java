@@ -24,6 +24,12 @@ import java.lang.reflect.Method;
  *   <li>信息流反序列化 → 直接读原始 JSON，命中关注作者/关键词就地提醒（零网络）</li>
  * </ul>
  *
+ * <p><b>跨版本</b>：1.3.393 / 1.3.394 / 1.3.395 三个版本里，
+ * {@code okhttp3.internal.connection.RealCall}、{@code com.max.hbcommon.push.HBGTIntentService}、
+ * 两个信息流反序列化器、{@code com.max.xiaoheihe.MainActivity} 以及用到的接口路径全都一致
+ * （已对 1.3.393 与 1.3.395 的 APK 逐一核对）；每个目标都按候选列表倒序尝试，
+ * 命中情况会汇总成一条日志，便于下次版本更新时排查。
+ *
  * <p>全部 fail-open：钩子安装失败只记日志，绝不影响宿主。
  */
 public final class WatchHook {
@@ -33,6 +39,9 @@ public final class WatchHook {
     public WatchHook(MainModule module) {
         this.module = module;
     }
+
+    /** 本轮命中的目标类，便于跨版本排查 */
+    private final StringBuilder hits = new StringBuilder();
 
     public void install(ClassLoader cl) {
         WatchEngine.init(module);
@@ -44,13 +53,43 @@ public final class WatchHook {
         hookPushArrive(cl);
         hookOkHttp(cl);
         hookFeedJson(cl);
+        module.logd(Log.INFO, module.TAG, "✔ 动态推送 Hook 安装完成：" + (hits.length() == 0 ? "无命中" : hits.toString()));
+    }
+
+    private void hit(String label, String target) {
+        if (hits.length() > 0) {
+            hits.append(" / ");
+        }
+        hits.append(label).append('=').append(target);
     }
 
     // ------------------------------------------------------------ 打开小黑盒
 
+    /** 打开检查的候选类：1.3.393 / 1.3.394 / 1.3.395 均为第一个；BaseActivity 兜底 */
+    private static final String[] OPEN_HOLDERS = {
+            "com.max.xiaoheihe.MainActivity",
+            "com.max.hbcommon.base.BaseActivity",
+    };
+
     private void hookAppOpen(ClassLoader cl) {
+        for (String cn : OPEN_HOLDERS) {
+            try {
+                Class<?> main = Class.forName(cn, false, cl);
+                if (installOpenHooks(main)) {
+                    hit("打开检查", cn);
+                    module.logd(Log.INFO, module.TAG, "✔ 动态推送：打开检查 Hook 已安装 (" + cn + ")");
+                    return;
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        module.logd(Log.WARN, module.TAG, "✘ 动态推送：打开检查 Hook 失败（候选全部落空）");
+    }
+
+    /** @return 是否装上了至少一个入口 */
+    private boolean installOpenHooks(Class<?> main) {
+        boolean any = false;
         try {
-            Class<?> main = Class.forName("com.max.xiaoheihe.MainActivity", false, cl);
             Method onCreate = findMethod(main, "onCreate", android.os.Bundle.class);
             if (onCreate != null) {
                 module.hook(onCreate).intercept(chain -> {
@@ -66,11 +105,11 @@ public final class WatchHook {
                     notifyOpen(chain.getThisObject());
                     return result;
                 });
+                any = true;
             }
-            module.logd(Log.INFO, module.TAG, "✔ 动态推送：打开检查 Hook 已安装");
-        } catch (Throwable t) {
-            module.logd(Log.WARN, module.TAG, "✘ 动态推送：打开检查 Hook 失败: " + t);
+        } catch (Throwable ignored) {
         }
+        return any;
     }
 
     private void notifyOpen(Object self) {
@@ -85,9 +124,30 @@ public final class WatchHook {
 
     // ------------------------------------------------------------ 推送搭便车
 
+    /**
+     * 推送搭便车。
+     *
+     * <p>候选按 1.3.393 / 1.3.394 / 1.3.395 的实测顺序：
+     * 三个版本的 `com.max.hbcommon.push.HBGTIntentService` 都在；
+     * 若哪天改名，再退到个推基类 {@code com.igexin.sdk.GTIntentService}（能覆盖所有子类）。
+     */
+    private static final String[] PUSH_HOLDERS = {
+            "com.max.hbcommon.push.HBGTIntentService",
+            "com.igexin.sdk.GTIntentService",
+    };
+
     private void hookPushArrive(ClassLoader cl) {
+        for (String cn : PUSH_HOLDERS) {
+            if (installPushHooks(cl, cn)) {
+                return;
+            }
+        }
+        module.logd(Log.WARN, module.TAG, "✘ 动态推送：推送搭便车 Hook 失败（候选全部落空）");
+    }
+
+    private boolean installPushHooks(ClassLoader cl, String cn) {
         try {
-            Class<?> svc = Class.forName("com.max.hbcommon.push.HBGTIntentService", false, cl);
+            Class<?> svc = Class.forName(cn, false, cl);
             int installed = 0;
             for (Method m : svc.getDeclaredMethods()) {
                 String n = m.getName();
@@ -108,10 +168,15 @@ public final class WatchHook {
                 });
                 installed++;
             }
-            module.logd(Log.INFO, module.TAG, "✔ 动态推送：推送搭便车 Hook 已安装 (" + installed + " 处)");
-        } catch (Throwable t) {
-            module.logd(Log.WARN, module.TAG, "✘ 动态推送：推送搭便车 Hook 失败: " + t);
+            if (installed > 0) {
+                hit("推送搭便车", cn + "×" + installed);
+                module.logd(Log.INFO, module.TAG, "✔ 动态推送：推送搭便车 Hook 已安装 ("
+                        + cn + ", " + installed + " 处)");
+                return true;
+            }
+        } catch (Throwable ignored) {
         }
+        return false;
     }
 
     // ------------------------------------------------------------ 捕获宿主网络栈
@@ -147,6 +212,7 @@ public final class WatchHook {
                     break;
                 }
                 if (installed > 0) {
+                    hit("网络栈", cn);
                     module.logd(Log.INFO, module.TAG, "✔ 动态推送：HTTP 客户端捕获 Hook 已安装 (" + cn + ")");
                     break;
                 }
@@ -160,13 +226,20 @@ public final class WatchHook {
 
     // ------------------------------------------------------------ 信息流被动命中
 
+    /**
+     * 信息流被动命中：hook Gson 反序列化器，直接读原始 JSON。
+     *
+     * <p>候选按 1.3.393 / 1.3.394 / 1.3.395 的实测顺序（两个类在三个版本中都在）；
+     * 方法名在 R8 后可能是 {@code a} 或 {@code deserialize}，两个都试。
+     */
+    private static final String[] FEED_DESERIALIZERS = {
+            "com.max.data.deserializer.FeedsFlowItemModelDeserializer",
+            "com.max.xiaoheihe.network.gson.FeedsContentDeserializer",
+    };
+
     private void hookFeedJson(ClassLoader cl) {
-        String[] classes = {
-                "com.max.data.deserializer.FeedsFlowItemModelDeserializer",
-                "com.max.xiaoheihe.network.gson.FeedsContentDeserializer",
-        };
         int installed = 0;
-        for (String cn : classes) {
+        for (String cn : FEED_DESERIALIZERS) {
             try {
                 Class<?> d = Class.forName(cn, false, cl);
                 Class<?> jsonElement = Class.forName("com.google.gson.JsonElement", false, cl);
@@ -189,6 +262,9 @@ public final class WatchHook {
                 }
             } catch (Throwable ignored) {
             }
+        }
+        if (installed > 0) {
+            hit("信息流", installed + " 处");
         }
         module.logd(Log.INFO, module.TAG, "✔ 动态推送：信息流命中 Hook 已安装 (" + installed + " 处)");
     }
