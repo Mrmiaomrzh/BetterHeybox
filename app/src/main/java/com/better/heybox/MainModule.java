@@ -97,35 +97,38 @@ public class MainModule extends XposedModule {
         }
     }
     private void activateIfNotDowngraded(PackageReadyParam param, Object app) {
-        long own = ownVersionCode();
-        long floor = -1;
-        try {
-            Context appContext = app instanceof Context ? (Context) app : null;
-            if (appContext != null) {
-                HeyboxPrefs.init(appContext);
-                String stored = HeyboxPrefs.getString(App.KEY_MODULE_VERSION_FLOOR, null);
-                if (stored != null && !stored.trim().isEmpty()) {
-                    floor = Long.parseLong(stored.trim());
-                }
-                if (own > 0) {
-                    long next = Math.max(floor, own);
-                    HeyboxPrefs.setString(App.KEY_MODULE_VERSION_FLOOR, String.valueOf(next));
-                    if (next != floor) {
-                        logd(Log.INFO, TAG, "版本下限: " + next);
-                    }
-                }
-            }
-        } catch (Throwable t) {
-            logd(Log.WARN, TAG, "检查读取失败，常规处理", t);
-            floor = -1;
-        }
-        boolean downgraded = floor > 0 && own > 0 && own < floor && !BuildFlags.DEBUG;
-        if (downgraded) {
-            GeneralHook.notifyDowngraded(app);
-            Checkpoint.mark("检测到模块过时: own=%d floor=%d，已停用", own, floor);
-            logd(Log.WARN, TAG, "检测到模块过时 own=" + own + " < floor=" + floor + "，拒绝激活");
-            return;
-        }
+        // ===== 模块版本检测已临时停用：无条件安装 Hook =====
+        // 需要恢复时把下面整段取消注释、并删掉最后一行 installHooks 即可。
+        //
+        // long own = ownVersionCode();
+        // long floor = -1;
+        // try {
+        //     Context appContext = app instanceof Context ? (Context) app : null;
+        //     if (appContext != null) {
+        //         HeyboxPrefs.init(appContext);
+        //         String stored = HeyboxPrefs.getString(App.KEY_MODULE_VERSION_FLOOR, null);
+        //         if (stored != null && !stored.trim().isEmpty()) {
+        //             floor = Long.parseLong(stored.trim());
+        //         }
+        //         if (own > 0) {
+        //             long next = Math.max(floor, own);
+        //             HeyboxPrefs.setString(App.KEY_MODULE_VERSION_FLOOR, String.valueOf(next));
+        //             if (next != floor) {
+        //                 logd(Log.INFO, TAG, "版本下限: " + next);
+        //             }
+        //         }
+        //     }
+        // } catch (Throwable t) {
+        //     logd(Log.WARN, TAG, "检查读取失败，常规处理", t);
+        //     floor = -1;
+        // }
+        // boolean downgraded = floor > 0 && own > 0 && own < floor && !BuildFlags.DEBUG;
+        // if (downgraded) {
+        //     GeneralHook.notifyDowngraded(app);
+        //     Checkpoint.mark("检测到模块过时: own=%d floor=%d，已停用", own, floor);
+        //     logd(Log.WARN, TAG, "检测到模块过时 own=" + own + " < floor=" + floor + "，拒绝激活");
+        //     return;
+        // }
         installHooks(param);
     }
 
