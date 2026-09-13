@@ -47,6 +47,10 @@ public final class WatchItem {
         sb.append(authorName == null || authorName.isEmpty() ? "未知作者" : authorName);
         if ("user".equals(hit) && hitUser != null && !hitUser.isEmpty()) {
             sb.append(" · 关注的人发布了新动态");
+        } else if ("topic".equals(hit) && hitUser != null && !hitUser.isEmpty()) {
+            sb.append(" · 来自话题「").append(hitUser).append("」");
+        } else if ("keyword".equals(hit) && hitUser != null && !hitUser.isEmpty()) {
+            sb.append(" · 命中关键词「").append(hitUser).append("」");
         } else if ("keyword".equals(hit)) {
             sb.append(" · 命中关键词");
         }

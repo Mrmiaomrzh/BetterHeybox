@@ -194,8 +194,16 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     public static final String KEY_WATCH_NOTIFY = "watch_notify";
     /** 检查间隔（分钟） */
     public static final String KEY_WATCH_INTERVAL_MIN = "watch_interval_min";
-    /** 时间窗（天）：只提醒最近 N 天内的新帖 */
+    /** 时间窗（天）：只提醒最近 N 天内的新帖（旧键，保留兼容） */
     public static final String KEY_WATCH_WINDOW_DAYS = "watch_window_days";
+    /** 获取时间窗（分钟）：只提醒最近 N 分钟内的新帖，优先于上面的「天」 */
+    public static final String KEY_WATCH_WINDOW_MIN = "watch_window_min";
+    /** 关注的话题：一行一个 "话题id|话题名"（导入关注话题时写入） */
+    public static final String KEY_WATCH_TOPICS = "watch_topics";
+    /** 关键词只匹配标题（默认标题+正文） */
+    public static final String KEY_WATCH_TITLE_ONLY = "watch_title_only";
+    /** 关键词/话题主动拉流：按关键词搜索、按话题取最新帖（默认关） */
+    public static final String KEY_WATCH_STREAM_FETCH = "watch_stream_fetch";
     /** 第三方推送总开关 */
     public static final String KEY_WATCH_PUSH_ENABLED = "watch_push_enabled";
     /** 钉钉机器人：webhook 或 access_token */
@@ -256,6 +264,8 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
         m.put(KEY_WATCH_BANNER, true);
         m.put(KEY_WATCH_NOTIFY, true);
         m.put(KEY_WATCH_PUSH_ENABLED, false);
+        m.put(KEY_WATCH_TITLE_ONLY, false);
+        m.put(KEY_WATCH_STREAM_FETCH, false);
         return m;
     }
 

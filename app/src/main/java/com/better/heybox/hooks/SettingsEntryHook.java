@@ -117,7 +117,9 @@ public final class SettingsEntryHook {
         POST_LEVEL, POST_KEYWORDS, AI_PROVIDER, AI_PROMPT, AI_TEST, AI_MAX_TOKENS,
         REDIRECT_FORCE, REDIRECT_BLOCK, REDIRECT_TARGET, WEB_LOG, ABOUT,
         WATCH_USERS, WATCH_KEYWORDS, WATCH_IMPORT_FOLLOW, WATCH_TEST_PUSH, WATCH_CHECK,
-        WATCH_DEBUG_PUSH3
+        WATCH_DEBUG_PUSH3,
+        /** v2 二级页入口 */ WATCH_V2,
+        WATCH_TOPICS, WATCH_IMPORT_TOPICS, WATCH_WINDOW, WATCH_INTERVAL, WATCH_SUGGEST_KEYWORDS
     }
 
     private static class SwitchDef {
@@ -271,29 +273,86 @@ public final class SettingsEntryHook {
      * 全部走宿主自身的网络栈与通知渠道，不需要任何额外凭据。
      */
     private void insertWatchGroup(List<SettingsGroup> groups) {
-        int userCount = com.better.heybox.watch.WatchConfig
-                .splitLines(module.getString(App.KEY_WATCH_USERS, ""), 999).size();
-        int kwCount = com.better.heybox.watch.WatchConfig
-                .splitLines(module.getString(App.KEY_WATCH_KEYWORDS, ""), 999).size();
+        final com.better.heybox.watch.WatchConfig cfg =
+                com.better.heybox.watch.WatchConfig.load(module);
+        String summary = "关注 " + cfg.users.size() + " 人 · 话题 " + cfg.topics.size()
+                + " 个 · 关键词 " + cfg.keywords.size() + " 个 · 时间窗 " + cfg.windowText();
         SettingsGroup group = new SettingsGroup("动态推送", new SwitchDef[]{
                 new SwitchDef("关注动态提醒",
-                        "打开小黑盒或收到推送时，检查关注对象是否有新动态",
+                        "打开小黑盒或收到推送时，检查关注对象 / 话题 / 关键词是否有新动态",
                         App.KEY_WATCH_ENABLED, false, false),
+                new SwitchDef("动态推送设置", summary + "；点击进入详细设置",
+                        null, false, false, true, null, Action.WATCH_V2),
+                new SwitchDef("立即检查", "手动触发一次检查（结果见模块日志）",
+                        null, false, false, true, null, Action.WATCH_CHECK),
+        });
+        insertBeforeGeneral(groups, group);
+    }
+
+    /** 插到「通用」分组之前；找不到就追加到末尾 */
+    private static void insertBeforeGeneral(List<SettingsGroup> groups, SettingsGroup group) {
+        int insertAt = groups.size();
+        for (int i = 0; i < groups.size(); i++) {
+            if (TITLE_GENERAL.equals(groups.get(i).title)) {
+                insertAt = i;
+                break;
+            }
+        }
+        groups.add(insertAt, group);
+    }
+
+    /**
+     * 动态推送二级页（v2）：把原先堆在主页面上的十几行拆成 5 个分组。
+     * 监控目标 / 抓取范围 / 提醒方式 / 第三方推送 / 测试与调试。
+     */
+    private List<SettingsGroup> buildWatchV2Groups(Activity activity) {
+        final com.better.heybox.watch.WatchConfig cfg =
+                com.better.heybox.watch.WatchConfig.load(module);
+        List<SettingsGroup> groups = new ArrayList<>();
+
+        groups.add(new SettingsGroup("监控目标", new SwitchDef[]{
                 new SwitchDef("关注对象",
-                        userCount > 0 ? "已配置 " + userCount + " 个，点击编辑"
-                                : "一行一个：userid 或用户主页链接",
+                        cfg.users.isEmpty() ? "一行一个：userid 或用户主页链接"
+                                : "已配置 " + cfg.users.size() + " 个，点击编辑",
                         null, false, false, true, null, Action.WATCH_USERS),
-                new SwitchDef("导入关注列表", "读取小黑盒「我关注的」并追加到上面（最多 "
+                new SwitchDef("导入关注列表", "读取小黑盒「我关注的」并追加（最多 "
                         + com.better.heybox.watch.WatchConfig.MAX_USERS + " 个）",
                         null, false, false, true, null, Action.WATCH_IMPORT_FOLLOW),
+                new SwitchDef("关注的话题",
+                        cfg.topics.isEmpty() ? "一行一个：话题名，或「话题id|话题名」"
+                                : "已配置 " + cfg.topics.size() + " 个，点击编辑",
+                        null, false, false, true, null, Action.WATCH_TOPICS),
+                new SwitchDef("导入关注话题", "读取小黑盒「我关注的话题」并追加（最多 "
+                        + com.better.heybox.watch.WatchConfig.MAX_TOPICS + " 个）",
+                        null, false, false, true, null, Action.WATCH_IMPORT_TOPICS),
                 new SwitchDef("监控关键词",
-                        kwCount > 0 ? "已配置 " + kwCount + " 个，点击编辑"
-                                : "命中标题或正文即提醒；regex: 前缀为正则",
+                        cfg.keywords.isEmpty() ? "命中标题或正文即提醒；regex: 前缀为正则"
+                                : "已配置 " + cfg.keywords.size() + " 个，点击编辑",
                         null, false, false, true, null, Action.WATCH_KEYWORDS),
+                new SwitchDef("推荐关键词", "拉取小黑盒热搜词 / 联想词，点一下加入监控关键词",
+                        null, false, false, true, null, Action.WATCH_SUGGEST_KEYWORDS),
+        }));
+
+        groups.add(new SettingsGroup("抓取范围", new SwitchDef[]{
+                new SwitchDef("关键词只匹配标题", "开启后关键词不再匹配正文",
+                        App.KEY_WATCH_TITLE_ONLY, false, false),
+                new SwitchDef("话题/关键词拉流",
+                        "按话题和关键词主动拉最新帖（首次只登记基线，之后只推新增）",
+                        App.KEY_WATCH_STREAM_FETCH, false, false),
+                new SwitchDef("获取时间窗", "只提醒发布时间在 " + cfg.windowText() + " 以内的帖子",
+                        null, false, false, true, null, Action.WATCH_WINDOW),
+                new SwitchDef("检查间隔", "两次自动检查至少间隔 " + cfg.intervalMin + " 分钟",
+                        null, false, false, true, null, Action.WATCH_INTERVAL),
+        }));
+
+        groups.add(new SettingsGroup("提醒方式", new SwitchDef[]{
                 new SwitchDef("应用内横幅", "在小黑盒界面上方弹出提醒",
                         App.KEY_WATCH_BANNER, true, false),
                 new SwitchDef("系统通知", "在通知栏提醒，点击可跳转帖子",
                         App.KEY_WATCH_NOTIFY, true, false),
+        }));
+
+        groups.add(new SettingsGroup("第三方推送", new SwitchDef[]{
                 new SwitchDef("第三方推送", "把新动态转发到钉钉 / WxPusher / 机器人",
                         App.KEY_WATCH_PUSH_ENABLED, false, false),
                 new SwitchDef("钉钉机器人", "webhook 地址或 access_token",
@@ -305,6 +364,9 @@ public final class SettingsEntryHook {
                         null, false, false, true, App.KEY_WATCH_PUSH_ONEBOT),
                 new SwitchDef("自定义 webhook", "支持 {title} {author} {link} {desc} 占位符",
                         null, false, false, true, App.KEY_WATCH_PUSH_CUSTOM),
+        }));
+
+        groups.add(new SettingsGroup("测试与调试", new SwitchDef[]{
                 new SwitchDef("测试提醒", "发一条测试：应用内横幅 + 系统通知 + 第三方推送",
                         null, false, false, true, null, Action.WATCH_TEST_PUSH),
                 new SwitchDef("立即检查", "手动触发一次检查（结果见模块日志）",
@@ -312,15 +374,242 @@ public final class SettingsEntryHook {
                 new SwitchDef("调试：推送最近 3 条",
                         "取关注对象最近 3 条帖子，按真实流程立即推送（忽略时间窗与去重）",
                         null, false, false, true, null, Action.WATCH_DEBUG_PUSH3),
-        });
-        int insertAt = groups.size();
-        for (int i = 0; i < groups.size(); i++) {
-            if (TITLE_GENERAL.equals(groups.get(i).title)) {
-                insertAt = i;
-                break;
+        }));
+
+        return groups;
+    }
+
+    // ------------------------------------------------------------ 时间窗 / 检查间隔
+
+    private static final String[] WATCH_WINDOW_LABELS = {
+            "30 分钟", "1 小时", "3 小时", "6 小时", "12 小时", "1 天", "3 天", "7 天", "30 天"};
+    private static final int[] WATCH_WINDOW_MINUTES = {
+            30, 60, 180, 360, 720, 1440, 4320, 10080, 43200};
+    private static final String[] WATCH_INTERVAL_LABELS = {
+            "5 分钟", "10 分钟", "15 分钟", "30 分钟", "1 小时", "3 小时", "6 小时", "12 小时"};
+    private static final int[] WATCH_INTERVAL_MINUTES = {5, 10, 15, 30, 60, 180, 360, 720};
+
+    private int currentWatchWindowMin() {
+        com.better.heybox.watch.WatchConfig cfg = com.better.heybox.watch.WatchConfig.load(module);
+        return cfg.windowMin;
+    }
+
+    private int currentWatchIntervalMin() {
+        com.better.heybox.watch.WatchConfig cfg = com.better.heybox.watch.WatchConfig.load(module);
+        return cfg.intervalMin;
+    }
+
+    /** 取最接近的下标（用户手改过配置时不至于跑出数组） */
+    private static int nearestIndex(int[] values, int cur) {
+        int best = 0;
+        for (int i = 1; i < values.length; i++) {
+            if (Math.abs(values[i] - cur) < Math.abs(values[best] - cur)) {
+                best = i;
             }
         }
-        groups.add(insertAt, group);
+        return best;
+    }
+
+    private void showWatchWindowDialog(final Activity activity) {
+        withHeyboxDialog(activity, spec -> showWatchWindowDialogNative(activity, spec),
+                () -> showWatchWindowDialogFallback(activity));
+    }
+
+    private void showWatchWindowDialogNative(Activity activity,
+                                             DexKitResolver.HeyboxDialogSpec spec) throws Exception {
+        LinearLayout list = buildOptionRowList(activity, WATCH_WINDOW_LABELS,
+                nearestIndex(WATCH_WINDOW_MINUTES, currentWatchWindowMin()));
+        Dialog dialog = spec.buildAndShow(activity, "获取时间窗", list, null, null,
+                "取消", (d, w) -> d.dismiss());
+        bindOptionRows(dialog, list, index -> applyWatchWindow(activity, index));
+    }
+
+    private void showWatchWindowDialogFallback(Activity activity) {
+        showSingleChoiceFallback(activity, "获取时间窗", WATCH_WINDOW_LABELS,
+                nearestIndex(WATCH_WINDOW_MINUTES, currentWatchWindowMin()),
+                index -> applyWatchWindow(activity, index));
+    }
+
+    private void applyWatchWindow(Activity activity, int index) {
+        try {
+            HeyboxPrefs.init(activity);
+            HeyboxPrefs.setString(App.KEY_WATCH_WINDOW_MIN, String.valueOf(WATCH_WINDOW_MINUTES[index]));
+            LogRecorder.recordEvent("动态推送时间窗: " + WATCH_WINDOW_LABELS[index]);
+            Toast.makeText(activity, "获取时间窗已设为 " + WATCH_WINDOW_LABELS[index],
+                    Toast.LENGTH_SHORT).show();
+            refreshEmbeddedPanel(activity);
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "设置获取时间窗失败: " + t);
+        }
+    }
+
+    private void showWatchIntervalDialog(final Activity activity) {
+        withHeyboxDialog(activity, spec -> showWatchIntervalDialogNative(activity, spec),
+                () -> showWatchIntervalDialogFallback(activity));
+    }
+
+    private void showWatchIntervalDialogNative(Activity activity,
+                                               DexKitResolver.HeyboxDialogSpec spec) throws Exception {
+        LinearLayout list = buildOptionRowList(activity, WATCH_INTERVAL_LABELS,
+                nearestIndex(WATCH_INTERVAL_MINUTES, currentWatchIntervalMin()));
+        Dialog dialog = spec.buildAndShow(activity, "检查间隔", list, null, null,
+                "取消", (d, w) -> d.dismiss());
+        bindOptionRows(dialog, list, index -> applyWatchInterval(activity, index));
+    }
+
+    private void showWatchIntervalDialogFallback(Activity activity) {
+        showSingleChoiceFallback(activity, "检查间隔", WATCH_INTERVAL_LABELS,
+                nearestIndex(WATCH_INTERVAL_MINUTES, currentWatchIntervalMin()),
+                index -> applyWatchInterval(activity, index));
+    }
+
+    private void applyWatchInterval(Activity activity, int index) {
+        try {
+            HeyboxPrefs.init(activity);
+            HeyboxPrefs.setString(App.KEY_WATCH_INTERVAL_MIN,
+                    String.valueOf(WATCH_INTERVAL_MINUTES[index]));
+            LogRecorder.recordEvent("动态推送检查间隔: " + WATCH_INTERVAL_LABELS[index]);
+            Toast.makeText(activity, "检查间隔已设为 " + WATCH_INTERVAL_LABELS[index],
+                    Toast.LENGTH_SHORT).show();
+            refreshEmbeddedPanel(activity);
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "设置检查间隔失败: " + t);
+        }
+    }
+
+    /**
+     * 导入关注话题：读取小黑盒「我关注的话题」并追加到「关注的话题」。
+     * 写入 "话题id|话题名"，带 id 的话题可以直接按话题拉流。
+     */
+    private void importWatchTopics(final Activity activity) {
+        Toast.makeText(activity, "正在读取关注话题…", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            final String[] msg = new String[1];
+            try {
+                List<String[]> list = com.better.heybox.watch.WatchFetcher.fetchFollowedTopics(
+                        com.better.heybox.watch.WatchConfig.MAX_TOPICS);
+                if (list.isEmpty()) {
+                    msg[0] = "未取到关注话题（详情见模块日志）";
+                } else {
+                    List<String> exist = com.better.heybox.watch.WatchConfig
+                            .splitLines(module.getString(App.KEY_WATCH_TOPICS, ""), 999);
+                    java.util.LinkedHashSet<String> set = new java.util.LinkedHashSet<>(exist);
+                    int added = 0;
+                    for (String[] t : list) {
+                        String line = com.better.heybox.watch.WatchConfig.formatTopic(t[0], t[1]);
+                        if (line.isEmpty() || set.contains(line)
+                                || set.size() >= com.better.heybox.watch.WatchConfig.MAX_TOPICS) {
+                            continue;
+                        }
+                        set.add(line);
+                        added++;
+                    }
+                    if (added > 0) {
+                        StringBuilder sb = new StringBuilder();
+                        for (String line : set) {
+                            sb.append(line).append('\n');
+                        }
+                        boolean ok = HeyboxPrefs.setString(App.KEY_WATCH_TOPICS, sb.toString());
+                        LogRecorder.recordEvent("导入关注话题已写入: added=" + added
+                                + ", total=" + set.size() + ", ok=" + ok);
+                    }
+                    msg[0] = added > 0 ? ("已导入 " + added + " 个话题，共 " + set.size()
+                            + " 个（重进面板可见）") : "没有新的话题可导入";
+                }
+            } catch (Throwable t) {
+                msg[0] = "导入失败：" + t;
+            }
+            final String out = msg[0];
+            activity.runOnUiThread(() -> {
+                try {
+                    Toast.makeText(activity, out, Toast.LENGTH_LONG).show();
+                    refreshEmbeddedPanel(activity);
+                } catch (Throwable ignored) {
+                }
+            });
+        }, "betterheybox-watch-topic-import").start();
+    }
+
+    /** 推荐关键词：拉热搜词/联想词，点一下加入监控关键词（不覆盖已有配置） */
+    private void suggestWatchKeywords(final Activity activity) {
+        Toast.makeText(activity, "正在获取推荐关键词…", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            final List<String> words = new ArrayList<>();
+            try {
+                words.addAll(com.better.heybox.watch.WatchFetcher.fetchHotWords(null, 12));
+            } catch (Throwable t) {
+                module.logd(Log.WARN, module.TAG, "推荐关键词获取失败: " + t);
+            }
+            activity.runOnUiThread(() -> {
+                try {
+                    if (words.isEmpty()) {
+                        Toast.makeText(activity, "没取到推荐关键词（详情见模块日志）",
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    showWatchSuggestDialog(activity, words.toArray(new String[0]));
+                } catch (Throwable t) {
+                    module.logd(Log.WARN, module.TAG, "推荐关键词弹窗失败: " + t);
+                }
+            });
+        }, "betterheybox-watch-suggest").start();
+    }
+
+    private void showWatchSuggestDialog(final Activity activity, final String[] labels) {
+        withHeyboxDialog(activity, spec -> {
+            LinearLayout list = buildOptionRowList(activity, labels, -1);
+            Dialog dialog = spec.buildAndShow(activity, "推荐关键词（点击添加）", list, null, null,
+                    "取消", (d, w) -> d.dismiss());
+            bindOptionRows(dialog, list, index -> addWatchKeyword(activity, labels[index]));
+        }, () -> showListPickFallback(activity, "推荐关键词（点击添加）", labels,
+                index -> addWatchKeyword(activity, labels[index])));
+    }
+
+    /** 多选列表的系统弹窗兜底：点击即选项（不关闭） */
+    private void showListPickFallback(final Activity activity, String title,
+                                      final String[] labels, final OptionPick onPick) {
+        try {
+            new AlertDialog.Builder(activity)
+                    .setTitle(title)
+                    .setItems(labels, (dialog, which) -> {
+                        onPick.pick(which);
+                        dialog.dismiss();
+                    })
+                    .setNegativeButton("取消", null)
+                    .show();
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "列表弹框失败(" + title + "): " + t);
+        }
+    }
+
+    private void addWatchKeyword(Activity activity, String word) {
+        try {
+            HeyboxPrefs.init(activity);
+            List<String> exist = com.better.heybox.watch.WatchConfig
+                    .splitLines(module.getString(App.KEY_WATCH_KEYWORDS, ""), 999);
+            for (String e : exist) {
+                if (e.equals(word)) {
+                    Toast.makeText(activity, "「" + word + "」已在关键词里", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+            }
+            if (exist.size() >= com.better.heybox.watch.WatchConfig.MAX_KEYWORDS) {
+                Toast.makeText(activity, "关键词最多 "
+                        + com.better.heybox.watch.WatchConfig.MAX_KEYWORDS + " 个", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            exist.add(word);
+            StringBuilder sb = new StringBuilder();
+            for (String line : exist) {
+                sb.append(line).append('\n');
+            }
+            HeyboxPrefs.setString(App.KEY_WATCH_KEYWORDS, sb.toString());
+            LogRecorder.recordEvent("推荐关键词已加入: " + word);
+            Toast.makeText(activity, "已添加关键词：" + word, Toast.LENGTH_SHORT).show();
+            refreshEmbeddedPanel(activity);
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "添加关键词失败: " + t);
+        }
     }
 
     /**
@@ -1005,7 +1294,24 @@ public final class SettingsEntryHook {
         return false;
     }
 
+    /** 当前叠加的是否为「动态推送设置」二级页（刷新时据此还原同一页） */
+    private boolean mPanelV2;
+
     private void showEmbeddedSettings(final Activity activity) {
+        mPanelV2 = false;
+        openEmbeddedPanel(activity, "BetterHeybox 设置", buildSettingsGroups(activity),
+                this::dismissEmbeddedSettings);
+    }
+
+    /** 二级页：动态推送设置（v2）。返回键 / 左上角箭头回到主设置页。 */
+    private void showWatchV2Settings(final Activity activity) {
+        mPanelV2 = true;
+        openEmbeddedPanel(activity, "动态推送设置", buildWatchV2Groups(activity),
+                () -> showEmbeddedSettings(activity));
+    }
+
+    private void openEmbeddedPanel(final Activity activity, String title,
+                                   List<SettingsGroup> groups, final Runnable onBack) {
         try {
             dismissEmbeddedSettings();
             HeyboxPrefs.init(activity);
@@ -1041,7 +1347,7 @@ public final class SettingsEntryHook {
                     ViewGroup.LayoutParams.MATCH_PARENT, statusBarH));
             page.addView(statusSpacer);
             ClassLoader cl = activity.getClassLoader();
-            page.addView(buildEmbeddedTitleBar(activity, cl, appbarBg));
+            page.addView(buildEmbeddedTitleBar(activity, cl, appbarBg, title, onBack));
             ScrollView scroller = new ScrollView(activity);
             scroller.setLayoutParams(new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
@@ -1053,7 +1359,7 @@ public final class SettingsEntryHook {
             scroller.addView(box);
             page.addView(scroller);
 
-            for (SettingsGroup group : buildSettingsGroups(activity)) {
+            for (SettingsGroup group : groups) {
                 View card = buildSectionCard(activity, cl, group);
                 if (card != null) {
                     box.addView(card);
@@ -1066,24 +1372,29 @@ public final class SettingsEntryHook {
                         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
                 overlay.addView(wm);
             }
-            attachEmbeddedPanel(activity, overlay);
+            attachEmbeddedPanel(activity, overlay, onBack);
         } catch (Throwable t) {
             module.logd(Log.ERROR, module.TAG, "渲染原生设置面板失败", t);
         }
     }
 
-    private View buildEmbeddedTitleBar(Activity activity, ClassLoader cl, int appbarBg) throws Throwable {
+    private View buildEmbeddedTitleBar(Activity activity, ClassLoader cl, int appbarBg,
+                                       String title, final Runnable onBack) throws Throwable {
         Class<?> titleBarCls = Class.forName("com.max.hbcommon.component.TitleBar", false, cl);
         Object titleBar = titleBarCls.getConstructor(Context.class).newInstance(activity);
         ((View) titleBar).setBackgroundColor(appbarBg);
-        titleBarCls.getMethod("setTitle", CharSequence.class).invoke(titleBar, "BetterHeybox 设置");
+        titleBarCls.getMethod("setTitle", CharSequence.class).invoke(titleBar, title);
         titleBarCls.getMethod("setNavigationIcon", int.class)
                 .invoke(titleBar, hostResId(activity, "appbar_back", "drawable", 0));
         Class<?> ocl = Class.forName("android.view.View$OnClickListener", false, cl);
         Object backListener = new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                dismissEmbeddedSettings();
+                if (onBack != null) {
+                    onBack.run();
+                } else {
+                    dismissEmbeddedSettings();
+                }
             }
         };
         titleBarCls.getMethod("setNavigationOnClickListener", ocl).invoke(titleBar, backListener);
@@ -1134,12 +1445,16 @@ public final class SettingsEntryHook {
         showEmbeddedSettings(activity);
     }
 
-    private void attachEmbeddedPanel(Activity activity, FrameLayout overlay) {
+    private void attachEmbeddedPanel(Activity activity, FrameLayout overlay, final Runnable onBack) {
         overlay.setOnKeyListener(new View.OnKeyListener() {
             @Override
             public boolean onKey(View v, int keyCode, KeyEvent event) {
                 if (keyCode == KeyEvent.KEYCODE_BACK && event.getAction() == KeyEvent.ACTION_DOWN) {
-                    dismissEmbeddedSettings();
+                    if (onBack != null) {
+                        onBack.run();
+                    } else {
+                        dismissEmbeddedSettings();
+                    }
                     return true;
                 }
                 return false;
@@ -1325,6 +1640,27 @@ public final class SettingsEntryHook {
                         break;
                     case WATCH_IMPORT_FOLLOW:
                         setRowClick(itemCls, item, v -> importWatchFollowing(activity));
+                        break;
+                    case WATCH_V2:
+                        setRowClick(itemCls, item, v -> showWatchV2Settings(activity));
+                        break;
+                    case WATCH_TOPICS:
+                        setRowClick(itemCls, item, v -> showMultilineEditDialog(activity,
+                                "关注的话题", App.KEY_WATCH_TOPICS,
+                                "一行一个：话题名，或「话题id|话题名」（「导入关注话题」会自动带上 id）",
+                                false));
+                        break;
+                    case WATCH_IMPORT_TOPICS:
+                        setRowClick(itemCls, item, v -> importWatchTopics(activity));
+                        break;
+                    case WATCH_WINDOW:
+                        setRowClick(itemCls, item, v -> showWatchWindowDialog(activity));
+                        break;
+                    case WATCH_INTERVAL:
+                        setRowClick(itemCls, item, v -> showWatchIntervalDialog(activity));
+                        break;
+                    case WATCH_SUGGEST_KEYWORDS:
+                        setRowClick(itemCls, item, v -> suggestWatchKeywords(activity));
                         break;
                     case WATCH_TEST_PUSH:
                         setRowClick(itemCls, item, v -> testWatchPush(activity));
@@ -1671,7 +2007,11 @@ public final class SettingsEntryHook {
         }
         ScrollView old = findScroller(panel);
         final int scrollY = old == null ? 0 : old.getScrollY();
-        showEmbeddedSettings(activity);
+        if (mPanelV2) {
+            showWatchV2Settings(activity);
+        } else {
+            showEmbeddedSettings(activity);
+        }
         View fresh = mSettingsPanel == null ? null : mSettingsPanel.get();
         if (fresh != null) {
             ScrollView scroller = findScroller(fresh);

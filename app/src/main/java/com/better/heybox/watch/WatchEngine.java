@@ -147,9 +147,14 @@ public final class WatchEngine {
 
     // ------------------------------------------------------------ 主动检查
 
+    /** 主动拉流时每轮最多处理多少个关键词（防请求过多） */
+    private static final int MAX_STREAM_KEYWORDS = 5;
+
     private static void run(WatchConfig cfg, Context ctx, String reason) {
         log(Log.INFO, "开始检查（" + reason + "）：关注 " + cfg.users.size()
-                + " 人，关键词 " + cfg.keywords.size() + " 个");
+                + " 人，关键词 " + cfg.keywords.size() + " 个，话题 " + cfg.topics.size()
+                + " 个，时间窗 " + cfg.windowText()
+                + (cfg.streamFetch ? "，拉流开启" : ""));
         List<WatchItem> found = new ArrayList<>();
         if (!HttpBridge.ready()) {
             log(Log.WARN, "尚未捕获宿主网络栈，跳过主动拉取（可先在小黑盒里刷新一次信息流以完成捕获）");
@@ -185,7 +190,73 @@ public final class WatchEngine {
                 sleep(800);
             }
         }
+        if (cfg.streamFetch) {
+            if (!HttpBridge.ready()) {
+                log(Log.WARN, "拉流需要宿主网络栈，本轮跳过（先在小黑盒里刷新一次信息流）");
+            } else {
+                streamFetch(cfg, found);
+            }
+        } else if (!cfg.topics.isEmpty()) {
+            log(Log.INFO, "已配置 " + cfg.topics.size()
+                    + " 个关注话题，但「话题/关键词拉流」未开启，本轮只在被动命中时匹配");
+        }
         deliver(cfg, ctx, WatchFetcher.dedupe(found), "主动拉取");
+    }
+
+    /**
+     * 拉流：按关键词搜索、按话题取最新帖。首次见到某个关键词/话题时只登记基线不推送，
+     * 之后只推新增（与关注对象同一套去重与时间窗逻辑）。
+     */
+    private static void streamFetch(WatchConfig cfg, List<WatchItem> found) {
+        int used = 0;
+        for (String kw : cfg.keywords) {
+            if (used >= MAX_STREAM_KEYWORDS) {
+                log(Log.INFO, "关键词拉流已达单轮上限 " + MAX_STREAM_KEYWORDS + " 个，其余留到下一轮");
+                break;
+            }
+            if (kw.startsWith("regex:")) {
+                continue;   // 正则表达式不能直接当搜索词
+            }
+            used++;
+            String key = "kw:" + kw.toLowerCase();
+            List<WatchItem> items = WatchFetcher.fetchKeywordPosts(kw, WatchFetcher.FETCH_LIMIT);
+            if (!WatchSeen.isBaselined(key)) {
+                for (WatchItem it : items) {
+                    WatchSeen.markNew(it.linkId);
+                }
+                WatchSeen.markBaselined(key);
+                log(Log.INFO, "关键词「" + kw + "」首轮基线：登记 " + items.size()
+                        + " 条，不推送（下次起只推新增）");
+                sleep(800);
+                continue;
+            }
+            for (WatchItem it : items) {
+                found.add(new WatchItem(it.linkId, it.title, it.desc, it.authorId, it.authorName,
+                        it.createAt, "keyword", kw));
+            }
+            sleep(800);
+        }
+        for (String raw : cfg.topics) {
+            String id = WatchConfig.parseTopicId(raw);
+            String name = WatchConfig.topicName(raw);
+            String key = "topic:" + (id != null ? id : name);
+            List<WatchItem> items = WatchFetcher.fetchTopicPosts(id, name, WatchFetcher.FETCH_LIMIT);
+            if (!WatchSeen.isBaselined(key)) {
+                for (WatchItem it : items) {
+                    WatchSeen.markNew(it.linkId);
+                }
+                WatchSeen.markBaselined(key);
+                log(Log.INFO, "话题「" + name + "」首轮基线：登记 " + items.size()
+                        + " 条，不推送（下次起只推新增）");
+                sleep(800);
+                continue;
+            }
+            for (WatchItem it : items) {
+                found.add(new WatchItem(it.linkId, it.title, it.desc, it.authorId, it.authorName,
+                        it.createAt, "topic", name));
+            }
+            sleep(800);
+        }
     }
 
     /**
@@ -505,11 +576,23 @@ public final class WatchEngine {
 
     /** 与发帖过滤同一套写法：一行一个，regex: 前缀为正则，忽略大小写 */
     public static boolean matchKeywords(WatchConfig cfg, String title, String desc) {
-        if (cfg.keywords.isEmpty()) {
+        if (cfg.keywords.isEmpty() && cfg.topics.isEmpty()) {
             return false;
         }
-        String text = nz(title) + "\n" + nz(desc);
-        for (String kw : cfg.keywords) {
+        // 「关键词只匹配标题」：正文不参与匹配
+        String text = cfg.titleOnly ? nz(title) : (nz(title) + "\n" + nz(desc));
+        // 关注的话题名也当关键词用：信息流里出现话题名即命中（不额外发请求）
+        List<String> words = cfg.keywords;
+        if (!cfg.topics.isEmpty()) {
+            words = new ArrayList<>(cfg.keywords);
+            for (String t : cfg.topics) {
+                String n = WatchConfig.topicName(t);
+                if (!n.isEmpty() && !words.contains(n)) {
+                    words.add(n);
+                }
+            }
+        }
+        for (String kw : words) {
             try {
                 if (kw.startsWith("regex:")) {
                     String p = kw.substring(6).trim();

@@ -27,6 +27,21 @@
   也支持 `private:QQ号`），适配 AstrBot 的 aiocqhttp 适配器；设了访问令牌时以
   `Authorization: Bearer` 发送，消息按纯文本发送（`auto_escape`）避免标题里的 CQ 码被解析
 
+- **关注话题 / 拉流 / 推荐关键词**：三个新的取数方向
+  - **导入关注话题**：读取小黑盒「我关注的话题」（`bbs/app/profile/preference_v5/topic_list`，
+    失败回落 `bbs/app/profile/topic/settings`），写入 `话题id|话题名`，id 可用于按话题拉流
+  - **关键词 / 话题拉流**：按关键词搜索（`bbs/app/api/general/search/v1` → `bbs/app/hashtag/search`
+    → `bbs/app/topic/search`）、按话题取最新帖（`bbs/app/topic/feeds` → `bbs/app/topic/max/feeds`
+    → `bbs/app/hashtag/concept/feeds`）；首次见到某个关键词/话题只登记基线不推送，
+    单轮最多 5 个关键词，`regex:` 关键词跳过搜索
+  - **推荐关键词**：`bbs/app/api/search/hot_words` + `bbs/app/api/search/suggestion/v2`，
+    弹窗里点一下即加入监控关键词（不覆盖已有配置）
+  - 端点均已在 1.3.393 / 1.3.395 的 dex 中确认存在
+- **设置项**：新增「获取时间窗」（30 分钟 ~ 30 天，按分钟存 `watch_window_min`，旧键 `watch_window_days` 仍兼容）、
+  「检查间隔」（5 分钟 ~ 12 小时）、「关键词只匹配标题」
+- **设置页 v2**：主设置页的动态推送分组精简为「总开关 + 入口 + 立即检查」，
+  详细设置移入二级页「动态推送设置」，按监控目标 / 抓取范围 / 提醒方式 / 第三方推送 / 测试与调试分为 5 组
+
 ### 修复
 
 - **真机实测（小黑盒 1.3.395 / Android 16）发现并修掉的问题**：
