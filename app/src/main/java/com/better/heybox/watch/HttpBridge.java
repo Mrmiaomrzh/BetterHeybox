@@ -44,6 +44,7 @@ public final class HttpBridge {
     private static volatile Method sNewBuilder;  // Request#newBuilder()
     private static volatile Method sUrl;         // Builder#url(String)
     private static volatile Method sBuild;       // Builder#build()
+    private static volatile Method sMethod;      // Builder#method(String, RequestBody)
     private static volatile Object sTemplate;    // 捕获到的原始 Request（用于派生 Builder）
 
     private static volatile String sDescribe = "未捕获";
@@ -135,9 +136,20 @@ public final class HttpBridge {
             if (urlSetter == null || build == null) {
                 continue;
             }
+            // Builder#method(String, RequestBody)：用于把复用的模板强制成 GET
+            Method methodSetter = null;
+            for (Method m : t.getMethods()) {
+                Class<?>[] ps = m.getParameterTypes();
+                if (ps.length == 2 && ps[0] == String.class && !ps[1].isPrimitive()
+                        && m.getReturnType() == t) {
+                    methodSetter = m;
+                    break;
+                }
+            }
             sNewBuilder = nb;
             sUrl = urlSetter;
             sBuild = build;
+            sMethod = methodSetter;
             return true;
         }
         return false;
@@ -268,6 +280,10 @@ public final class HttpBridge {
         Object req;
         try {
             Object builder = sNewBuilder.invoke(template);
+            // newBuilder() 会把原请求的 method/body 一起复制过来，必须重置为 GET
+            if (sMethod != null) {
+                sMethod.invoke(builder, "GET", null);
+            }
             sUrl.invoke(builder, url);
             if (headers != null) {
                 Method addHeader = null;

@@ -176,10 +176,13 @@ public final class WatchBanner {
         root.addView(card);
         sCurrent = new WeakReference<>(card);
         card.animate().alpha(1f).translationY(0f).setDuration(180L).start();
-        // 定时器与具体 View 绑定：只有它仍是当前横幅时才关闭，避免误关后一条
-        card.postDelayed(() -> {
+        // 定时器与具体 View 绑定：只有它仍是当前横幅时才关闭，避免误关后一条；
+        // 用主线程 Handler 而不是 view.postDelayed —— 页面销毁时后者可能不再执行，会把队列卡死
+        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
             if (sCurrent.get() == card) {
                 dismiss(card);
+            } else if (sCurrent.get() == null) {
+                finishOne();
             }
         }, AUTO_DISMISS_MS);
     }
