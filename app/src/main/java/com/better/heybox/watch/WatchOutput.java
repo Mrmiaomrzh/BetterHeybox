@@ -59,12 +59,13 @@ public final class WatchOutput {
         }
     }
 
-    public static void notifyPost(Context ctx, WatchItem item) {
+    /** @return 是否成功发出（测试面板据此显示结果） */
+    public static boolean notifyPost(Context ctx, WatchItem item) {
         try {
             ensureChannel(ctx);
             NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
             if (nm == null) {
-                return;
+                return false;
             }
             Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(item.webUrl()));
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -83,8 +84,10 @@ public final class WatchOutput {
                     .setContentIntent(pi);
             nm.notify(code, b.build());
             log(Log.INFO, "已发通知：" + item.displayTitle());
+            return true;
         } catch (Throwable t) {
             log(Log.WARN, "发通知失败: " + t);
+            return false;
         }
     }
 
@@ -115,6 +118,29 @@ public final class WatchOutput {
     }
 
     // ------------------------------------------------------------ 第三方推送
+
+    /**
+     * 测试用应用内横幅：点击只提示回调是否正常，不跳转（测试条目的链接是占位值）。
+     *
+     * @return 是否成功弹出
+     */
+    public static boolean testBanner(final Activity activity, final WatchItem item) {
+        if (activity == null || item == null) {
+            return false;
+        }
+        try {
+            WatchBanner.show(activity, item, () -> {
+                try {
+                    Toast.makeText(activity, "横幅点击回调正常", Toast.LENGTH_SHORT).show();
+                } catch (Throwable ignored) {
+                }
+            });
+            return true;
+        } catch (Throwable t) {
+            log(Log.WARN, "测试横幅失败: " + t);
+            return false;
+        }
+    }
 
     /** 依次发送到所有已配置渠道；返回成功条数 */
     public static int pushAll(WatchConfig cfg, WatchItem item) {

@@ -300,7 +300,7 @@ public final class SettingsEntryHook {
                         null, false, false, true, App.KEY_WATCH_PUSH_ONEBOT),
                 new SwitchDef("自定义 webhook", "支持 {title} {author} {link} {desc} 占位符",
                         null, false, false, true, App.KEY_WATCH_PUSH_CUSTOM),
-                new SwitchDef("测试推送", "发送一条测试消息，验证推送配置",
+                new SwitchDef("测试提醒", "发一条测试：应用内横幅 + 系统通知 + 第三方推送",
                         null, false, false, true, null, Action.WATCH_TEST_PUSH),
                 new SwitchDef("立即检查", "手动触发一次检查（结果见模块日志）",
                         null, false, false, true, null, Action.WATCH_CHECK),
@@ -315,29 +315,44 @@ public final class SettingsEntryHook {
         groups.add(insertAt, group);
     }
 
-    /** 测试第三方推送：只发推送渠道，不动本地通知 */
+    /**
+     * 测试提醒：应用内横幅 + 系统通知（本地，立即可见）+ 第三方推送（按开关）。
+     * 三种渠道的结果汇总在一条 Toast 里，方便一键验收。
+     */
     private void testWatchPush(final Activity activity) {
-        Toast.makeText(activity, "正在发送测试推送…", Toast.LENGTH_SHORT).show();
-        new Thread(() -> {
-            final String[] msg = new String[1];
-            try {
-                com.better.heybox.watch.WatchConfig cfg =
-                        com.better.heybox.watch.WatchConfig.load(module);
-                com.better.heybox.watch.WatchItem item = new com.better.heybox.watch.WatchItem(
-                        "betterheybox-test", "测试消息", "BetterHeybox 动态推送测试",
-                        "0", "BetterHeybox", System.currentTimeMillis() / 1000L, "keyword", "");
-                int n = com.better.heybox.watch.WatchOutput.pushAll(cfg, item);
-                msg[0] = n > 0 ? ("已发送 " + n + " 个渠道") : "未发送：请开启开关并填写地址";
-            } catch (Throwable t) {
-                msg[0] = "测试失败：" + t;
-            }
-            activity.runOnUiThread(() -> {
+        Toast.makeText(activity, "正在发送测试提醒…", Toast.LENGTH_SHORT).show();
+        try {
+            com.better.heybox.watch.WatchConfig cfg =
+                    com.better.heybox.watch.WatchConfig.load(module);
+            com.better.heybox.watch.WatchItem item = new com.better.heybox.watch.WatchItem(
+                    "betterheybox-test", "测试消息 · BetterHeybox",
+                    "这是一条测试提醒：关注对象发布新动态 / 关键词命中时会这样提示",
+                    "0", "BetterHeybox", System.currentTimeMillis() / 1000L, "keyword", "");
+            // 本地两种：立即执行，直接能看到效果
+            final boolean banner = com.better.heybox.watch.WatchOutput.testBanner(activity, item);
+            final boolean notify = com.better.heybox.watch.WatchOutput.notifyPost(activity, item);
+            // 第三方：后台线程，避免阻塞 UI
+            new Thread(() -> {
+                final String[] msg = new String[1];
                 try {
-                    Toast.makeText(activity, msg[0], Toast.LENGTH_LONG).show();
-                } catch (Throwable ignored) {
+                    int n = com.better.heybox.watch.WatchOutput.pushAll(cfg, item);
+                    String push = !cfg.pushEnabled ? "推送未开启"
+                            : (n > 0 ? ("推送 " + n + " 个渠道") : "推送失败：检查地址");
+                    msg[0] = (banner ? "横幅 ✓" : "横幅 ✗")
+                            + " · " + (notify ? "通知 ✓" : "通知 ✗") + " · " + push;
+                } catch (Throwable t) {
+                    msg[0] = "推送测试异常：" + t;
                 }
-            });
-        }, "betterheybox-watch-test").start();
+                activity.runOnUiThread(() -> {
+                    try {
+                        Toast.makeText(activity, msg[0], Toast.LENGTH_LONG).show();
+                    } catch (Throwable ignored) {
+                    }
+                });
+            }, "betterheybox-watch-test").start();
+        } catch (Throwable t) {
+            Toast.makeText(activity, "测试失败：" + t, Toast.LENGTH_LONG).show();
+        }
     }
 
     private void insertPostFilterGroup(List<SettingsGroup> groups) {
