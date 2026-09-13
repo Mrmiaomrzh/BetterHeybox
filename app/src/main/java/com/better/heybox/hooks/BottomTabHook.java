@@ -119,6 +119,10 @@ public final class BottomTabHook {
             View plus = findPlusButton(activity, binding);
             if (module.isEnabled(App.KEY_HIDE_ADD, false)) {
                 hideView(findPlaceholder(activity, binding, group), "推荐占位");
+                // 玻璃栏激活时加号可见性归玻璃安装器（PreDraw 强制），此处让位避免拉锯
+                if (plus != null && !LiquidGlassInstaller.isGlassBarActive()) {
+                    hideView(plus, "加号");
+                }
             } else if (plus != null && plus.getVisibility() == View.VISIBLE
                     && !LiquidGlassInstaller.isGlassBarActive()) {
                 alignPlusToPlaceholder(activity, binding, group, plus);
