@@ -362,9 +362,14 @@ public final class SettingsEntryHook {
                         for (String line : set) {
                             sb.append(line).append('\n');
                         }
-                        App.writeString(App.KEY_WATCH_USERS, sb.toString());
+                        // 必须走 HeyboxPrefs：App.writeString 依赖框架 RemotePreferences，
+                        // 在宿主进程里服务未绑定时会静默不写（这条踩过一次）
+                        boolean ok = HeyboxPrefs.setString(App.KEY_WATCH_USERS, sb.toString());
+                        LogRecorder.recordEvent("导入关注列表已写入: added=" + added
+                                + ", total=" + set.size() + ", ok=" + ok);
                     }
-                    msg[0] = added > 0 ? ("已导入 " + added + " 个关注，共 " + set.size() + " 个")
+                    msg[0] = added > 0 ? ("已导入 " + added + " 个关注，共 " + set.size()
+                            + " 个（重进面板可见）")
                             : "没有新的关注对象可导入";
                 }
             } catch (Throwable t) {
