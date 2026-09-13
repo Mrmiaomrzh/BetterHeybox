@@ -148,6 +148,12 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     /** 发帖过滤：AI 标题党识别 */
     public static final String KEY_POST_AI_ENABLED = "post_filter_ai_enabled";
 
+    /** 发帖过滤：首页信息流屏蔽视频帖 */
+    public static final String KEY_BLOCK_VIDEO_POST = "block_video_post";
+
+    /** 收藏：打开收藏列表发现失效内容时自动清理 */
+    public static final String KEY_FAVOUR_AUTO_CLEAN = "favour_auto_clean";
+
     /** AI 提供商预设 */
     public static final String KEY_AI_PROVIDER = "ai_provider";
 
@@ -259,6 +265,8 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
         m.put(KEY_SINGLE_COLUMN_FEED, false);
         m.put(KEY_POST_AI_ENABLED, false);
         m.put(KEY_POST_NO_LEVEL, false);
+        m.put(KEY_BLOCK_VIDEO_POST, false);
+        m.put(KEY_FAVOUR_AUTO_CLEAN, false);
         m.put(KEY_DISCLAIMER_ACCEPTED, false);
         m.put(KEY_TARGET_HINT_VISIBLE, true);
         // 动态推送（默认关闭：涉及自动请求；开启后默认用横幅 + 通知提醒）

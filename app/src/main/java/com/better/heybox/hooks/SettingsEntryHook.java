@@ -188,6 +188,11 @@ public final class SettingsEntryHook {
             new SettingsGroup("分享净化", new SwitchDef[]{
                     new SwitchDef("净化分享链接", null, App.KEY_PURIFY_SHARE_LINK, true, false),
             }),
+            new SettingsGroup("收藏管理", new SwitchDef[]{
+                    new SwitchDef("自动清理失效收藏",
+                            "打开收藏列表发现失效内容时自动清理（等同「点击清理」并确认）",
+                            App.KEY_FAVOUR_AUTO_CLEAN, false, false),
+            }),
             new SettingsGroup("每日任务", new SwitchDef[]{
                     new SwitchDef("自动完成每日分享任务", null, App.KEY_DAILY_TASK_ENABLED, false, false),
                     new SwitchDef("完成后返回首页", "完成后自动退回首页", App.KEY_DAILY_TASK_BACK_HOME, true, false),
@@ -908,6 +913,9 @@ public final class SettingsEntryHook {
         }
         String providerId = module.getString(App.KEY_AI_PROVIDER, "");
         SettingsGroup group = new SettingsGroup("发帖过滤", new SwitchDef[]{
+                new SwitchDef("屏蔽视频帖",
+                        "信息流中隐藏视频帖（首页推荐/瀑布流/列表）；按宿主 link_style 与 has_video 判定",
+                        App.KEY_BLOCK_VIDEO_POST, false, false),
                 new SwitchDef("屏蔽低等级发帖",
                         minLevel > 0 ? "当前：屏蔽 Lv" + minLevel + " 以下"
                                 : "选择等级阈值",

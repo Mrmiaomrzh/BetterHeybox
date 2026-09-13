@@ -147,6 +147,15 @@ public final class PostFilterHook {
             Object link = safeInvoke(item, "getLinkContent");
             String title = link == null ? "" : safeGet(link, "getTitle");
             String desc = link == null ? "" : safeGet(link, "getDescription");
+            if (videoBlocked(item)) {
+                module.logd(Log.INFO, module.TAG, "屏蔽视频帖 (首页流列表) " + abbreviate(title));
+                try {
+                    it.remove();
+                } catch (Throwable t) {
+                    return filteredCopy(list, aiEnabled);
+                }
+                continue;
+            }
             if (levelBlocked(item) || keywordBlockedText(title, desc)) {
                 module.logd(Log.INFO, module.TAG, "发帖过滤命中 (首页流列表, "
                         + (levelBlocked(item) ? "lv" : "kw") + ") " + abbreviate(title));
@@ -176,7 +185,7 @@ public final class PostFilterHook {
             Object link = safeInvoke(item, "getLinkContent");
             String title = link == null ? "" : safeGet(link, "getTitle");
             String desc = link == null ? "" : safeGet(link, "getDescription");
-            if (levelBlocked(item) || keywordBlockedText(title, desc)) {
+            if (videoBlocked(item) || levelBlocked(item) || keywordBlockedText(title, desc)) {
                 continue;
             }
             if (aiEnabled && !title.isEmpty()
@@ -253,6 +262,10 @@ public final class PostFilterHook {
             Object link = safeInvoke(result, "getLinkContent");
             String title = link == null ? "" : safeGet(link, "getTitle");
             String desc = link == null ? "" : safeGet(link, "getDescription");
+            if (videoBlocked(result)) {
+                module.logd(Log.INFO, module.TAG, "屏蔽视频帖 (首页流) " + abbreviate(title));
+                return null;
+            }
             if (levelBlocked(result) || keywordBlockedText(title, desc)) {
                 module.logd(Log.INFO, module.TAG, "发帖过滤命中 (首页流, "
                         + (levelBlocked(result) ? "lv" : "kw") + ") " + abbreviate(title));
@@ -278,6 +291,12 @@ public final class PostFilterHook {
     private final java.util.concurrent.ConcurrentHashMap<Class<?>, Boolean> postModelCache =
             new java.util.concurrent.ConcurrentHashMap<>();
 
+    /** 视频帖判定：模型 hasVideo() 查找结果缓存（命中 + 未命中分别记录，避免反复查找） */
+    private final java.util.concurrent.ConcurrentHashMap<Class<?>, java.lang.reflect.Method> hasVideoCache =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.Set<Class<?>> hasVideoMiss =
+            java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<Class<?>, Boolean>());
+
     private boolean isPostFlowModel(Object result) {
         Class<?> c = result.getClass();
         Boolean cached = postModelCache.get(c);
@@ -295,6 +314,85 @@ public final class PostFilterHook {
         }
         postModelCache.put(c, isPost);
         return isPost;
+    }
+
+    // ---------- 视频帖过滤 ----------
+
+    /** 视频帖开关开启时判定条目是否为视频帖 */
+    private boolean videoBlocked(Object item) {
+        if (item == null || !module.isEnabled(App.KEY_BLOCK_VIDEO_POST, false)) {
+            return false;
+        }
+        return isPostFlowModel(item) ? isVideoModel(item) : isVideoLegacy(item);
+    }
+
+    /**
+     * 首页流模型：宿主 LinkFeedsFlowItemModel.hasVideo() 即 getLinkStyle() == LinkStyle.VIDEO_LINK；
+     * 方法改名时回退比较 LinkStyle 名字。
+     */
+    private boolean isVideoModel(Object model) {
+        try {
+            java.lang.reflect.Method m = hasVideoMethod(model.getClass());
+            if (m != null) {
+                Object v = m.invoke(model);
+                return v instanceof Boolean && (Boolean) v;
+            }
+        } catch (Throwable ignored) {
+        }
+        Object style = safeInvoke(model, "getLinkStyle");
+        return style != null && "VIDEO_LINK".equals(String.valueOf(style));
+    }
+
+    /** 旧链 BBSLinkObj：has_video 标志位 / video_url / video_info 任一命中即视为视频帖 */
+    private boolean isVideoLegacy(Object item) {
+        if (isTruthy(safeGet(item, "getHas_video"))) {
+            return true;
+        }
+        if (!safeGet(item, "getVideo_url").isEmpty()) {
+            return true;
+        }
+        return safeInvoke(item, "getVideo_info") != null;
+    }
+
+    private java.lang.reflect.Method hasVideoMethod(Class<?> c) {
+        java.lang.reflect.Method cached = hasVideoCache.get(c);
+        if (cached != null) {
+            return cached;
+        }
+        if (hasVideoMiss.contains(c)) {
+            return null;
+        }
+        java.lang.reflect.Method found = null;
+        Class<?> walk = c;
+        while (walk != null && walk != Object.class) {
+            try {
+                java.lang.reflect.Method m = walk.getDeclaredMethod("hasVideo");
+                if (m.getParameterCount() == 0
+                        && (m.getReturnType() == boolean.class
+                        || m.getReturnType() == Boolean.class)) {
+                    m.setAccessible(true);
+                    found = m;
+                    break;
+                }
+            } catch (Throwable ignored) {
+            }
+            walk = walk.getSuperclass();
+        }
+        if (found == null) {
+            hasVideoMiss.add(c);
+        } else {
+            hasVideoCache.put(c, found);
+        }
+        return found;
+    }
+
+    /** "1" / "true" / "yes" 视为真（宿主 has_video 是布尔串） */
+    private static boolean isTruthy(String s) {
+        if (s == null) {
+            return false;
+        }
+        String v = s.trim();
+        return "1".equals(v) || "true".equalsIgnoreCase(v) || "yes".equalsIgnoreCase(v);
     }
 
     // ---------- 委托入口：PromotePostHook 渲染链 ----------
@@ -362,6 +460,11 @@ public final class PostFilterHook {
             Object link = safeInvoke(model, "getLinkContent");
             String title = link == null ? "" : safeGet(link, "getTitle");
             String desc = link == null ? "" : safeGet(link, "getDescription");
+            if (videoBlocked(model)) {
+                module.logd(Log.INFO, module.TAG, "屏蔽视频帖 (首页卡片) " + abbreviate(title));
+                FeedItemHider.hide(cardView);
+                return result;
+            }
             if (levelBlocked(model) || keywordBlockedText(title, desc)) {
                 module.logd(Log.INFO, module.TAG, "发帖过滤命中 (首页卡片, "
                         + (levelBlocked(model) ? "lv" : "kw") + ") " + abbreviate(title));
@@ -430,6 +533,11 @@ public final class PostFilterHook {
     // ---------- 同步过滤判定 ----------
 
     private boolean applySyncFilters(Object item) {
+        if (videoBlocked(item)) {
+            module.logd(Log.INFO, module.TAG, "屏蔽视频帖 (ct=" + getContentType(item) + ") "
+                    + abbreviate(safeTitle(item)));
+            return true;
+        }
         if (levelBlocked(item)) {
             module.logd(Log.INFO, module.TAG, "屏蔽低等级发帖 (ct=" + getContentType(item) + ")");
             return true;
