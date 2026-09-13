@@ -47,6 +47,12 @@
   兼容 OpenAI 协议接口，内置 DeepSeek / Kimi / 通义 / 智谱 / OpenAI / OpenRouter /
   本地模型（Ollama 等）预设（选中自动填充地址与模型），判定提示词可自定义，
   支持一键测试连接；帖子标题会发送到你配置的 AI 服务商，请知悉
+- **屏蔽视频帖**（默认关闭）：信息流中隐藏视频帖。判定直接取宿主数据——
+  首页流模型看 `link_style`（`VIDEO_LINK`），旧渲染链看 `has_video` / `video_url` / `video_info`，
+  不依赖混淆名，宿主改名或改版后仍能命中
+- **自动清理失效收藏**（默认关闭）：打开收藏列表后若发现失效内容（宿主 `is_deleted` 标记，
+  与列表灰化「内容已失效」同源），自动发起宿主自带的清理请求（等同点「点击清理」并确认），
+  清理完成后自动刷新列表；同一页面 30 秒内只触发一次，接口失败不会反复重试
 - 覆盖首页推荐 / 热点 / 话题详情等信息流列表；改动规则后需刷新信息流或加载新分页生效，
   本地缓存已渲染的帖子会在滚动重新绑定时补拦
 - 以上配置纳入配置备份（AI Token 除外）
@@ -216,7 +222,8 @@ app/src/main/
 │       ├── SettingsEntryHook.java # 设置页入口注入 + 内嵌设置面板
 │       ├── BottomTabHook.java   #   底部导航栏隐藏（tab 名版本自适应）
 │       ├── PromotePostHook.java #   推广贴屏蔽
-│       ├── PostFilterHook.java #   发帖过滤：等级 / 关键词 / AI 标题党
+│       ├── PostFilterHook.java #   发帖过滤：等级 / 关键词 / AI 标题党 / 视频帖
+│       ├── FavourAutoCleanHook.java # 自动清理失效收藏（复用宿主清理请求）
 │       ├── AIClickbaitChecker.java # AI 标题党判定：OpenAI 兼容 / 批量 / 缓存 / 冷却
 │       ├── FeedItemHider.java #   信息流条目隐藏与复用恢复（推广贴 / 发帖过滤共用）
 │       ├── SingleColumnFeedHook.java # 单列信息流：屏蔽双列瀑布流（旧布局 + 首页 Epoxy 配对）
