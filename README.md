@@ -4,12 +4,17 @@
 
 增强小黑盒（Heybox）的 LSPosed 模块。
 
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE) [![LSPosed Module](https://img.shields.io/badge/LSPosed-Module-blue.svg)](https://github.com/LSPosed/LSPosed)
+
 > [!CAUTION]
-> **免责声明**
-> - 本应用与清枫(北京)科技有限公司**无任何关联**，亦未经其授权或认可  
-> - 本项目仅用于**学习与研究**小黑盒 APP 的部分技术原理，**严禁**用于任何商业或非法用途  
-> - 请在下载后 **24 小时内**删除本应用及相关文件  
-> - **禁止**在 **小黑盒 / HeyBox** 平台内发布、讨论或传播本模块的内容，违者后果自负  
+> **免责声明与使用倡议**
+> - 本应用与清枫(北京)科技有限公司**无任何关联**，亦未经其授权或认可，请注意甄别来源  
+> - 本项目仅供**学习与研究**小黑盒 APP 的部分技术原理，请勿用于任何非法用途  
+> - 本模块会修改宿主应用的运行时行为，可能存在账号封禁、数据异常等风险，**请自行评估并承担后果**  
+> - 作者**不建议**将本模块用于商业用途，也不为其在商业场景下的可用性、合规性提供担保或支持  
+> - 建议体验后删除本应用及相关文件，并**不要**在 **小黑盒 / HeyBox** 平台内发布、讨论或传播本模块  
+>
+> 以上为作者的风险提示与项目立场；本项目授权条款以 [`LICENSE`](LICENSE)为准，
 
 > [!Note]
 >本应用兼容 [小黑盒 1.3.393](https://github.com/Mrmiaomrzh/BetterHeybox/releases/download/v0.2.0/heybox_1.3.393.apk) 及以上版本，其他版本出现的问题不会进行处理
@@ -342,3 +347,29 @@ app/src/main/resources/META-INF/xposed/
 2. **[假装开启小黑盒通知权限](https://github.com/Xposed-Modules-Repo/com.chrxw.justenablednotification)** — 提供了功能上的启发  
 
 如果涉及任何代码使用不当或版权问题，请随时联系
+
+## 开源协议
+
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+
+本项目采用 **GNU 通用公共许可证第 3 版**授权，完整条款见仓库根目录的 `LICENSE`。
+
+- 本程序是自由软件：你可以依据自由软件基金会发布的 GPLv3 的条款
+  重新发布和/或修改它；本程序不提供任何担保，详见 `LICENSE` 第 15、16 条
+- `LICENSE` 由两部分组成：**GPLv3 完整原文**，以及文件末尾依 **GPLv3 第 7 条**作出的
+  《BetterHeybox 附加条款与说明》：
+  - 保留版权声明、SPDX 标识、附加条款与「与清枫（北京）科技有限公司无关联」的非关联声明
+  - 修改版本须显著标注「已修改」与修改日期，不得歪曲来源或暗示作者背书
+  - 未经许可不得用 `BetterHeybox` / 作者名义为衍生作品宣传；本许可不授予任何商标权，
+    「小黑盒 / Heybox」的权利归清枫（北京）科技有限公司所有
+  - 免责与责任限制：Hook 宿主、下载与推送等操作的风险由使用者自行承担
+  - **宿主应用例外**：本模块与专有宿主「小黑盒」的运行期结合属于两个独立程序的聚合，
+    不使宿主应用成为本程序的衍生作品，也不要求其著作权人公开源代码
+- 上方免责声明中的表述均属于作者的风险提示与使用倡议，**不构成 GPLv3 之外的许可条件**；GPLv3 本身不限制商业性使用
+- 仓库中移植或依赖的第三方组件各自保留原始许可证，见下方[致谢](#致谢)：
+  `libxposed/api`、`DexKit`（Apache-2.0），液态玻璃渲染器相关实现（MIT），
+  二者均与本许可证兼容
+
+> GPLv3 条款以英文原文为准，中文说明仅为便于理解：
+> <https://www.gnu.org/licenses/gpl-3.0.html>
+
