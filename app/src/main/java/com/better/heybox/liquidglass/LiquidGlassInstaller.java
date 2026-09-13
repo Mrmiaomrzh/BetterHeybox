@@ -56,8 +56,52 @@ public final class LiquidGlassInstaller {
         }
     }
 
+    /** 重新断言窗口级小白条沉浸（宿主 onResume 可能重设导航栏颜色，需覆盖回去） */
+    static void applyImmersive(Activity activity) {
+        try {
+            GlassConfig.load(activity);
+            WindowImmersiveController.apply(activity);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** 底栏只存在于 MainActivity；设置入口运行在宿主设置页，操作必须落到这个引用上 */
+    private static volatile java.lang.ref.WeakReference<Activity> sMainRef;
+
+    private static Activity mainActivity() {
+        java.lang.ref.WeakReference<Activity> ref = sMainRef;
+        Activity main = ref != null ? ref.get() : null;
+        return main != null && !main.isFinishing() && !main.isDestroyed() ? main : null;
+    }
+
+    /**
+     * 切换液态玻璃开关后立即生效：开=安装玻璃，关=卸载玻璃恢复经典底栏。
+     * 沉浸式小白条独立于玻璃开关，两条路径都会按配置应用/还原
+     */
+    public static void applyGlassEnabled(Activity activity) {
+        try {
+            if (GlassProvider.prefersHbmod(activity)) {
+                return;
+            }
+            Activity main = mainActivity();
+            if (main == null) {
+                return;
+            }
+            if (isGlassEnabled(activity)) {
+                scheduleInstall(main);
+            } else {
+                uninstallGlass(main);
+                applyImmersive(main);
+                applyClassicImmersive(main);
+            }
+        } catch (Throwable t) {
+            LiquidGlassLog.logErr("apply glass enabled failed", t);
+        }
+    }
+
     public static void scheduleInstall(Activity activity) {
-        if (!isGlassEnabled(activity) || GlassProvider.prefersHbmod(activity)) {
+        sMainRef = new java.lang.ref.WeakReference<>(activity);
+        if (GlassProvider.prefersHbmod(activity)) {
             return;
         }
         View decor = activity.getWindow().getDecorView();
@@ -66,18 +110,29 @@ public final class LiquidGlassInstaller {
                 if (activity.isFinishing() || activity.isDestroyed()) {
                     return;
                 }
+                applyImmersive(activity);
+                if (!isGlassEnabled(activity)) {
+                    applyClassicImmersive(activity);
+                    return;
+                }
                 ViewGroup root = findViewByName(activity, ID_ROOT);
                 if (root == null) {
                     LiquidGlassLog.log(android.util.Log.WARN,
                             "root view " + ID_ROOT + " not found, retry in 200ms");
+                    final int gen = sSyncGen;
                     decor.postDelayed(() -> {
-                        if (!activity.isFinishing() && !activity.isDestroyed()) {
+                        if (!activity.isFinishing() && !activity.isDestroyed()
+                                && gen == sSyncGen && isGlassEnabled(activity)) {
                             ViewGroup r = findViewByName(activity, ID_ROOT);
                             if (r != null) {
                                 install(activity, r);
                             }
                         }
                     }, 200L);
+                    return;
+                }
+                if (root.findViewWithTag(LiquidGlassHostLayout.GLASS_TAG) != null) {
+                    // 已安装：onResume / 底栏回调重入，无需重复安装
                     return;
                 }
                 install(activity, root);
@@ -87,10 +142,251 @@ public final class LiquidGlassInstaller {
         });
     }
 
+    /** 安装前宿主底栏原始状态，运行时卸载玻璃按此还原 */
+    private static final class BarSnapshot {
+        int barIndex = -1;
+        int tipsIndex = -1;
+        int midIndex = -1;
+        ViewGroup.LayoutParams barLp;
+        ViewGroup.LayoutParams tipsLp;
+        ViewGroup.LayoutParams midLp;
+        android.graphics.drawable.Drawable barBackground;
+        int barPadLeft, barPadTop, barPadRight, barPadBottom;
+        int contentAboveRule;
+        View legacyShadow;
+    }
+
+    private static volatile BarSnapshot sSnapshot;
+    /** 递增使旧的 500ms 轮询自行终止，避免卸载后继续驱动玻璃逻辑 */
+    private static volatile int sSyncGen;
+
+    /** 运行时卸载玻璃底栏并把宿主原始底栏装回原位（关闭液态玻璃免重启） */
+    private static void uninstallGlass(Activity activity) {
+        try {
+            ViewGroup root = findViewByName(activity, ID_ROOT);
+            if (root == null || root.findViewWithTag(LiquidGlassHostLayout.GLASS_TAG) == null) {
+                return;
+            }
+            BarSnapshot snap = sSnapshot;
+            sSyncGen++;
+            cancelGlassAnimators();
+            // 摘视图要在 host 还挂在窗口树上时做，findViewById 才找得到
+            ViewGroup bar = findViewByName(activity, ID_BAR);
+            ViewGroup tips = findViewByName(activity, ID_TIPS);
+            View midTab = findViewByName(activity, ID_MID_TAB);
+            View content = findViewByName(activity, ID_CONTENT);
+            unwrapCheckedListener(bar);
+            removeMidPreDraw(midTab);
+            if (content != null && snap != null
+                    && content.getLayoutParams() instanceof RelativeLayout.LayoutParams) {
+                RelativeLayout.LayoutParams clp =
+                        (RelativeLayout.LayoutParams) content.getLayoutParams();
+                clp.getRules()[RelativeLayout.ABOVE] = snap.contentAboveRule;
+                content.setLayoutParams(clp);
+            }
+            if (snap != null && snap.legacyShadow != null) {
+                snap.legacyShadow.setVisibility(View.VISIBLE);
+            }
+            View host = root.findViewWithTag(LiquidGlassHostLayout.GLASS_TAG);
+            // 必须先把三件套从 host / center 包装里摘除，否则 addView 会因
+            // "child already has a parent" 抛异常，底栏就永远装不回去了
+            removeFromParent(bar);
+            removeFromParent(tips);
+            removeFromParent(midTab);
+            if (host != null) {
+                root.removeView(host);
+            }
+            // 按原始索引升序装回：宿主其余子视图都在原相对位置，直接用原索引即可还原 z 序
+            if (bar != null && snap != null) {
+                bar.setBackground(snap.barBackground);
+                bar.setPadding(snap.barPadLeft, snap.barPadTop,
+                        snap.barPadRight, snap.barPadBottom);
+                bar.setVisibility(View.VISIBLE);
+                root.addView(bar, readdIndex(snap.barIndex, root), snap.barLp);
+            }
+            if (tips != null && snap != null && snap.tipsLp != null) {
+                root.addView(tips, readdIndex(snap.tipsIndex, root), snap.tipsLp);
+            }
+            if (midTab != null && snap != null && snap.midLp != null) {
+                midTab.setTranslationX(0);
+                midTab.setVisibility(View.VISIBLE);
+                restoreChildren(midTab);
+                root.addView(midTab, readdIndex(snap.midIndex, root), snap.midLp);
+            }
+            resetGlassState();
+            root.requestLayout();
+            LiquidGlassLog.log(android.util.Log.INFO, "liquid glass uninstalled");
+        } catch (Throwable t) {
+            LiquidGlassLog.logErr("uninstall glass failed", t);
+        }
+    }
+
+    private static int readdIndex(int originalIndex, ViewGroup root) {
+        return Math.max(0, Math.min(originalIndex, root.getChildCount()));
+    }
+
+    private static void removeFromParent(View v) {
+        if (v != null && v.getParent() instanceof ViewGroup) {
+            ((ViewGroup) v.getParent()).removeView(v);
+        }
+    }
+
+    private static void cancelGlassAnimators() {
+        if (sTabShiftAnimator != null) {
+            sTabShiftAnimator.cancel();
+        }
+        if (sBarWidthAnimator != null) {
+            sBarWidthAnimator.cancel();
+        }
+        if (sDropletSizeAnimator != null) {
+            sDropletSizeAnimator.cancel();
+        }
+        if (sCenterAnimator != null) {
+            sCenterAnimator.cancel();
+        }
+    }
+
+    private static void resetGlassState() {
+        sTabBarActive = false;
+        sTabBarRef = EMPTY_BAR_REF;
+        sRadioBarRef = EMPTY_RADIO_REF;
+        sGlassCircleRef = null;
+        sContentViewRef = null;
+        sHostRef = null;
+        sCenterRefStatic = null;
+        sMidTabRef = EMPTY_MID_REF;
+        sPlusHidden = false;
+        sCircleMode = false;
+        sLastTabs = -1;
+        sStableTabs = -1;
+        sBuildSig = "";
+        sSyncing = false;
+        sVisibleButtons.clear();
+        sBasePadBottom = 0;
+        sInstallPadBottom = 0;
+        sNavPad = 0;
+        sSnapshot = null;
+        resetWidthAnimState();
+    }
+
+    /** 经典底栏沉浸基线（rg_main 原高/原内边距、加号原下边距） */
+    private static int sClassicBarHeight = -1;
+    private static int sClassicBarPadBottom = -1;
+    private static int sClassicMidMargin = -1;
+    private static volatile boolean sClassicImmersive;
+
+    /**
+     * 无玻璃时的沉浸式小白条：窗口级透明由 apply() 负责，这里把 rg_main 加高
+     * navPad 并同步内边距，让底栏背景延伸进手势区而内容仍避开小白条
+     */
+    private static void applyClassicImmersive(final Activity activity) {
+        try {
+            ViewGroup root = findViewByName(activity, ID_ROOT);
+            ViewGroup bar = findViewByName(activity, ID_BAR);
+            if (root == null || bar == null) {
+                activity.getWindow().getDecorView().postDelayed(() -> {
+                    if (!activity.isFinishing() && !activity.isDestroyed()
+                            && sHostRef == null) {
+                        applyClassicImmersive(activity);
+                    }
+                }, 200L);
+                return;
+            }
+            View midTab = findViewByName(activity, ID_MID_TAB);
+            if (!GlassConfig.immersiveGestureNavigation) {
+                restoreClassicImmersive(bar, midTab);
+                return;
+            }
+            int navPad = computeClassicNavPad(root);
+            if (navPad <= 0) {
+                restoreClassicImmersive(bar, midTab);
+                return;
+            }
+            if (!sClassicImmersive) {
+                sClassicBarHeight = bar.getLayoutParams().height;
+                sClassicBarPadBottom = bar.getPaddingBottom();
+                if (midTab != null && midTab.getLayoutParams()
+                        instanceof RelativeLayout.LayoutParams) {
+                    sClassicMidMargin = ((RelativeLayout.LayoutParams)
+                            midTab.getLayoutParams()).bottomMargin;
+                }
+                sClassicImmersive = true;
+            }
+            ViewGroup.LayoutParams lp = bar.getLayoutParams();
+            if (sClassicBarHeight > 0) {
+                lp.height = sClassicBarHeight + navPad;
+                bar.setLayoutParams(lp);
+            }
+            bar.setPadding(bar.getPaddingLeft(), bar.getPaddingTop(),
+                    bar.getPaddingRight(), sClassicBarPadBottom + navPad);
+            if (midTab != null && sClassicMidMargin >= 0 && midTab.getLayoutParams()
+                    instanceof RelativeLayout.LayoutParams) {
+                RelativeLayout.LayoutParams mlp =
+                        (RelativeLayout.LayoutParams) midTab.getLayoutParams();
+                mlp.bottomMargin = sClassicMidMargin + navPad;
+                midTab.setLayoutParams(mlp);
+            }
+            bar.requestLayout();
+        } catch (Throwable t) {
+            LiquidGlassLog.logErr("classic immersive failed", t);
+        }
+    }
+
+    private static void restoreClassicImmersive(ViewGroup bar, View midTab) {
+        if (!sClassicImmersive) {
+            return;
+        }
+        try {
+            if (bar != null) {
+                if (sClassicBarHeight > 0) {
+                    bar.getLayoutParams().height = sClassicBarHeight;
+                    bar.setLayoutParams(bar.getLayoutParams());
+                }
+                bar.setPadding(bar.getPaddingLeft(), bar.getPaddingTop(),
+                        bar.getPaddingRight(), Math.max(sClassicBarPadBottom, 0));
+            }
+            if (midTab != null && sClassicMidMargin >= 0 && midTab.getLayoutParams()
+                    instanceof RelativeLayout.LayoutParams) {
+                RelativeLayout.LayoutParams mlp =
+                        (RelativeLayout.LayoutParams) midTab.getLayoutParams();
+                mlp.bottomMargin = sClassicMidMargin;
+                midTab.setLayoutParams(mlp);
+            }
+        } catch (Throwable t) {
+            LiquidGlassLog.logErr("restore classic immersive failed", t);
+        }
+        sClassicImmersive = false;
+    }
+
+    /**
+     * 与玻璃路径不同：不扣 decor 底部空隙——apply() 已声明 LAYOUT_HIDE_NAVIGATION，
+     * decor 即将延伸到屏幕底，直接按导航栏 inset 取值
+     */
+    private static int computeClassicNavPad(ViewGroup root) {
+        try {
+            WindowInsets wi = root.getRootWindowInsets();
+            if (wi == null) {
+                return 0;
+            }
+            int nav = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                    ? wi.getInsets(WindowInsets.Type.navigationBars()).bottom
+                    : wi.getSystemWindowInsetBottom();
+            if (nav <= 0) {
+                return 0;
+            }
+            float density = root.getResources().getDisplayMetrics().density;
+            return (int) Math.min(nav, density * 56f);
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
     private static void install(Activity activity, ViewGroup root) {
         if (root.findViewWithTag(LiquidGlassHostLayout.GLASS_TAG) != null) {
             return;
         }
+        // 卸载会递增代数：回调/重试与卸载竞态时以代数判废
+        final int gen = sSyncGen;
         ViewGroup bar = findViewByName(activity, ID_BAR);
         if (bar == null || bar.getParent() != root) {
             LiquidGlassLog.log(android.util.Log.WARN,
@@ -103,6 +399,27 @@ public final class LiquidGlassInstaller {
         View midTab = findViewByName(activity, ID_MID_TAB);
         ViewGroup content = findViewByName(activity, ID_CONTENT);
         View videoFull = findViewByName(activity, ID_VIDEO_FULL);
+
+        // 玻璃即将接管手势区避让，先撤销经典避让，避免快照与基准值被污染
+        restoreClassicImmersive(bar, midTab);
+
+        BarSnapshot snap = new BarSnapshot();
+        snap.barIndex = root.indexOfChild(bar);
+        snap.tipsIndex = tips != null ? root.indexOfChild(tips) : -1;
+        snap.midIndex = midTab != null ? root.indexOfChild(midTab) : -1;
+        snap.barLp = bar.getLayoutParams();
+        snap.tipsLp = tips != null ? tips.getLayoutParams() : null;
+        snap.midLp = midTab != null ? midTab.getLayoutParams() : null;
+        snap.barBackground = bar.getBackground();
+        snap.barPadLeft = bar.getPaddingLeft();
+        snap.barPadTop = bar.getPaddingTop();
+        snap.barPadRight = bar.getPaddingRight();
+        snap.barPadBottom = bar.getPaddingBottom();
+        snap.contentAboveRule = content != null
+                && content.getLayoutParams() instanceof RelativeLayout.LayoutParams
+                ? ((RelativeLayout.LayoutParams) content.getLayoutParams())
+                        .getRules()[RelativeLayout.ABOVE] : 0;
+        sSnapshot = snap;
 
         Context ctx = root.getContext();
         float density = ctx.getResources().getDisplayMetrics().density;
@@ -122,11 +439,13 @@ public final class LiquidGlassInstaller {
             }
         }
 
-        hideLegacyShadow(root, bar.getId());
+        snap.legacyShadow = hideLegacyShadow(root, bar.getId());
 
         int barHeightSpec = bar.getLayoutParams().height;
         int navPad = computeNavInsetPadding(activity, root, bar);
         int origBarPadBottom = bar.getPaddingBottom();
+        sNavPad = navPad;
+        sInstallPadBottom = origBarPadBottom + navPad;
 
         LiquidGlassHostLayout host = new LiquidGlassHostLayout(ctx, root, bar);
 
@@ -201,7 +520,12 @@ public final class LiquidGlassInstaller {
                         attached = true;
                         root.getViewTreeObserver()
                                 .removeOnGlobalLayoutListener(this);
+                        if (gen != sSyncGen) {
+                            // 玻璃在首次布局前已被卸载，本轮回调作废
+                            return;
+                        }
                         host.attach();
+                        applyImmersive(activity);
                         if (!sTabBarActive) {
                             setupTabPopAnimation(bar);
                         }
@@ -223,10 +547,31 @@ public final class LiquidGlassInstaller {
     private static final long FIT_ANIM_MS = 380L;
     private static final float FIT_ANIM_TENSION = 1.1f;
     private static volatile boolean sTabBarActive;
+    /** 安装时的 host 基准 padding 与导航栏 inset（applyBarGeometry 以后者决定冲销量） */
+    private static int sInstallPadBottom;
+    private static int sNavPad;
+
+    /**
+     * 手势区避让由沉浸开关决定：开=冲销 navPad 让玻璃条延伸到手势区，关=保留避让。
+     * 必须同时写 sBasePadBottom，applyBarGeometry 会以它为基准重设 padding
+     */
+    private static void applyNavPadState(ViewGroup host) {
+        if (host == null || sInstallPadBottom <= 0) {
+            return;
+        }
+        int target = GlassConfig.immersiveGestureNavigation
+                ? Math.max(sInstallPadBottom - sNavPad, 0)
+                : sInstallPadBottom;
+        host.setPadding(host.getPaddingLeft(), host.getPaddingTop(),
+                host.getPaddingRight(), target);
+        sBasePadBottom = target;
+    }
 
     private static void attachGlassRenderer(Activity activity, ViewGroup host,
                                             ViewGroup bar, ViewGroup tips, View midTab,
                                             ViewGroup content, int barHeightSpec, int navPad) {
+        GlassConfig.load(activity);
+        applyNavPadState(host);
         if (Build.VERSION.SDK_INT < 33 || content == null) {
             return;
         }
@@ -240,9 +585,26 @@ public final class LiquidGlassInstaller {
         }
     }
 
+    /**
+     * 供设置入口在切换沉浸等玻璃参数后调用：先从 prefs 重载配置再刷新，
+     * 避免宿主设置页只写 pref、GlassConfig 静态字段滞后的问题
+     */
+    public static void refreshGlassWith(Activity activity) {
+        GlassConfig.load(activity);
+        refreshGlass();
+        if (activeGlassHost() == null) {
+            // 玻璃未安装时沉浸仍需作用于经典底栏（必须落到 MainActivity 的窗口）
+            Activity main = mainActivity();
+            if (main != null) {
+                applyClassicImmersive(main);
+            }
+        }
+    }
+
     static void refreshGlass() {
         try {
             WindowImmersiveController.refresh();
+            applyNavPadState(sHostRef);
             applyBarGeometry();
             View bar = sTabBarRef.get();
             if (bar instanceof ViewGroup) {
@@ -286,15 +648,10 @@ public final class LiquidGlassInstaller {
                                           ViewGroup content, int barHeightSpec,
                                           int navPad) {
         try {
-            GlassConfig.load(activity);
             sHostRef = host;
             sDensity = host.getResources().getDisplayMetrics().density;
             sRadioBarRef = new java.lang.ref.WeakReference<>(bar);
             sContentViewRef = new java.lang.ref.WeakReference<>(content);
-            int flushPad = Math.max(host.getPaddingBottom() - navPad, 0);
-            host.setPadding(host.getPaddingLeft(), host.getPaddingTop(),
-                    host.getPaddingRight(), flushPad);
-            sBasePadBottom = flushPad;
             sCenterRefStatic = null;
             final com.example.liquidglass.LiquidGlassTabBar tabBar =
                     new com.example.liquidglass.LiquidGlassTabBar(activity, null, 0);
@@ -410,26 +767,26 @@ public final class LiquidGlassInstaller {
         sMidTabRef = new java.lang.ref.WeakReference<>(
                 midTab != null ? midTab : centerHost);
         if (midTab != null) {
-            midTab.getViewTreeObserver().addOnPreDrawListener(
-                    new android.view.ViewTreeObserver.OnPreDrawListener() {
-                        @Override
-                        public boolean onPreDraw() {
-                            try {
-                                if (sPlusHidden) {
-                                    if (midTab.getVisibility() != View.GONE) {
-                                        midTab.setVisibility(View.GONE);
-                                    }
-                                } else {
-                                    if (midTab.getVisibility() != View.VISIBLE) {
-                                        midTab.setVisibility(View.VISIBLE);
-                                    }
-                                    restoreChildren(midTab);
-                                }
-                            } catch (Throwable ignored) {
+            sMidPreDraw = new android.view.ViewTreeObserver.OnPreDrawListener() {
+                @Override
+                public boolean onPreDraw() {
+                    try {
+                        if (sPlusHidden) {
+                            if (midTab.getVisibility() != View.GONE) {
+                                midTab.setVisibility(View.GONE);
                             }
-                            return true;
+                        } else {
+                            if (midTab.getVisibility() != View.VISIBLE) {
+                                midTab.setVisibility(View.VISIBLE);
+                            }
+                            restoreChildren(midTab);
                         }
-                    });
+                    } catch (Throwable ignored) {
+                    }
+                    return true;
+                }
+            };
+            midTab.getViewTreeObserver().addOnPreDrawListener(sMidPreDraw);
         }
     }
 
@@ -584,9 +941,14 @@ public final class LiquidGlassInstaller {
     private static void startTabVisibilitySync(
             final android.widget.RadioGroup bar,
             final com.example.liquidglass.LiquidGlassTabBar tabBar) {
+        final int gen = sSyncGen;
         bar.postDelayed(new Runnable() {
             @Override
             public void run() {
+                if (gen != sSyncGen) {
+                    // 玻璃已卸载/重装，本轮询作废
+                    return;
+                }
                 try {
                     if (bar.isAttachedToWindow()) {
                         rebuildTabBar(tabBar);
@@ -1797,6 +2159,10 @@ public final class LiquidGlassInstaller {
         void onChecked(android.widget.RadioGroup group, int checkedId);
     }
 
+    private static android.widget.RadioGroup.OnCheckedChangeListener sOriginalCheckedListener;
+    private static android.widget.RadioGroup.OnCheckedChangeListener sWrappedListener;
+    private static android.view.ViewTreeObserver.OnPreDrawListener sMidPreDraw;
+
     private static void wrapCheckedListener(final android.widget.RadioGroup bar,
                                             final OnCheckedExtra extra) {
         try {
@@ -1804,23 +2170,61 @@ public final class LiquidGlassInstaller {
                     .getDeclaredField("mOnCheckedChangeListener");
             f.setAccessible(true);
             final Object original = f.get(bar);
-            bar.setOnCheckedChangeListener(new android.widget.RadioGroup.OnCheckedChangeListener() {
-                @Override
-                public void onCheckedChanged(android.widget.RadioGroup group, int checkedId) {
-                    if (original instanceof android.widget.RadioGroup.OnCheckedChangeListener) {
-                        ((android.widget.RadioGroup.OnCheckedChangeListener) original)
-                                .onCheckedChanged(group, checkedId);
-                    }
-                    try {
-                        extra.onChecked(group, checkedId);
-                    } catch (Throwable ignored) {
-                    }
-                }
-            });
+            sOriginalCheckedListener =
+                    original instanceof android.widget.RadioGroup.OnCheckedChangeListener
+                            ? (android.widget.RadioGroup.OnCheckedChangeListener) original
+                            : null;
+            android.widget.RadioGroup.OnCheckedChangeListener wrapper =
+                    new android.widget.RadioGroup.OnCheckedChangeListener() {
+                        @Override
+                        public void onCheckedChanged(android.widget.RadioGroup group, int checkedId) {
+                            if (sOriginalCheckedListener != null) {
+                                sOriginalCheckedListener.onCheckedChanged(group, checkedId);
+                            }
+                            try {
+                                extra.onChecked(group, checkedId);
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                    };
+            sWrappedListener = wrapper;
+            bar.setOnCheckedChangeListener(wrapper);
         } catch (Throwable t) {
             LiquidGlassLog.log(android.util.Log.WARN,
                     "checked listener wrap unavailable: " + t);
         }
+    }
+
+    /** 卸载玻璃时还原宿主原始的底栏选中监听 */
+    private static void unwrapCheckedListener(ViewGroup barView) {
+        if (!(barView instanceof android.widget.RadioGroup)
+                || sWrappedListener == null) {
+            return;
+        }
+        android.widget.RadioGroup bar = (android.widget.RadioGroup) barView;
+        try {
+            java.lang.reflect.Field f = android.widget.RadioGroup.class
+                    .getDeclaredField("mOnCheckedChangeListener");
+            f.setAccessible(true);
+            if (f.get(bar) == sWrappedListener) {
+                bar.setOnCheckedChangeListener(sOriginalCheckedListener);
+            }
+        } catch (Throwable ignored) {
+        }
+        sWrappedListener = null;
+        sOriginalCheckedListener = null;
+    }
+
+    /** 卸载玻璃时移除加号的 PreDraw 可见性强制，避免与经典路径拉锯 */
+    private static void removeMidPreDraw(View midTab) {
+        if (midTab == null || sMidPreDraw == null) {
+            return;
+        }
+        try {
+            midTab.getViewTreeObserver().removeOnPreDrawListener(sMidPreDraw);
+        } catch (Throwable ignored) {
+        }
+        sMidPreDraw = null;
     }
 
     private static void setupTabSelectionSync(final android.widget.RadioGroup bar,
@@ -2039,7 +2443,8 @@ public final class LiquidGlassInstaller {
         });
     }
 
-    private static void hideLegacyShadow(ViewGroup root, int barId) {
+    /** 隐藏宿主自带的底栏上方渐变阴影，返回被隐藏的视图供卸载时还原 */
+    private static View hideLegacyShadow(ViewGroup root, int barId) {
         for (int i = 0; i < root.getChildCount(); i++) {
             View child = root.getChildAt(i);
             if (child.getClass() == View.class && child.getBackground() != null) {
@@ -2048,11 +2453,12 @@ public final class LiquidGlassInstaller {
                     if (((RelativeLayout.LayoutParams) lp)
                             .getRules()[RelativeLayout.ABOVE] == barId) {
                         child.setVisibility(View.GONE);
-                        return;
+                        return child;
                     }
                 }
             }
         }
+        return null;
     }
 
     private static void copyMargins(RelativeLayout.LayoutParams src,

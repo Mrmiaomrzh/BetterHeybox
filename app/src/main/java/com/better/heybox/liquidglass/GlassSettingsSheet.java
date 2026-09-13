@@ -141,12 +141,12 @@ public final class GlassSettingsSheet {
     private static LinearLayout buildSwitchCard(Activity activity, int textPrimary, int textSecondary,
                                                 int accent, int divider, int cardBg, float density) {
         LinearLayout switchCard = card(activity, cardBg, density);
-        switchCard.addView(switchRow(activity, "启用液态玻璃", "关闭后需重启小黑盒生效",
+        switchCard.addView(switchRow(activity, "启用液态玻璃", "关闭后立即恢复经典底栏",
                 HeyboxPrefs.getBoolean(App.KEY_LIQUID_GLASS, true),
                 textPrimary, textSecondary, accent, density,
                 (buttonView, isChecked) -> {
                     HeyboxPrefs.setBoolean(App.KEY_LIQUID_GLASS, isChecked);
-                    Toast.makeText(activity, "需重启小黑盒生效", Toast.LENGTH_SHORT).show();
+                    LiquidGlassInstaller.applyGlassEnabled(activity);
                 }));
         switchCard.addView(divider(activity, divider, density));
         switchCard.addView(switchRow(activity, "沉浸式小白条",
@@ -155,7 +155,7 @@ public final class GlassSettingsSheet {
                 (buttonView, isChecked) -> {
                     GlassConfig.immersiveGestureNavigation = isChecked;
                     GlassConfig.save(activity);
-                    LiquidGlassInstaller.refreshGlass();
+                    LiquidGlassInstaller.refreshGlassWith(activity);
                 }));
         switchCard.addView(divider(activity, divider, density));
         switchCard.addView(switchRow(activity, "自适应反色",

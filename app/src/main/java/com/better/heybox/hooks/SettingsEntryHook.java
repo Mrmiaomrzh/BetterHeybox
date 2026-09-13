@@ -51,6 +51,7 @@ import com.better.heybox.LogRecorder;
 import com.better.heybox.ThemeUtils;
 import com.better.heybox.VersionUtils;
 import com.better.heybox.VideoDownloadManager;
+import com.better.heybox.liquidglass.LiquidGlassInstaller;
 import com.better.heybox.MainModule;
 import com.better.heybox.PreferenceReceiver;
 
@@ -377,7 +378,7 @@ public final class SettingsEntryHook {
                     "当前：" + label + "，点击切换", null, false, false, true, null, Action.CHOOSE_GLASS));
         }
         if (ownGlass) {
-            rows.add(new SwitchDef("液态玻璃底栏", "在底部导航显示液态玻璃效果（需重启小黑盒）", App.KEY_LIQUID_GLASS, true, true));
+            rows.add(new SwitchDef("液态玻璃底栏", "在底部导航显示液态玻璃效果", App.KEY_LIQUID_GLASS, true, false));
             rows.add(new SwitchDef("沉浸式小白条", "让底栏延伸到系统手势区域", App.KEY_GLASS_IMMERSIVE, true, false));
             rows.add(new SwitchDef("自适应反色", "标签文字与图标随背景亮度切换黑白", App.KEY_GLASS_ADAPTIVE, true, false));
             rows.add(new SwitchDef("玻璃宽度自适应", "隐藏标签后底栏宽度随可见标签数收缩", App.KEY_GLASS_FIT_TABS, false, false));
@@ -1181,6 +1182,14 @@ public final class SettingsEntryHook {
                         if (App.KEY_CUSTOM_TEXT_SELECT.equals(def.key)
                                 || App.KEY_COPY_POST.equals(def.key)) {
                             TextSelectHook.refresh();
+                        }
+                        // 液态玻璃开关：运行时安装/卸载玻璃底栏，无需重启
+                        if (App.KEY_LIQUID_GLASS.equals(def.key)) {
+                            LiquidGlassInstaller.applyGlassEnabled(activity);
+                        }
+                        // 小白条沉浸：即时刷新玻璃条避让与窗口导航栏，无需重启
+                        if (App.KEY_GLASS_IMMERSIVE.equals(def.key)) {
+                            LiquidGlassInstaller.refreshGlassWith(activity);
                         }
                         applySwitchMutex(activity, def.key, isChecked);
                     } catch (Throwable t) {
