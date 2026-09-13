@@ -18,12 +18,25 @@
     端点为 `bbs/app/profile/user/link/list`（1.3.393 dex 中确认）
   - 默认关闭；未配置监控目标时不发起任何请求
   - 「测试提醒」一键验证三种输出：横幅 ✓ · 通知 ✓ · 推送 N 个渠道
+  - 「调试：推送最近 3 条」：拉取关注对象最近 3 条帖子并按真实流程直接推送
+    （忽略时间窗与去重），用于验收取数 / 横幅 / 通知 / 第三方推送整条链路
 - **AstrBot 机器人接入**：「AstrBot 机器人」配置格式为 `http://主机:6199|群号|访问令牌`（后两段可省，
   也支持 `private:QQ号`），适配 AstrBot 的 aiocqhttp 适配器；设了访问令牌时以
   `Authorization: Bearer` 发送，消息按纯文本发送（`auto_escape`）避免标题里的 CQ 码被解析
 
 ### 修复
 
+- **真机实测（小黑盒 1.3.395 / Android 16）发现并修掉的问题**：
+  - **HTTP 客户端捕获方式**：小黑盒的 R8 已把 OkHttp 公开类全部改名
+    （`OkHttpClient` → `okhttp3.z`、`Request` → `okhttp3.a0`，`okhttp3.Request` 这个名字根本不存在），
+    按类名 hook 直接 ClassNotFoundException。改为**按结构识别**：hook
+    `okhttp3.internal.connection.RealCall` 构造函数（R8 改不了参数顺序，第一个参数就是客户端），
+    再按方法签名形状找 newBuilder/url/build 与 newCall/execute/code/body/string —— 与名字完全无关
+  - **状态写入静默失效**：`App.writeString/readString` 走的是框架 RemotePreferences，
+    在宿主进程里服务未绑定时会静默不写，导致"已提醒集合 / 首轮基线 / 上次检查时间"永远为空
+    （同一批帖子每轮都会重推）。改用 `HeyboxPrefs`（宿主进程内 SharedPreferences + commit）
+  - **冷启动空转**：打开小黑盒时宿主的第一个网络请求还没发生，客户端尚未捕获，首次检查必然空转。
+    现在捕获成功后会自动补跑一次检查
 - 动态推送一次性把历史帖全推出去：新增**首轮基线**——第一次检查某个关注对象时只登记不推送，
   之后只推新增；同时把时间窗改为**强制生效**（取不到时间戳的帖子直接跳过、超窗跳过），
   单轮最多提醒 5 条，其余留到下一轮

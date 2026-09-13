@@ -19,7 +19,8 @@ android {
     defaultConfig {
         // 预览版单独包名：可与正式版同时安装、在 LSPosed 里分别勾选（注意两者不要同时启用，
         // 否则同一进程会装两份 Hook）。
-        applicationId = "com.better.heybox.preview"
+        // 默认预览版包名；真机测试时可用 -PAPP_ID=com.better.heybox 复用已授权的作用域
+        applicationId = (project.findProperty("APP_ID") as String?) ?: "com.better.heybox.preview"
         minSdk = 26
         targetSdk = 37
         versionCode = (project.findProperty("VERSION_CODE") as String? ?: "1").toInt()

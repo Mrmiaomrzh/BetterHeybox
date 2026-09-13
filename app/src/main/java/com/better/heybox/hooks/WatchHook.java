@@ -116,29 +116,45 @@ public final class WatchHook {
 
     // ------------------------------------------------------------ 捕获宿主网络栈
 
+    /**
+     * 捕获宿主的 HTTP 客户端。
+     *
+     * <p><b>不按类名</b>找 OkHttpClient —— 实测小黑盒 1.3.395 的 R8 已把
+     * {@code okhttp3.OkHttpClient} 改名（类定义里没有这个名字，方法名也不再是 newCall），
+     * 所以改为 hook {@code okhttp3.internal.connection.RealCall} 的构造函数：
+     * R8 能改名字，但<b>改不了参数顺序</b>，第一个参数就是客户端实例。
+     */
     private void hookOkHttp(ClassLoader cl) {
-        try {
-            Class<?> ok = Class.forName("okhttp3.OkHttpClient", false, cl);
-            for (Method m : ok.getDeclaredMethods()) {
-                if (!"newCall".equals(m.getName()) || m.getParameterTypes().length != 1) {
-                    continue;
-                }
-                module.hook(m).intercept(chain -> {
-                    try {
-                        if (!HttpBridge.ready()) {
-                            Object self = chain.getThisObject();
-                            HttpBridge.capture(self, self != null ? self.getClass().getClassLoader() : cl);
-                        }
-                    } catch (Throwable ignored) {
+        int installed = 0;
+        for (String cn : HttpBridge.CLIENT_HOLDERS) {
+            try {
+                Class<?> holder = Class.forName(cn, false, cl);
+                for (java.lang.reflect.Constructor<?> ctor : holder.getDeclaredConstructors()) {
+                    if (ctor.getParameterTypes().length < 2) {
+                        continue;
                     }
-                    return chain.proceed();
-                });
-                module.logd(Log.INFO, module.TAG, "✔ 动态推送：OkHttp 捕获 Hook 已安装");
-                return;
+                    module.hook(ctor).intercept(chain -> {
+                        Object result = chain.proceed();
+                        try {
+                            if (!HttpBridge.ready()) {
+                                HttpBridge.captureIfClient(chain.getArg(0), chain.getArg(1), cl);
+                            }
+                        } catch (Throwable ignored) {
+                        }
+                        return result;
+                    });
+                    installed++;
+                    break;
+                }
+                if (installed > 0) {
+                    module.logd(Log.INFO, module.TAG, "✔ 动态推送：HTTP 客户端捕获 Hook 已安装 (" + cn + ")");
+                    break;
+                }
+            } catch (Throwable ignored) {
             }
-            module.logd(Log.WARN, module.TAG, "✘ 动态推送：未找到 OkHttpClient.newCall");
-        } catch (Throwable t) {
-            module.logd(Log.WARN, module.TAG, "✘ 动态推送：OkHttp 捕获 Hook 失败: " + t);
+        }
+        if (installed == 0) {
+            module.logd(Log.WARN, module.TAG, "✘ 动态推送：未找到可用的 OkHttp 载体类，主动拉取将不可用");
         }
     }
 

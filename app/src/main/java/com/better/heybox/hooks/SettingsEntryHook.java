@@ -116,7 +116,8 @@ public final class SettingsEntryHook {
         EXPORT_LOG, RUNTIME_STATUS, OPEN_WEB, PICK_DIR, RESET_GLASS, CHOOSE_GLASS,
         POST_LEVEL, POST_KEYWORDS, AI_PROVIDER, AI_PROMPT, AI_TEST, AI_MAX_TOKENS,
         REDIRECT_FORCE, REDIRECT_BLOCK, REDIRECT_TARGET, WEB_LOG, ABOUT,
-        WATCH_USERS, WATCH_KEYWORDS, WATCH_IMPORT_FOLLOW, WATCH_TEST_PUSH, WATCH_CHECK
+        WATCH_USERS, WATCH_KEYWORDS, WATCH_IMPORT_FOLLOW, WATCH_TEST_PUSH, WATCH_CHECK,
+        WATCH_DEBUG_PUSH3
     }
 
     private static class SwitchDef {
@@ -308,6 +309,9 @@ public final class SettingsEntryHook {
                         null, false, false, true, null, Action.WATCH_TEST_PUSH),
                 new SwitchDef("立即检查", "手动触发一次检查（结果见模块日志）",
                         null, false, false, true, null, Action.WATCH_CHECK),
+                new SwitchDef("调试：推送最近 3 条",
+                        "取关注对象最近 3 条帖子，按真实流程立即推送（忽略时间窗与去重）",
+                        null, false, false, true, null, Action.WATCH_DEBUG_PUSH3),
         });
         int insertAt = groups.size();
         for (int i = 0; i < groups.size(); i++) {
@@ -1319,6 +1323,12 @@ public final class SettingsEntryHook {
                         break;
                     case WATCH_TEST_PUSH:
                         setRowClick(itemCls, item, v -> testWatchPush(activity));
+                        break;
+                    case WATCH_DEBUG_PUSH3:
+                        setRowClick(itemCls, item, v -> {
+                            Toast.makeText(activity, "正在拉取最近 3 条并推送…", Toast.LENGTH_SHORT).show();
+                            com.better.heybox.watch.WatchEngine.debugPushLatest(activity, 3);
+                        });
                         break;
                     case WATCH_CHECK:
                         setRowClick(itemCls, item, v -> {

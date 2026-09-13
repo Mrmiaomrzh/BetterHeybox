@@ -1,6 +1,7 @@
 package com.better.heybox.watch;
 
 import com.better.heybox.App;
+import com.better.heybox.HeyboxPrefs;
 import com.better.heybox.MainModule;
 
 import java.util.ArrayList;
@@ -27,7 +28,7 @@ public final class WatchSeen {
     private static Set<String> seen() {
         if (sSeen == null) {
             Set<String> set = new LinkedHashSet<>();
-            String raw = App.readString(App.KEY_WATCH_SEEN, "");
+            String raw = HeyboxPrefs.getString(App.KEY_WATCH_SEEN, "");
             for (String s : raw.split(",")) {
                 String v = s.trim();
                 if (!v.isEmpty()) {
@@ -82,7 +83,7 @@ public final class WatchSeen {
             set.clear();
             set.addAll(list);
         }
-        App.writeString(App.KEY_WATCH_SEEN, String.join(",", list));
+        HeyboxPrefs.setString(App.KEY_WATCH_SEEN, String.join(",", list));
     }
 
     // ------------------------------------------------------------ 首轮基线
@@ -92,7 +93,7 @@ public final class WatchSeen {
     private static Set<String> baselined() {
         if (sBaselined == null) {
             Set<String> set = new LinkedHashSet<>();
-            for (String s : App.readString(App.KEY_WATCH_BASELINED, "").split(",")) {
+            for (String s : HeyboxPrefs.getString(App.KEY_WATCH_BASELINED, "").split(",")) {
                 String v = s.trim();
                 if (!v.isEmpty()) {
                     set.add(v);
@@ -120,25 +121,25 @@ public final class WatchSeen {
         synchronized (LOCK) {
             Set<String> set = baselined();
             set.add(userId);
-            App.writeString(App.KEY_WATCH_BASELINED, String.join(",", set));
+            HeyboxPrefs.setString(App.KEY_WATCH_BASELINED, String.join(",", set));
         }
     }
 
     public static void clearBaselines() {
         synchronized (LOCK) {
             sBaselined = new LinkedHashSet<>();
-            App.writeString(App.KEY_WATCH_BASELINED, "");
+            HeyboxPrefs.setString(App.KEY_WATCH_BASELINED, "");
         }
     }
 
     /** 记录一次检查时间；用于节流 */
     public static void touchCheck() {
-        App.writeString(App.KEY_WATCH_LAST_CHECK, String.valueOf(System.currentTimeMillis()));
+        HeyboxPrefs.setString(App.KEY_WATCH_LAST_CHECK, String.valueOf(System.currentTimeMillis()));
     }
 
     public static long lastCheck() {
         try {
-            return Long.parseLong(App.readString(App.KEY_WATCH_LAST_CHECK, "0").trim());
+            return Long.parseLong(HeyboxPrefs.getString(App.KEY_WATCH_LAST_CHECK, "0").trim());
         } catch (Throwable ignored) {
             return 0L;
         }
