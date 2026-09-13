@@ -120,7 +120,8 @@ public final class SettingsEntryHook {
         WATCH_DEBUG_PUSH3,
         /** v2 二级页入口 */ WATCH_V2,
         /** 通用二级页入口（页面 id 存在 editKey 里） */ OPEN_PAGE,
-        WATCH_TOPICS, WATCH_IMPORT_TOPICS, WATCH_WINDOW, WATCH_INTERVAL, WATCH_SUGGEST_KEYWORDS
+        WATCH_TOPICS, WATCH_IMPORT_TOPICS, WATCH_WINDOW, WATCH_INTERVAL, WATCH_SUGGEST_KEYWORDS,
+        WATCH_TOPIC_SEARCH
     }
 
     private static class SwitchDef {
@@ -384,9 +385,11 @@ public final class SettingsEntryHook {
                         cfg.topics.isEmpty() ? "一行一个：话题名，或「话题id|话题名」"
                                 : "已配置 " + cfg.topics.size() + " 个，点击编辑",
                         null, false, false, true, null, Action.WATCH_TOPICS),
-                new SwitchDef("导入关注话题", "读取小黑盒「我关注的话题」并追加（最多 "
+                new SwitchDef("导入关注话题", "读取小黑盒「我关注的话题」；接口不可用时回落到你最近浏览过的话题（最多 "
                         + com.better.heybox.watch.WatchConfig.MAX_TOPICS + " 个）",
                         null, false, false, true, null, Action.WATCH_IMPORT_TOPICS),
+                new SwitchDef("搜索话题", "输入关键词搜索话题 / 标签，点一下加入「关注的话题」",
+                        null, false, false, true, null, Action.WATCH_TOPIC_SEARCH),
                 new SwitchDef("监控关键词",
                         cfg.keywords.isEmpty() ? "命中标题或正文即提醒；regex: 前缀为正则"
                                 : "已配置 " + cfg.keywords.size() + " 个，点击编辑",
@@ -590,6 +593,123 @@ public final class SettingsEntryHook {
                 }
             });
         }, "betterheybox-watch-topic-import").start();
+    }
+
+    /** 搜索话题：输入关键词 → 搜话题/标签 → 点一下加入「关注的话题」 */
+    private void showTopicSearchDialog(final Activity activity) {
+        withHeyboxDialog(activity, spec -> {
+            final EditText input = buildTopicSearchInput(activity);
+            spec.buildAndShow(activity, "搜索话题", input, "搜索",
+                    (d, w) -> runTopicSearch(activity, input.getText().toString()),
+                    "取消", (d, w) -> d.dismiss());
+        }, () -> {
+            try {
+                final EditText input = buildTopicSearchInput(activity);
+                new AlertDialog.Builder(activity)
+                        .setTitle("搜索话题")
+                        .setView(input)
+                        .setPositiveButton("搜索", (d, w) ->
+                                runTopicSearch(activity, input.getText().toString()))
+                        .setNegativeButton("取消", null)
+                        .show();
+            } catch (Throwable t) {
+                module.logd(Log.WARN, module.TAG, "搜索话题弹窗失败: " + t);
+            }
+        });
+    }
+
+    private EditText buildTopicSearchInput(Activity activity) {
+        EditText input = new EditText(activity);
+        int pad = module.dp(activity, 10);
+        input.setPadding(pad, pad, pad, pad);
+        input.setSingleLine(true);
+        input.setInputType(InputType.TYPE_CLASS_TEXT);
+        input.setHint("例如：原神 / 数码硬件");
+        int bgId = hostResId(activity, "bg_dialog_edit", "drawable", 0);
+        if (bgId != 0) {
+            input.setBackgroundResource(bgId);
+        }
+        return input;
+    }
+
+    private void runTopicSearch(final Activity activity, final String keyword) {
+        final String kw = keyword == null ? "" : keyword.trim();
+        if (kw.isEmpty()) {
+            Toast.makeText(activity, "请输入关键词", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Toast.makeText(activity, "正在搜索「" + kw + "」…", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            final List<String[]> found = new ArrayList<>();
+            try {
+                found.addAll(com.better.heybox.watch.WatchFetcher.fetchTopicSearch(kw, 10));
+            } catch (Throwable t) {
+                module.logd(Log.WARN, module.TAG, "话题搜索失败: " + t);
+            }
+            activity.runOnUiThread(() -> {
+                try {
+                    if (found.isEmpty()) {
+                        Toast.makeText(activity, "没搜到话题（详情见模块日志）",
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    final String[] labels = new String[found.size()];
+                    for (int i = 0; i < found.size(); i++) {
+                        String id = found.get(i)[0];
+                        labels[i] = found.get(i)[1] + (id == null ? "" : ("  #" + id));
+                    }
+                    withHeyboxDialog(activity, spec -> {
+                        LinearLayout list = buildOptionRowList(activity, labels, -1);
+                        Dialog dialog = spec.buildAndShow(activity,
+                                "搜索结果（点击加入）", list, null, null,
+                                "取消", (d, w) -> d.dismiss());
+                        bindOptionRows(dialog, list, index -> addWatchTopic(activity,
+                                found.get(index)[0], found.get(index)[1]));
+                    }, () -> showListPickFallback(activity, "搜索结果（点击加入）", labels,
+                            index -> addWatchTopic(activity, found.get(index)[0],
+                                    found.get(index)[1])));
+                } catch (Throwable t) {
+                    module.logd(Log.WARN, module.TAG, "话题搜索结果弹窗失败: " + t);
+                }
+            });
+        }, "betterheybox-topic-search").start();
+    }
+
+    /** 把一个话题写进「关注的话题」（带 id，可直接拉流） */
+    private void addWatchTopic(Activity activity, String id, String name) {
+        try {
+            HeyboxPrefs.init(activity);
+            String line = com.better.heybox.watch.WatchConfig.formatTopic(id, name);
+            if (line.isEmpty()) {
+                return;
+            }
+            List<String> exist = com.better.heybox.watch.WatchConfig
+                    .splitLines(module.getString(App.KEY_WATCH_TOPICS, ""), 999);
+            for (String e : exist) {
+                if (e.equals(line) || com.better.heybox.watch.WatchConfig.topicName(e).equals(name)) {
+                    Toast.makeText(activity, "「" + name + "」已在关注的话题里",
+                            Toast.LENGTH_SHORT).show();
+                    return;
+                }
+            }
+            if (exist.size() >= com.better.heybox.watch.WatchConfig.MAX_TOPICS) {
+                Toast.makeText(activity, "关注的话题最多 "
+                        + com.better.heybox.watch.WatchConfig.MAX_TOPICS + " 个",
+                        Toast.LENGTH_SHORT).show();
+                return;
+            }
+            exist.add(line);
+            StringBuilder sb = new StringBuilder();
+            for (String l : exist) {
+                sb.append(l).append('\n');
+            }
+            HeyboxPrefs.setString(App.KEY_WATCH_TOPICS, sb.toString());
+            LogRecorder.recordEvent("已加入关注话题: " + line);
+            Toast.makeText(activity, "已加入话题：" + name, Toast.LENGTH_SHORT).show();
+            refreshEmbeddedPanel(activity);
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "加入话题失败: " + t);
+        }
     }
 
     /** 推荐关键词：拉热搜词/联想词，点一下加入监控关键词（不覆盖已有配置） */
@@ -1733,6 +1853,9 @@ public final class SettingsEntryHook {
                         break;
                     case WATCH_IMPORT_TOPICS:
                         setRowClick(itemCls, item, v -> importWatchTopics(activity));
+                        break;
+                    case WATCH_TOPIC_SEARCH:
+                        setRowClick(itemCls, item, v -> showTopicSearchDialog(activity));
                         break;
                     case WATCH_WINDOW:
                         setRowClick(itemCls, item, v -> showWatchWindowDialog(activity));
