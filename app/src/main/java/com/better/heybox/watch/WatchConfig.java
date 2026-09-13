@@ -119,9 +119,19 @@ public final class WatchConfig {
         if (s.isEmpty()) {
             return null;
         }
-        if (s.matches("\\d{5,20}")) {
-            return s;
+        // 支持 "userid  # 昵称" / "userid | 昵称" 这类带注释的写法：只取第一段
+        String head = s;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '#' || c == ' ' || c == '\t' || c == '|' || c == ',') {
+                head = s.substring(0, i).trim();
+                break;
+            }
         }
+        if (head.matches("\\d{5,20}")) {
+            return head;
+        }
+        s = head;
         String best = null;
         java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\d{5,20})").matcher(s);
         while (m.find()) {

@@ -116,7 +116,7 @@ public final class SettingsEntryHook {
         EXPORT_LOG, RUNTIME_STATUS, OPEN_WEB, PICK_DIR, RESET_GLASS, CHOOSE_GLASS,
         POST_LEVEL, POST_KEYWORDS, AI_PROVIDER, AI_PROMPT, AI_TEST, AI_MAX_TOKENS,
         REDIRECT_FORCE, REDIRECT_BLOCK, REDIRECT_TARGET, WEB_LOG, ABOUT,
-        WATCH_USERS, WATCH_KEYWORDS, WATCH_TEST_PUSH, WATCH_CHECK
+        WATCH_USERS, WATCH_KEYWORDS, WATCH_IMPORT_FOLLOW, WATCH_TEST_PUSH, WATCH_CHECK
     }
 
     private static class SwitchDef {
@@ -282,6 +282,9 @@ public final class SettingsEntryHook {
                         userCount > 0 ? "已配置 " + userCount + " 个，点击编辑"
                                 : "一行一个：userid 或用户主页链接",
                         null, false, false, true, null, Action.WATCH_USERS),
+                new SwitchDef("导入关注列表", "读取小黑盒「我关注的」并追加到上面（最多 "
+                        + com.better.heybox.watch.WatchConfig.MAX_USERS + " 个）",
+                        null, false, false, true, null, Action.WATCH_IMPORT_FOLLOW),
                 new SwitchDef("监控关键词",
                         kwCount > 0 ? "已配置 " + kwCount + " 个，点击编辑"
                                 : "命中标题或正文即提醒；regex: 前缀为正则",
@@ -314,6 +317,62 @@ public final class SettingsEntryHook {
             }
         }
         groups.add(insertAt, group);
+    }
+
+    /**
+     * 一键导入关注列表：读取小黑盒「我关注的」用户，去重后追加到「关注对象」。
+     * 写入 30 个上限，已有同 userid 的跳过。
+     */
+    private void importWatchFollowing(final Activity activity) {
+        Toast.makeText(activity, "正在读取关注列表…", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            final String[] msg = new String[1];
+            try {
+                java.util.List<String[]> list = com.better.heybox.watch.WatchFetcher
+                        .fetchFollowing(com.better.heybox.watch.WatchFetcher.FOLLOW_IMPORT_LIMIT);
+                if (list.isEmpty()) {
+                    msg[0] = "未取到关注列表：请确认小黑盒已登录（详情见模块日志）";
+                } else {
+                    java.util.List<String> exist = com.better.heybox.watch.WatchConfig
+                            .splitLines(module.getString(App.KEY_WATCH_USERS, ""), 999);
+                    java.util.LinkedHashSet<String> set = new java.util.LinkedHashSet<>(exist);
+                    int added = 0;
+                    for (String[] u : list) {
+                        String uid = u[0];
+                        boolean dup = false;
+                        for (String e : set) {
+                            String parsed = com.better.heybox.watch.WatchConfig.parseUserId(e);
+                            if (uid.equals(parsed)) {
+                                dup = true;
+                                break;
+                            }
+                        }
+                        if (dup || set.size() >= com.better.heybox.watch.WatchConfig.MAX_USERS) {
+                            continue;
+                        }
+                        set.add(u[1] == null || u[1].isEmpty() ? uid : (uid + "  # " + u[1]));
+                        added++;
+                    }
+                    if (added > 0) {
+                        StringBuilder sb = new StringBuilder();
+                        for (String line : set) {
+                            sb.append(line).append('\n');
+                        }
+                        App.writeString(App.KEY_WATCH_USERS, sb.toString());
+                    }
+                    msg[0] = added > 0 ? ("已导入 " + added + " 个关注，共 " + set.size() + " 个")
+                            : "没有新的关注对象可导入";
+                }
+            } catch (Throwable t) {
+                msg[0] = "导入失败：" + t;
+            }
+            activity.runOnUiThread(() -> {
+                try {
+                    Toast.makeText(activity, msg[0], Toast.LENGTH_LONG).show();
+                } catch (Throwable ignored) {
+                }
+            });
+        }, "betterheybox-watch-import").start();
     }
 
     /**
@@ -1254,6 +1313,9 @@ public final class SettingsEntryHook {
                         setRowClick(itemCls, item, v -> showMultilineEditDialog(activity,
                                 "监控关键词", App.KEY_WATCH_KEYWORDS,
                                 "一行一个，命中标题或正文即提醒；regex: 前缀为正则", false));
+                        break;
+                    case WATCH_IMPORT_FOLLOW:
+                        setRowClick(itemCls, item, v -> importWatchFollowing(activity));
                         break;
                     case WATCH_TEST_PUSH:
                         setRowClick(itemCls, item, v -> testWatchPush(activity));

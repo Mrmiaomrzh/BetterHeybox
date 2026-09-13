@@ -210,6 +210,8 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     public static final String KEY_WATCH_SEEN = "watch_seen";
     /** 上次检查时间（毫秒） */
     public static final String KEY_WATCH_LAST_CHECK = "watch_last_check";
+    /** 已完成首轮基线的关注对象（逗号分隔，首轮只记录不推送） */
+    public static final String KEY_WATCH_BASELINED = "watch_baselined";
 
     /** receiver 白名单与备份列表 */
     public static final java.util.Map<String, Boolean> BOOLEAN_DEFAULTS = buildBooleanDefaults();

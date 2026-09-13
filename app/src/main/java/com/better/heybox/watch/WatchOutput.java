@@ -107,6 +107,18 @@ public final class WatchOutput {
         }
     }
 
+    /** 一批多条时的汇总横幅（避免连续弹很多条） */
+    public static void bannerSummary(Activity activity, String title, String sub, Runnable onClick) {
+        if (activity == null) {
+            return;
+        }
+        try {
+            WatchBanner.showSummary(activity, title, sub, onClick);
+        } catch (Throwable t) {
+            log(Log.WARN, "汇总横幅失败: " + t);
+        }
+    }
+
     public static void openPost(Context ctx, WatchItem item) {
         try {
             Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(item.webUrl()));

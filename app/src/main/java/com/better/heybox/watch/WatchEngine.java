@@ -133,7 +133,21 @@ public final class WatchEngine {
                     log(Log.WARN, "无法解析 userid：" + raw);
                     continue;
                 }
-                List<WatchItem> items = WatchFetcher.fetchUserPosts(uid, WatchConfig.MAX_LIMIT_PER_USER);
+                List<WatchItem> items = WatchFetcher.fetchUserPosts(uid, WatchFetcher.FETCH_LIMIT);
+                // 首轮基线：第一次看这个关注对象时只登记、不推送，避免把历史帖一次性全推出去
+                if (!WatchSeen.isBaselined(uid)) {
+                    int recorded = 0;
+                    for (WatchItem it : items) {
+                        if (WatchSeen.markNew(it.linkId)) {
+                            recorded++;
+                        }
+                    }
+                    WatchSeen.markBaselined(uid);
+                    log(Log.INFO, "首次检查「" + displayName(raw) + "」：登记 " + recorded
+                            + " 条历史帖作为基线，不推送（下次起只推新增）");
+                    sleep(800);
+                    continue;
+                }
                 for (WatchItem it : items) {
                     if (uid.equals(it.authorId) || it.authorId == null || it.authorId.isEmpty()) {
                         found.add(new WatchItem(it.linkId, it.title, it.desc, it.authorId,
@@ -207,20 +221,76 @@ public final class WatchEngine {
 
     // ------------------------------------------------------------ 过滤与投递
 
+    /** 单轮最多提醒多少条（防止一次刷屏） */
+    public static final int MAX_PUSH_PER_CHECK = 5;
+
     private static void deliver(WatchConfig cfg, Context ctx, List<WatchItem> items, String from) {
         long now = System.currentTimeMillis() / 1000L;
-        int pushed = 0;
+        long window = cfg.windowSeconds();
+        int tooOld = 0;
+        int noTime = 0;
+        List<WatchItem> fresh = new ArrayList<>();
         for (WatchItem it : items) {
-            if (it.createAt > 0 && now - it.createAt > cfg.windowSeconds()) {
+            // 时间未知的直接跳过：宁可漏推，也不把可能很旧的帖子推出去
+            if (it.createAt <= 0) {
+                noTime++;
                 continue;
             }
-            if (!WatchSeen.markNew(it.linkId)) {
+            if (now - it.createAt > window) {
+                tooOld++;
                 continue;
             }
-            output(cfg, it, false);
-            pushed++;
+            if (WatchSeen.contains(it.linkId)) {
+                continue;
+            }
+            fresh.add(it);
         }
-        sLastResult = from + "：候选 " + items.size() + " 条，提醒 " + pushed + " 条";
+        // 新的在前，超出单轮上限的留到下一轮（不标记为已读）
+        fresh.sort((a, b) -> Long.compare(b.createAt, a.createAt));
+        int over = Math.max(0, fresh.size() - MAX_PUSH_PER_CHECK);
+        if (fresh.size() > MAX_PUSH_PER_CHECK) {
+            fresh = new ArrayList<>(fresh.subList(0, MAX_PUSH_PER_CHECK));
+        }
+        for (WatchItem it : fresh) {
+            WatchSeen.markNew(it.linkId);
+        }
+        if (cfg.banner && !fresh.isEmpty()) {
+            Activity a = sActivity.get();
+            if (a != null) {
+                if (fresh.size() > 1) {
+                    WatchItem first = fresh.get(0);
+                    StringBuilder sb = new StringBuilder();
+                    for (int i = 0; i < fresh.size() && i < 3; i++) {
+                        if (i > 0) {
+                            sb.append('\n');
+                        }
+                        sb.append("· ").append(fresh.get(i).displayTitle());
+                    }
+                    if (fresh.size() > 3) {
+                        sb.append("\n· 还有 ").append(fresh.size() - 3).append(" 条…");
+                    }
+                    WatchOutput.bannerSummary(a, "🔔 " + fresh.size() + " 条新动态", sb.toString(),
+                            () -> WatchOutput.openPost(a, first));
+                } else {
+                    WatchOutput.bannerOrToast(a, fresh.get(0));
+                }
+            }
+        }
+        for (WatchItem it : fresh) {
+            if (cfg.notify) {
+                try {
+                    WatchOutput.notifyPost(pickContext(), it);
+                } catch (Throwable t) {
+                    log(Log.WARN, "通知失败: " + t);
+                }
+            }
+            if (cfg.pushEnabled) {
+                int n = WatchOutput.pushAll(cfg, it);
+                log(Log.INFO, "第三方推送完成，成功 " + n + " 个渠道：" + it.displayTitle());
+            }
+        }
+        sLastResult = from + "：候选 " + items.size() + " 条（超窗 " + tooOld + "、无时间 " + noTime
+                + "、未提醒 " + over + "），提醒 " + fresh.size() + " 条";
         log(Log.INFO, sLastResult);
     }
 
@@ -232,7 +302,8 @@ public final class WatchEngine {
                 log(Log.WARN, "通知失败: " + t);
             }
         }
-        if (cfg.banner && fromFeed) {
+        // 横幅对所有来源都生效（主动拉取 / 信息流命中）
+        if (cfg.banner) {
             Activity a = sActivity.get();
             if (a != null) {
                 WatchOutput.bannerOrToast(a, item);

@@ -85,6 +85,52 @@ public final class WatchSeen {
         App.writeString(App.KEY_WATCH_SEEN, String.join(",", list));
     }
 
+    // ------------------------------------------------------------ 首轮基线
+
+    private static Set<String> sBaselined;
+
+    private static Set<String> baselined() {
+        if (sBaselined == null) {
+            Set<String> set = new LinkedHashSet<>();
+            for (String s : App.readString(App.KEY_WATCH_BASELINED, "").split(",")) {
+                String v = s.trim();
+                if (!v.isEmpty()) {
+                    set.add(v);
+                }
+            }
+            sBaselined = set;
+        }
+        return sBaselined;
+    }
+
+    /** 该关注对象是否已完成首轮基线（首轮只记录不推送，避免把历史帖全推一遍） */
+    public static boolean isBaselined(String userId) {
+        if (userId == null || userId.isEmpty()) {
+            return true;
+        }
+        synchronized (LOCK) {
+            return baselined().contains(userId);
+        }
+    }
+
+    public static void markBaselined(String userId) {
+        if (userId == null || userId.isEmpty()) {
+            return;
+        }
+        synchronized (LOCK) {
+            Set<String> set = baselined();
+            set.add(userId);
+            App.writeString(App.KEY_WATCH_BASELINED, String.join(",", set));
+        }
+    }
+
+    public static void clearBaselines() {
+        synchronized (LOCK) {
+            sBaselined = new LinkedHashSet<>();
+            App.writeString(App.KEY_WATCH_BASELINED, "");
+        }
+    }
+
     /** 记录一次检查时间；用于节流 */
     public static void touchCheck() {
         App.writeString(App.KEY_WATCH_LAST_CHECK, String.valueOf(System.currentTimeMillis()));
