@@ -201,9 +201,9 @@ public final class WatchHook {
                     module.hook(ctor).intercept(chain -> {
                         Object result = chain.proceed();
                         try {
-                            if (!HttpBridge.ready()) {
-                                HttpBridge.captureIfClient(chain.getArg(0), chain.getArg(1), cl);
-                            }
+                            // 不在这里判 ready()：captureIfClient 自己会短路，
+                            // 而它同时负责把宿主请求 URL 记进日志（诊断端点参数用）
+                            HttpBridge.captureIfClient(chain.getArg(0), chain.getArg(1), cl);
                         } catch (Throwable ignored) {
                         }
                         return result;

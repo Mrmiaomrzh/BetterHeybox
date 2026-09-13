@@ -50,6 +50,19 @@
   - 修复切换页面的触摸穿透：旧面板移除后，同一次触摸的后续事件会落到新面板上
     （实测点入口行会顺带点开二级页同一位置的条目），新面板加了 300ms 触摸屏蔽窗口
 
+- **取数接口按真机实测对齐**（用「记录宿主请求 URL」的诊断抓下宿主自己的写法对照）
+  - **按话题拉流已对齐**：宿主用的是 bbs/app/topic/feeds?topic_id=<id>&offset=0&limit=30，与实现里的首选参数一致
+  - **关键词搜索必须带筛选参数**：bbs/app/api/general/search/v1 不带 search_type=link&type=link 时返回空 items，现在固定带上
+  - **热搜词字段是 key**：bbs/app/api/search/hot_words 的候选词在 list[].key，之前漏了这个字段名，会把广告横幅文字也当成候选词
+  - **「我关注的话题」接口拿不到数据**：bbs/app/profile/preference_v5/topic_list 固定返回 msg=请至少选择一个平台，
+    平台参数名没有公开信息（platform / platforms / platform_id / platform_type / platform_list 都试过），
+    因此改为**回落到「最近浏览过的话题」**：模块顺手记下宿主请求里的 topic_id，
+    再用 bbs/app/topic/list_infos?topic_ids= 批量换回名字 —— 没关注过话题的用户同样可用
+  - 新增**话题搜索**：bbs/app/api/search/topic → topic/search → hashtag/search，搜到后点一下即加入「关注的话题」（带 id，可直接拉流）
+- **修复「未知作者」**：搜索结果的结构是 {"info":{…帖子…},"user":{…作者…}}（作者与帖子是兄弟节点），
+  宽松解析只在自己身上找作者字段，于是全显示成「未知作者」；现在解析时会把上层节点的作者对象往下继承，
+  并补充 user_info / userinfo / author / hb_user 等容器名
+
 ### 修复
 
 - **真机实测（小黑盒 1.3.395 / Android 16）发现并修掉的问题**：

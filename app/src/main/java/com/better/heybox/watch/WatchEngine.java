@@ -399,15 +399,19 @@ public final class WatchEngine {
             Object link = jsonGet(obj, "link");
             String title = jsonStr(obj, "title");
             String desc = jsonStr(obj, "description", "desc");
-            String authorId = jsonStr(obj, "userid", "user_id");
+            String authorId = jsonStr(obj, "userid", "user_id", "author_id");
             String authorName = jsonStr(obj, "username", "nickname");
-            Object user = jsonGet(obj, "user");
+            // 作者容器在不同接口里叫法不一：user / user_info / author …
+            Object user = jsonFirstObject(obj, "user", "user_info", "userinfo", "author", "hb_user");
+            if (user == null && link != null) {
+                user = jsonFirstObject(link, "user", "user_info", "author");
+            }
             if (user != null) {
                 if (authorId == null) {
-                    authorId = jsonStr(user, "userid", "user_id");
+                    authorId = jsonStr(user, "userid", "user_id", "heybox_id");
                 }
                 if (authorName == null) {
-                    authorName = jsonStr(user, "username", "nickname");
+                    authorName = jsonStr(user, "username", "nickname", "user_name", "name");
                 }
             }
             String hitUser = matchUser(cfg, authorId);
@@ -613,6 +617,17 @@ public final class WatchEngine {
     }
 
     // ------------------------------------------------------------ JSON 反射小工具
+
+    /** 依次取第一个存在的对象字段（作者容器在不同接口里叫法不一） */
+    private static Object jsonFirstObject(Object jsonObj, String... keys) {
+        for (String k : keys) {
+            Object v = jsonGet(jsonObj, k);
+            if (v != null) {
+                return v;
+            }
+        }
+        return null;
+    }
 
     private static Object jsonGet(Object jsonObj, String key) {
         try {

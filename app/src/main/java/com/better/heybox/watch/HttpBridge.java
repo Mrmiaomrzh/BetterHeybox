@@ -62,6 +62,60 @@ public final class HttpBridge {
         return sClient != null && sNewCall != null && sExecute != null;
     }
 
+    /**
+     * 记住用户在小黑盒里打开过的话题 id：这些是他真正在看的话题，
+     * 比「我关注的话题」接口更可靠（后者实测要求一个未知的平台参数）。
+     */
+    private static void rememberTopic(String id) {
+        if (id == null || id.isEmpty()) {
+            return;
+        }
+        boolean changed = false;
+        synchronized (sRecentTopics) {
+            if (!sRecentTopics.contains(id)) {
+                sRecentTopics.add(id);
+                while (sRecentTopics.size() > RECENT_TOPIC_LIMIT) {
+                    java.util.Iterator<String> it = sRecentTopics.iterator();
+                    it.next();
+                    it.remove();
+                }
+                changed = true;
+            }
+        }
+        if (changed) {
+            try {
+                StringBuilder sb = new StringBuilder();
+                synchronized (sRecentTopics) {
+                    for (String t : sRecentTopics) {
+                        sb.append(t).append(',');
+                    }
+                }
+                com.better.heybox.HeyboxPrefs.init(com.better.heybox.App.resolveAppContext());
+                com.better.heybox.HeyboxPrefs.setString(
+                        com.better.heybox.App.KEY_WATCH_RECENT_TOPICS, sb.toString());
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
+    /** 最近在宿主里打开过的话题 id（最新在前） */
+    public static java.util.List<String> recentTopicIds() {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        synchronized (sRecentTopics) {
+            // 反转：最新在前
+            String[] arr = sRecentTopics.toArray(new String[0]);
+            for (int i = arr.length - 1; i >= 0; i--) {
+                out.add(arr[i]);
+            }
+        }
+        return out;
+    }
+
+    /** 当前登录 userid（从宿主请求里解析，拿不到返回 null） */
+    public static String hostUserId() {
+        return sHostUserId;
+    }
+
     public static String describe() {
         return sDescribe;
     }
@@ -72,6 +126,7 @@ public final class HttpBridge {
      * @return 是否已具备发请求的能力
      */
     public static boolean captureIfClient(Object client, Object request, ClassLoader cl) {
+        logHostRequest(request);
         if (client == null) {
             return false;
         }
@@ -107,6 +162,71 @@ public final class HttpBridge {
                 log(Log.WARN, "识别客户端失败：" + t);
                 return false;
             }
+        }
+    }
+
+    private static volatile long sLogFlagAt;
+    private static volatile boolean sLogFlag;
+    /** 从宿主请求里顺手解析出的当前登录 userid（很多接口要用） */
+    private static volatile String sHostUserId;
+    // 注意：只认宿主自己的写法（user_id= / ws 连接串），
+    // 否则会把我们模块自己请求里的 userid=（那是个被关注的用户）当成登录用户
+    private static final java.util.regex.Pattern HOST_UID =
+            java.util.regex.Pattern.compile("user_id=(\\d{5,20})");
+    private static final java.util.regex.Pattern ANY_UID =
+            java.util.regex.Pattern.compile("userid=(\\d{5,20})");
+    private static final java.util.regex.Pattern TOPIC_ID =
+            java.util.regex.Pattern.compile("topic_id=(\\d{1,20})");
+    /** 最近在宿主里打开过的话题 id（有界，最新在前） */
+    private static final java.util.LinkedHashSet<String> sRecentTopics = new java.util.LinkedHashSet<>();
+    private static final int RECENT_TOPIC_LIMIT = 20;
+
+    private static final java.util.regex.Pattern URL_IN_TOSTRING =
+            java.util.regex.Pattern.compile("url=([^,\\s]+)");
+
+    /**
+     * 诊断：开启「记录日志」时，把宿主自己发的<b>话题/标签</b>类请求记进模块日志。
+     * 这些接口的参数写法（比如平台字段）只有看宿主真实请求才能对齐，比自己猜参数可靠。
+     * OkHttp 的 Request#toString() 会带出完整 URL，且它是 Object 方法，R8 不会改名。
+     */
+    private static void logHostRequest(Object request) {
+        try {
+            if (request == null) {
+                return;
+            }
+            long now = System.currentTimeMillis();
+            if (now - sLogFlagAt > 30000L) {
+                sLogFlagAt = now;
+                MainModule m = sModule;
+                sLogFlag = m != null && m.isEnabled(com.better.heybox.App.KEY_LOG, false);
+            }
+            if (!sLogFlag) {
+                return;
+            }
+            java.util.regex.Matcher mt = URL_IN_TOSTRING.matcher(String.valueOf(request));
+            if (!mt.find()) {
+                return;
+            }
+            String url = mt.group(1);
+            if (sHostUserId == null) {
+                java.util.regex.Matcher um = HOST_UID.matcher(url);
+                if (!um.find() && url.contains("ws.xiaoheihe.cn")) {
+                    um = ANY_UID.matcher(url);
+                }
+                if (um.find()) {
+                    sHostUserId = um.group(1);
+                    log(Log.INFO, "宿主登录 userid = " + sHostUserId);
+                }
+            }
+            // 只记与「话题 / 搜索」相关的宿主请求：这几类端点的参数写法要跟宿主对齐
+            if (url.contains("topic") || url.contains("hashtag") || url.contains("/search")) {
+                log(Log.INFO, "宿主请求 " + url);
+            }
+            java.util.regex.Matcher tm = TOPIC_ID.matcher(url);
+            if (tm.find()) {
+                rememberTopic(tm.group(1));
+            }
+        } catch (Throwable ignored) {
         }
     }
 

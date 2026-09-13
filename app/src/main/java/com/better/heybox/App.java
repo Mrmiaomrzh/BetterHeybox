@@ -200,6 +200,8 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     public static final String KEY_WATCH_WINDOW_MIN = "watch_window_min";
     /** 关注的话题：一行一个 "话题id|话题名"（导入关注话题时写入） */
     public static final String KEY_WATCH_TOPICS = "watch_topics";
+    /** 最近浏览过的话题 id（从宿主请求里顺手记录，供导入用） */
+    public static final String KEY_WATCH_RECENT_TOPICS = "watch_recent_topics";
     /** 关键词只匹配标题（默认标题+正文） */
     public static final String KEY_WATCH_TITLE_ONLY = "watch_title_only";
     /** 关键词/话题主动拉流：按关键词搜索、按话题取最新帖（默认关） */
