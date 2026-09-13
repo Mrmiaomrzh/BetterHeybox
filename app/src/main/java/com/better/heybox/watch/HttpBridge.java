@@ -136,12 +136,14 @@ public final class HttpBridge {
             if (urlSetter == null || build == null) {
                 continue;
             }
-            // Builder#method(String, RequestBody)：用于把复用的模板强制成 GET
+            // Builder#method(String, RequestBody)：用于把复用的模板强制成 GET。
+            // 注意排除 header/addHeader(String, String) —— 它们形状相同，
+            // 若误选并传入 null 会在 okhttp 内部抛 NPE（实测踩过）
             Method methodSetter = null;
             for (Method m : t.getMethods()) {
                 Class<?>[] ps = m.getParameterTypes();
-                if (ps.length == 2 && ps[0] == String.class && !ps[1].isPrimitive()
-                        && m.getReturnType() == t) {
+                if (ps.length == 2 && ps[0] == String.class && ps[1] != String.class
+                        && !ps[1].isPrimitive() && m.getReturnType() == t) {
                     methodSetter = m;
                     break;
                 }
@@ -280,9 +282,13 @@ public final class HttpBridge {
         Object req;
         try {
             Object builder = sNewBuilder.invoke(template);
-            // newBuilder() 会把原请求的 method/body 一起复制过来，必须重置为 GET
+            // newBuilder() 会把原请求的 method/body 一起复制过来，重置为 GET。
+            // 这一步只是保险，失败也不该影响请求本身
             if (sMethod != null) {
-                sMethod.invoke(builder, "GET", null);
+                try {
+                    sMethod.invoke(builder, "GET", null);
+                } catch (Throwable ignored) {
+                }
             }
             sUrl.invoke(builder, url);
             if (headers != null) {
@@ -303,7 +309,8 @@ public final class HttpBridge {
             }
             req = sBuild.invoke(builder);
         } catch (Throwable t) {
-            log(Log.WARN, "构造请求失败: " + t);
+            Throwable cause = t.getCause() != null ? t.getCause() : t;
+            log(Log.WARN, "构造请求失败: " + t + " / cause=" + cause);
             return null;
         }
         // 只支持 GET（当前用途），POST 需要 RequestBody，这里不做，避免依赖更多混淆类
