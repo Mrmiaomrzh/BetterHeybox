@@ -296,7 +296,8 @@ public final class SettingsEntryHook {
                         null, false, false, true, App.KEY_WATCH_PUSH_DINGTALK),
                 new SwitchDef("WxPusher", "appToken|topicId 或 appToken|uid:UID",
                         null, false, false, true, App.KEY_WATCH_PUSH_WXPUSHER),
-                new SwitchDef("OneBot 机器人", "baseUrl|群号 或 baseUrl|private:QQ（AstrBot/NapCat 等）",
+                new SwitchDef("AstrBot 机器人",
+                        "AstrBot / OneBot：http://主机:6199|群号|访问令牌（后两段可省）",
                         null, false, false, true, App.KEY_WATCH_PUSH_ONEBOT),
                 new SwitchDef("自定义 webhook", "支持 {title} {author} {link} {desc} 占位符",
                         null, false, false, true, App.KEY_WATCH_PUSH_CUSTOM),
@@ -2563,6 +2564,18 @@ public final class SettingsEntryHook {
         return module.isEnabled(key, defaultValue);
     }
 
+    /** 模块自身包名（预览版与正式版不同，不能写死） */
+    private String modulePackageName() {
+        try {
+            android.content.pm.ApplicationInfo info = module.getModuleApplicationInfo();
+            if (info != null && info.packageName != null && !info.packageName.isEmpty()) {
+                return info.packageName;
+            }
+        } catch (Throwable ignored) {
+        }
+        return "com.better.heybox";
+    }
+
     private boolean writeEmbeddedBoolean(Activity activity, String key, boolean value) {
         LogRecorder.setContext(activity);
         HeyboxPrefs.init(activity);
@@ -2572,7 +2585,7 @@ public final class SettingsEntryHook {
         try {
             Intent request = new Intent(PreferenceReceiver.ACTION_SET_BOOLEAN)
                     .setComponent(new android.content.ComponentName(
-                            "com.better.heybox", "com.better.heybox.PreferenceReceiver"))
+                            modulePackageName(), PreferenceReceiver.class.getName()))
                     .putExtra(PreferenceReceiver.EXTRA_KEY, key)
                     .putExtra(PreferenceReceiver.EXTRA_VALUE, value)
                     .addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES);

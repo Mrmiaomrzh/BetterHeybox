@@ -10,13 +10,26 @@
   - **关注对象**：一行一个，支持 userid 或用户主页链接（最多 30 个）
   - **监控关键词**：一行一个，命中标题或正文即提醒，`regex:` 前缀支持正则（与发帖过滤同一套写法）
   - **三种提醒方式**：应用内横幅（自绘，挂在当前界面顶部，点击直达帖子）、
-    系统通知（点击跳转帖子）、第三方推送（钉钉机器人 / WxPusher / OneBot（AstrBot、NapCat 等）/ 自定义 webhook）
+    系统通知（点击跳转帖子）、第三方推送（钉钉机器人 / WxPusher / **AstrBot**（aiocqhttp，OneBot v11）/ 自定义 webhook）
   - **检查时机**：打开小黑盒、宿主收到任意推送（搭便车唤醒，无需任何凭据）、信息流命中；
     引擎内自带最小间隔节流（默认 10 分钟）
   - **取数复用宿主自身的 OkHttp**：捕获宿主的 `OkHttpClient` 实例后发出自己的请求，
     签名（hkey/_time/nonce）、Cookie、UA 全部由宿主拦截器完成 —— 不自己实现签名，也就不随算法变更失效；
     端点为 `bbs/app/profile/user/link/list`（1.3.393 dex 中确认）
   - 默认关闭；未配置监控目标时不发起任何请求
+  - 「测试提醒」一键验证三种输出：横幅 ✓ · 通知 ✓ · 推送 N 个渠道
+- **AstrBot 机器人接入**：「AstrBot 机器人」配置格式为 `http://主机:6199|群号|访问令牌`（后两段可省，
+  也支持 `private:QQ号`），适配 AstrBot 的 aiocqhttp 适配器；设了访问令牌时以
+  `Authorization: Bearer` 发送，消息按纯文本发送（`auto_escape`）避免标题里的 CQ 码被解析
+
+### 变更
+
+- **预览版独立包名**：`applicationId` 改为 `com.better.heybox.preview`，模块名显示为
+  「BetterHeybox 预览」，可与正式版同时安装、在 LSPosed 里分别授权
+  （⚠️ 不要把两份模块同时启用在同一作用域，否则同一进程会安装两遍 Hook）
+- **临时停用模块版本检测**：低于历史版本下限时不再拒绝激活，便于本地自编译版本安装；
+  原逻辑已整段注释保留在 `MainModule.activateIfNotDowngraded`，取消注释即可恢复
+- 跨进程开关广播（`PreferenceReceiver`）改为运行时解析模块包名，不再写死 `com.better.heybox`
 
 ## 0.7.7
 

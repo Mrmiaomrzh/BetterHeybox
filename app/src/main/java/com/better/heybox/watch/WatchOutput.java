@@ -211,12 +211,24 @@ public final class WatchOutput {
         }
     }
 
-    /** OneBot v11（AstrBot / NapCat 等）：格式 baseUrl|group_id 或 baseUrl|private:QQ */
+    /**
+     * AstrBot / OneBot v11 机器人（AstrBot 的 aiocqhttp 适配器、NapCat、Lagrange 等）。
+     *
+     * <p>配置格式（用 | 分隔，后两段可省）：
+     * <pre>
+     *   http://主机:6199|群号
+     *   http://主机:6199|群号|访问令牌
+     *   http://主机:6199|private:QQ号|访问令牌
+     * </pre>
+     * AstrBot 的 aiocqhttp 适配器默认监听 6199；若其配置里设了 access_token，
+     * 需要填第三段（以 Authorization: Bearer 形式发送）。
+     */
     private static boolean sendOneBot(String cfg, WatchItem item) {
         try {
             String[] parts = cfg.split("\\|");
             String base = parts[0].trim().replaceAll("/+$", "");
             String target = parts.length > 1 ? parts[1].trim() : "";
+            String token = parts.length > 2 ? parts[2].trim() : "";
             JSONObject o = new JSONObject();
             String action;
             if (target.startsWith("private:")) {
@@ -227,10 +239,15 @@ public final class WatchOutput {
                 o.put("group_id", Long.parseLong(target.isEmpty() ? "0" : target));
             }
             o.put("message", "【小黑盒】" + item.displayTitle() + "\n" + item.webUrl());
-            o.put("auto_escape", false);
-            return postJson(base + action, o.toString()) != null;
+            // 不让标题里的 [CQ:...] 被当成 CQ 码解析
+            o.put("auto_escape", true);
+            Map<String, String> headers = new HashMap<>();
+            if (!token.isEmpty()) {
+                headers.put("Authorization", "Bearer " + token);
+            }
+            return postJson(base + action, o.toString(), headers) != null;
         } catch (Throwable t) {
-            log(Log.WARN, "OneBot 推送失败: " + t);
+            log(Log.WARN, "AstrBot / OneBot 推送失败: " + t);
             return false;
         }
     }
@@ -274,6 +291,10 @@ public final class WatchOutput {
     }
 
     private static String postJson(String url, String json) {
+        return postJson(url, json, null);
+    }
+
+    private static String postJson(String url, String json, Map<String, String> headers) {
         HttpURLConnection c = null;
         try {
             c = (HttpURLConnection) new URL(url).openConnection();
@@ -282,6 +303,11 @@ public final class WatchOutput {
             c.setReadTimeout(8000);
             c.setDoOutput(true);
             c.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+            if (headers != null) {
+                for (Map.Entry<String, String> e : headers.entrySet()) {
+                    c.setRequestProperty(e.getKey(), e.getValue());
+                }
+            }
             try (OutputStream os = c.getOutputStream()) {
                 os.write(json.getBytes(StandardCharsets.UTF_8));
             }

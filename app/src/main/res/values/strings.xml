@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">BetterHeybox</string>
-    <string name="module_description">小黑盒（Heybox）增强模块</string>
+    <!-- 预览版：与正式版区分，便于在 LSPosed 模块列表里辨认 -->
+    <string name="app_name">BetterHeybox 预览</string>
+    <string name="module_description">小黑盒（Heybox）增强模块 · 预览版，可与正式版共存</string>
 </resources>

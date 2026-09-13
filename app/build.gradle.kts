@@ -17,7 +17,9 @@ android {
     buildToolsVersion = "36.0.0"
 
     defaultConfig {
-        applicationId = "com.better.heybox"
+        // 预览版单独包名：可与正式版同时安装、在 LSPosed 里分别勾选（注意两者不要同时启用，
+        // 否则同一进程会装两份 Hook）。
+        applicationId = "com.better.heybox.preview"
         minSdk = 26
         targetSdk = 37
         versionCode = (project.findProperty("VERSION_CODE") as String? ?: "1").toInt()
