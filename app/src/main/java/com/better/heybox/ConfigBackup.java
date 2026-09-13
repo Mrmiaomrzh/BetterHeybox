@@ -43,6 +43,16 @@ public final class ConfigBackup {
             App.KEY_AI_MODEL,
             App.KEY_AI_PROMPT,
             App.KEY_AI_MAX_TOKENS,
+            // 动态推送（#26）：目标与推送配置是字符串，需要在备份里单独列出
+            App.KEY_WATCH_USERS,
+            App.KEY_WATCH_TOPICS,
+            App.KEY_WATCH_KEYWORDS,
+            App.KEY_WATCH_WINDOW_MIN,
+            App.KEY_WATCH_INTERVAL_MIN,
+            App.KEY_WATCH_PUSH_DINGTALK,
+            App.KEY_WATCH_PUSH_WXPUSHER,
+            App.KEY_WATCH_PUSH_ONEBOT,
+            App.KEY_WATCH_PUSH_CUSTOM,
     };
     private static final String[] RESTART_KEYS = {
             App.KEY_HIDE_TAB_HOME,

@@ -187,6 +187,48 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     public static final String KEY_MODULE_VERSION_FLOOR = "module_version_floor";
     public static final String KEY_TARGET_HINT_VISIBLE = "target_hint_visible";
 
+    // ===== 动态推送（关注作者 / 关键词监控）=====
+    /** 动态推送总开关 */
+    public static final String KEY_WATCH_ENABLED = "watch_enabled";
+    /** 关注对象：一行一个 userid 或用户主页链接 */
+    public static final String KEY_WATCH_USERS = "watch_users";
+    /** 监控关键词：一行一个，regex: 前缀为正则 */
+    public static final String KEY_WATCH_KEYWORDS = "watch_keywords";
+    /** 应用内横幅提醒 */
+    public static final String KEY_WATCH_BANNER = "watch_banner";
+    /** 系统通知栏提醒 */
+    public static final String KEY_WATCH_NOTIFY = "watch_notify";
+    /** 检查间隔（分钟） */
+    public static final String KEY_WATCH_INTERVAL_MIN = "watch_interval_min";
+    /** 时间窗（天）：只提醒最近 N 天内的新帖（旧键，保留兼容） */
+    public static final String KEY_WATCH_WINDOW_DAYS = "watch_window_days";
+    /** 获取时间窗（分钟）：只提醒最近 N 分钟内的新帖，优先于上面的「天」 */
+    public static final String KEY_WATCH_WINDOW_MIN = "watch_window_min";
+    /** 关注的话题：一行一个 "话题id|话题名"（导入关注话题时写入） */
+    public static final String KEY_WATCH_TOPICS = "watch_topics";
+    /** 最近浏览过的话题 id（从宿主请求里顺手记录，供导入用） */
+    public static final String KEY_WATCH_RECENT_TOPICS = "watch_recent_topics";
+    /** 关键词只匹配标题（默认标题+正文） */
+    public static final String KEY_WATCH_TITLE_ONLY = "watch_title_only";
+    /** 关键词/话题主动拉流：按关键词搜索、按话题取最新帖（默认关） */
+    public static final String KEY_WATCH_STREAM_FETCH = "watch_stream_fetch";
+    /** 第三方推送总开关 */
+    public static final String KEY_WATCH_PUSH_ENABLED = "watch_push_enabled";
+    /** 钉钉机器人：webhook 或 access_token */
+    public static final String KEY_WATCH_PUSH_DINGTALK = "watch_push_dingtalk";
+    /** WxPusher：appToken|topicId 或 appToken|uid:UID */
+    public static final String KEY_WATCH_PUSH_WXPUSHER = "watch_push_wxpusher";
+    /** OneBot：baseUrl|群号 或 baseUrl|private:QQ */
+    public static final String KEY_WATCH_PUSH_ONEBOT = "watch_push_onebot";
+    /** 自定义 webhook（支持 {title} {author} {link} 占位符） */
+    public static final String KEY_WATCH_PUSH_CUSTOM = "watch_push_custom";
+    /** 已提醒过的 link_id（有界，逗号分隔） */
+    public static final String KEY_WATCH_SEEN = "watch_seen";
+    /** 上次检查时间（毫秒） */
+    public static final String KEY_WATCH_LAST_CHECK = "watch_last_check";
+    /** 已完成首轮基线的关注对象（逗号分隔，首轮只记录不推送） */
+    public static final String KEY_WATCH_BASELINED = "watch_baselined";
+
     /** receiver 白名单与备份列表 */
     public static final java.util.Map<String, Boolean> BOOLEAN_DEFAULTS = buildBooleanDefaults();
 
@@ -227,6 +269,13 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
         m.put(KEY_FAVOUR_AUTO_CLEAN, false);
         m.put(KEY_DISCLAIMER_ACCEPTED, false);
         m.put(KEY_TARGET_HINT_VISIBLE, true);
+        // 动态推送（默认关闭：涉及自动请求；开启后默认用横幅 + 通知提醒）
+        m.put(KEY_WATCH_ENABLED, false);
+        m.put(KEY_WATCH_BANNER, true);
+        m.put(KEY_WATCH_NOTIFY, true);
+        m.put(KEY_WATCH_PUSH_ENABLED, false);
+        m.put(KEY_WATCH_TITLE_ONLY, false);
+        m.put(KEY_WATCH_STREAM_FETCH, false);
         return m;
     }
 

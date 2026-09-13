@@ -22,6 +22,7 @@ import com.better.heybox.hooks.GeneralHook;
 import com.better.heybox.hooks.ImageShareHook;
 import com.better.heybox.hooks.PromotePostHook;
 import com.better.heybox.hooks.PostFilterHook;
+import com.better.heybox.hooks.WatchHook;
 import com.better.heybox.hooks.SettingsEntryHook;
 import com.better.heybox.hooks.ShareLinkPurifyHook;
 import com.better.heybox.hooks.SingleColumnFeedHook;
@@ -177,6 +178,7 @@ public class MainModule extends XposedModule {
             dailyTaskHook = new DailyTaskHook(this);
             dailyTaskHook.install(ignored);
         }, cl);
+        installHook("动态推送", new WatchHook(this)::install, cl);
 
         Checkpoint.mark(">>> Hook 安装完成，总耗时 %d ms", SystemClock.elapsedRealtime() - t0);
         logd(Log.INFO, TAG, "Hook 安装流程结束");
