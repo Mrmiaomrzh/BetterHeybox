@@ -115,7 +115,8 @@ public final class SettingsEntryHook {
         NONE, EDIT_LINK, CLEAR_DAILY, CHANNEL, EXPORT, IMPORT,
         EXPORT_LOG, RUNTIME_STATUS, OPEN_WEB, PICK_DIR, RESET_GLASS, CHOOSE_GLASS,
         POST_LEVEL, POST_KEYWORDS, AI_PROVIDER, AI_PROMPT, AI_TEST, AI_MAX_TOKENS,
-        REDIRECT_FORCE, REDIRECT_BLOCK, REDIRECT_TARGET, WEB_LOG, ABOUT
+        REDIRECT_FORCE, REDIRECT_BLOCK, REDIRECT_TARGET, WEB_LOG, ABOUT,
+        WATCH_USERS, WATCH_KEYWORDS, WATCH_TEST_PUSH, WATCH_CHECK
     }
 
     private static class SwitchDef {
@@ -234,6 +235,7 @@ public final class SettingsEntryHook {
             groups.add(g);
         }
         insertPostFilterGroup(groups);
+        insertWatchGroup(groups);
         insertBrowserRedirectGroup(activity, groups);
         if (BuildFlags.DEBUG) {
             addRuntimeStatusRow(groups);
@@ -260,6 +262,83 @@ public final class SettingsEntryHook {
     }
 
     private static final String TITLE_AD_FILTER = "广告过滤";
+
+    /**
+     * 动态推送分组：关注作者的新动态 / 关键词命中 → 应用内横幅、通知栏、第三方推送。
+     *
+     * <p>检查时机：打开小黑盒、宿主收到推送（搭便车）、信息流命中；
+     * 全部走宿主自身的网络栈与通知渠道，不需要任何额外凭据。
+     */
+    private void insertWatchGroup(List<SettingsGroup> groups) {
+        int userCount = com.better.heybox.watch.WatchConfig
+                .splitLines(module.getString(App.KEY_WATCH_USERS, ""), 999).size();
+        int kwCount = com.better.heybox.watch.WatchConfig
+                .splitLines(module.getString(App.KEY_WATCH_KEYWORDS, ""), 999).size();
+        SettingsGroup group = new SettingsGroup("动态推送", new SwitchDef[]{
+                new SwitchDef("关注动态提醒",
+                        "打开小黑盒或收到推送时，检查关注对象是否有新动态",
+                        App.KEY_WATCH_ENABLED, false, false),
+                new SwitchDef("关注对象",
+                        userCount > 0 ? "已配置 " + userCount + " 个，点击编辑"
+                                : "一行一个：userid 或用户主页链接",
+                        null, false, false, true, null, Action.WATCH_USERS),
+                new SwitchDef("监控关键词",
+                        kwCount > 0 ? "已配置 " + kwCount + " 个，点击编辑"
+                                : "命中标题或正文即提醒；regex: 前缀为正则",
+                        null, false, false, true, null, Action.WATCH_KEYWORDS),
+                new SwitchDef("应用内横幅", "在小黑盒界面上方弹出提醒",
+                        App.KEY_WATCH_BANNER, true, false),
+                new SwitchDef("系统通知", "在通知栏提醒，点击可跳转帖子",
+                        App.KEY_WATCH_NOTIFY, true, false),
+                new SwitchDef("第三方推送", "把新动态转发到钉钉 / WxPusher / 机器人",
+                        App.KEY_WATCH_PUSH_ENABLED, false, false),
+                new SwitchDef("钉钉机器人", "webhook 地址或 access_token",
+                        null, false, false, true, App.KEY_WATCH_PUSH_DINGTALK),
+                new SwitchDef("WxPusher", "appToken|topicId 或 appToken|uid:UID",
+                        null, false, false, true, App.KEY_WATCH_PUSH_WXPUSHER),
+                new SwitchDef("OneBot 机器人", "baseUrl|群号 或 baseUrl|private:QQ（AstrBot/NapCat 等）",
+                        null, false, false, true, App.KEY_WATCH_PUSH_ONEBOT),
+                new SwitchDef("自定义 webhook", "支持 {title} {author} {link} {desc} 占位符",
+                        null, false, false, true, App.KEY_WATCH_PUSH_CUSTOM),
+                new SwitchDef("测试推送", "发送一条测试消息，验证推送配置",
+                        null, false, false, true, null, Action.WATCH_TEST_PUSH),
+                new SwitchDef("立即检查", "手动触发一次检查（结果见模块日志）",
+                        null, false, false, true, null, Action.WATCH_CHECK),
+        });
+        int insertAt = groups.size();
+        for (int i = 0; i < groups.size(); i++) {
+            if (TITLE_GENERAL.equals(groups.get(i).title)) {
+                insertAt = i;
+                break;
+            }
+        }
+        groups.add(insertAt, group);
+    }
+
+    /** 测试第三方推送：只发推送渠道，不动本地通知 */
+    private void testWatchPush(final Activity activity) {
+        Toast.makeText(activity, "正在发送测试推送…", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            final String[] msg = new String[1];
+            try {
+                com.better.heybox.watch.WatchConfig cfg =
+                        com.better.heybox.watch.WatchConfig.load(module);
+                com.better.heybox.watch.WatchItem item = new com.better.heybox.watch.WatchItem(
+                        "betterheybox-test", "测试消息", "BetterHeybox 动态推送测试",
+                        "0", "BetterHeybox", System.currentTimeMillis() / 1000L, "keyword", "");
+                int n = com.better.heybox.watch.WatchOutput.pushAll(cfg, item);
+                msg[0] = n > 0 ? ("已发送 " + n + " 个渠道") : "未发送：请开启开关并填写地址";
+            } catch (Throwable t) {
+                msg[0] = "测试失败：" + t;
+            }
+            activity.runOnUiThread(() -> {
+                try {
+                    Toast.makeText(activity, msg[0], Toast.LENGTH_LONG).show();
+                } catch (Throwable ignored) {
+                }
+            });
+        }, "betterheybox-watch-test").start();
+    }
 
     private void insertPostFilterGroup(List<SettingsGroup> groups) {
         int minLevel = 0;
@@ -1149,6 +1228,25 @@ public final class SettingsEntryHook {
                         break;
                     case ABOUT:
                         setRowClick(itemCls, item, v -> showAboutDialog(activity));
+                        break;
+                    case WATCH_USERS:
+                        setRowClick(itemCls, item, v -> showMultilineEditDialog(activity,
+                                "关注对象", App.KEY_WATCH_USERS,
+                                "一行一个：userid 或用户主页链接（最多 30 个）", false));
+                        break;
+                    case WATCH_KEYWORDS:
+                        setRowClick(itemCls, item, v -> showMultilineEditDialog(activity,
+                                "监控关键词", App.KEY_WATCH_KEYWORDS,
+                                "一行一个，命中标题或正文即提醒；regex: 前缀为正则", false));
+                        break;
+                    case WATCH_TEST_PUSH:
+                        setRowClick(itemCls, item, v -> testWatchPush(activity));
+                        break;
+                    case WATCH_CHECK:
+                        setRowClick(itemCls, item, v -> {
+                            com.better.heybox.watch.WatchEngine.checkNow(activity, true);
+                            Toast.makeText(activity, "已触发检查，结果见日志", Toast.LENGTH_SHORT).show();
+                        });
                         break;
                     case EDIT_LINK:
                     default:
