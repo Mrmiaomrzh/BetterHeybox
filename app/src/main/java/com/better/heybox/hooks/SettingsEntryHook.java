@@ -119,6 +119,7 @@ public final class SettingsEntryHook {
         WATCH_USERS, WATCH_KEYWORDS, WATCH_IMPORT_FOLLOW, WATCH_TEST_PUSH, WATCH_CHECK,
         WATCH_DEBUG_PUSH3,
         /** v2 二级页入口 */ WATCH_V2,
+        /** 通用二级页入口（页面 id 存在 editKey 里） */ OPEN_PAGE,
         WATCH_TOPICS, WATCH_IMPORT_TOPICS, WATCH_WINDOW, WATCH_INTERVAL, WATCH_SUGGEST_KEYWORDS
     }
 
@@ -231,37 +232,121 @@ public final class SettingsEntryHook {
     private static final String EXPERIMENTAL_HEYBOX_VERSION = "1.3.395";
     private static final long EXPERIMENTAL_HEYBOX_CODE = 1131L;
 
+    /** 一级页只放分类入口，具体设置项都在二级页里（v2 归类） */
     private List<SettingsGroup> buildSettingsGroups(Activity activity) {
         List<SettingsGroup> groups = new ArrayList<>();
-        groups.add(buildBottomTabGroup(activity));
-        for (SettingsGroup g : BASE_GROUPS) {
-            groups.add(g);
+        com.better.heybox.watch.WatchConfig cfg =
+                com.better.heybox.watch.WatchConfig.load(module);
+        boolean redirectOn = module.isEnabled(App.KEY_BROWSER_REDIRECT, false);
+        groups.add(new SettingsGroup("功能分类", new SwitchDef[]{
+                entry(PAGE_ADS, "广告与内容过滤",
+                        "开屏 / 信息流 / 气泡 / 角标广告、推广贴、发帖过滤、分享净化"),
+                entry(PAGE_UI, "界面与外观",
+                        "液态玻璃底栏、底部导航栏隐藏、首页单列信息流"),
+                entry(PAGE_BROWSE, "浏览与下载",
+                        "解除复制、外部链接重定向" + (redirectOn ? "（已开）" : "") + "、视频下载"),
+                entry(PAGE_WATCH, "动态推送",
+                        "关注 " + cfg.users.size() + " 人 · 话题 " + cfg.topics.size()
+                                + " 个 · 关键词 " + cfg.keywords.size() + " 个 · 时间窗 "
+                                + cfg.windowText()),
+                entry(PAGE_TASK, "每日任务", "一键完成三个分享任务并返回首页"),
+                entry(PAGE_COMMON, "通用与备份", "通知权限、屏蔽更新、日志、配置备份、关于"),
+        }));
+        return groups;
+    }
+
+    // ------------------------------------------------------------ 分类页面
+
+    private static final String PAGE_ADS = "ads";
+    private static final String PAGE_UI = "ui";
+    private static final String PAGE_BROWSE = "browse";
+    private static final String PAGE_WATCH = "watch";
+    private static final String PAGE_TASK = "task";
+    private static final String PAGE_COMMON = "common";
+
+    private static SwitchDef entry(String pageId, String title, String desc) {
+        // 页面 id 借 editKey 传递（Action.OPEN_PAGE 只认这个字段）
+        return new SwitchDef(title, desc, null, false, false, true, pageId, Action.OPEN_PAGE);
+    }
+
+    private static String pageTitle(String pageId) {
+        if (PAGE_ADS.equals(pageId)) {
+            return "广告与内容过滤";
         }
-        insertPostFilterGroup(groups);
-        insertWatchGroup(groups);
-        insertBrowserRedirectGroup(activity, groups);
+        if (PAGE_UI.equals(pageId)) {
+            return "界面与外观";
+        }
+        if (PAGE_BROWSE.equals(pageId)) {
+            return "浏览与下载";
+        }
+        if (PAGE_WATCH.equals(pageId)) {
+            return "动态推送";
+        }
+        if (PAGE_TASK.equals(pageId)) {
+            return "每日任务";
+        }
+        if (PAGE_COMMON.equals(pageId)) {
+            return "通用与备份";
+        }
+        return "BetterHeybox 设置";
+    }
+
+    /** 二级页内容：按分类把原来的分组装箱 */
+    private List<SettingsGroup> buildPageGroups(Activity activity, String pageId) {
+        List<SettingsGroup> groups = new ArrayList<>();
+        if (PAGE_ADS.equals(pageId)) {
+            addBase(groups, "广告过滤");
+            insertPostFilterGroup(groups);
+            addBase(groups, TITLE_SHARE_PURIFY);
+            return groups;
+        }
+        if (PAGE_UI.equals(pageId)) {
+            SettingsGroup glass = buildGlassGroup(activity);
+            if (glass != null) {
+                groups.add(glass);
+            }
+            groups.add(buildBottomTabGroup(activity));
+            if (VersionUtils.isHeyboxBuild(activity, EXPERIMENTAL_HEYBOX_VERSION,
+                    EXPERIMENTAL_HEYBOX_CODE)) {
+                groups.add(new SettingsGroup("实验性功能", new SwitchDef[]{
+                        new SwitchDef("屏蔽双列信息流",
+                                "将首页推荐/话题/百科信息流从双列样式恢复为单列",
+                                App.KEY_SINGLE_COLUMN_FEED, false, false),
+                }));
+            }
+            return groups;
+        }
+        if (PAGE_BROWSE.equals(pageId)) {
+            addBase(groups, "解除复制");
+            insertBrowserRedirectGroup(activity, groups);
+            addBase(groups, "视频下载");
+            return groups;
+        }
+        if (PAGE_WATCH.equals(pageId)) {
+            return buildWatchV2Groups(activity);
+        }
+        if (PAGE_TASK.equals(pageId)) {
+            addBase(groups, "每日任务");
+            return groups;
+        }
+        // PAGE_COMMON 及其它
+        addBase(groups, TITLE_GENERAL);
         if (BuildFlags.DEBUG) {
             addRuntimeStatusRow(groups);
         }
-        SettingsGroup glass = buildGlassGroup(activity);
-        if (glass != null) {
-            int insertAt = groups.size();
-            for (int i = 0; i < groups.size(); i++) {
-                if (TITLE_GENERAL.equals(groups.get(i).title)) {
-                    insertAt = i;
-                    break;
-                }
-            }
-            groups.add(insertAt, glass);
-        }
-        if (VersionUtils.isHeyboxBuild(activity, EXPERIMENTAL_HEYBOX_VERSION,
-                EXPERIMENTAL_HEYBOX_CODE)) {
-            groups.add(new SettingsGroup("实验性功能", new SwitchDef[]{
-                    new SwitchDef("屏蔽双列信息流",
-                            "将首页推荐/话题/百科信息流从双列样式恢复为单列", App.KEY_SINGLE_COLUMN_FEED, false, false),
-            }));
-        }
+        addBase(groups, "配置备份");
+        addBase(groups, "关于");
         return groups;
+    }
+
+    /** 从 BASE_GROUPS 里按标题取分组（找不到就跳过） */
+    private static void addBase(List<SettingsGroup> out, String title) {
+        for (SettingsGroup g : BASE_GROUPS) {
+            if (g.title.equals(title)) {
+                out.add(g);
+                return;
+            }
+        }
     }
 
     private static final String TITLE_AD_FILTER = "广告过滤";
@@ -272,35 +357,6 @@ public final class SettingsEntryHook {
      * <p>检查时机：打开小黑盒、宿主收到推送（搭便车）、信息流命中；
      * 全部走宿主自身的网络栈与通知渠道，不需要任何额外凭据。
      */
-    private void insertWatchGroup(List<SettingsGroup> groups) {
-        final com.better.heybox.watch.WatchConfig cfg =
-                com.better.heybox.watch.WatchConfig.load(module);
-        String summary = "关注 " + cfg.users.size() + " 人 · 话题 " + cfg.topics.size()
-                + " 个 · 关键词 " + cfg.keywords.size() + " 个 · 时间窗 " + cfg.windowText();
-        SettingsGroup group = new SettingsGroup("动态推送", new SwitchDef[]{
-                new SwitchDef("关注动态提醒",
-                        "打开小黑盒或收到推送时，检查关注对象 / 话题 / 关键词是否有新动态",
-                        App.KEY_WATCH_ENABLED, false, false),
-                new SwitchDef("动态推送设置", summary + "；点击进入详细设置",
-                        null, false, false, true, null, Action.WATCH_V2),
-                new SwitchDef("立即检查", "手动触发一次检查（结果见模块日志）",
-                        null, false, false, true, null, Action.WATCH_CHECK),
-        });
-        insertBeforeGeneral(groups, group);
-    }
-
-    /** 插到「通用」分组之前；找不到就追加到末尾 */
-    private static void insertBeforeGeneral(List<SettingsGroup> groups, SettingsGroup group) {
-        int insertAt = groups.size();
-        for (int i = 0; i < groups.size(); i++) {
-            if (TITLE_GENERAL.equals(groups.get(i).title)) {
-                insertAt = i;
-                break;
-            }
-        }
-        groups.add(insertAt, group);
-    }
-
     /**
      * 动态推送二级页（v2）：把原先堆在主页面上的十几行拆成 5 个分组。
      * 监控目标 / 抓取范围 / 提醒方式 / 第三方推送 / 测试与调试。
@@ -309,6 +365,12 @@ public final class SettingsEntryHook {
         final com.better.heybox.watch.WatchConfig cfg =
                 com.better.heybox.watch.WatchConfig.load(module);
         List<SettingsGroup> groups = new ArrayList<>();
+
+        groups.add(new SettingsGroup("总开关", new SwitchDef[]{
+                new SwitchDef("关注动态提醒",
+                        "打开小黑盒或收到推送时，检查关注对象 / 话题 / 关键词是否有新动态",
+                        App.KEY_WATCH_ENABLED, false, false),
+        }));
 
         groups.add(new SettingsGroup("监控目标", new SwitchDef[]{
                 new SwitchDef("关注对象",
@@ -1294,20 +1356,25 @@ public final class SettingsEntryHook {
         return false;
     }
 
-    /** 当前叠加的是否为「动态推送设置」二级页（刷新时据此还原同一页） */
-    private boolean mPanelV2;
+    /** 当前叠加的二级页 id（null = 一级分类页；刷新时据此还原同一页） */
+    private String mCurrentPage;
 
     private void showEmbeddedSettings(final Activity activity) {
-        mPanelV2 = false;
+        mCurrentPage = null;
         openEmbeddedPanel(activity, "BetterHeybox 设置", buildSettingsGroups(activity),
                 this::dismissEmbeddedSettings);
     }
 
-    /** 二级页：动态推送设置（v2）。返回键 / 左上角箭头回到主设置页。 */
-    private void showWatchV2Settings(final Activity activity) {
-        mPanelV2 = true;
-        openEmbeddedPanel(activity, "动态推送设置", buildWatchV2Groups(activity),
+    /** 二级页：某个分类的详细设置。返回键 / 左上角箭头回到分类页。 */
+    private void showModulePage(final Activity activity, String pageId) {
+        mCurrentPage = pageId;
+        openEmbeddedPanel(activity, pageTitle(pageId), buildPageGroups(activity, pageId),
                 () -> showEmbeddedSettings(activity));
+    }
+
+    /** 兼容旧入口：动态推送二级页 */
+    private void showWatchV2Settings(final Activity activity) {
+        showModulePage(activity, PAGE_WATCH);
     }
 
     private void openEmbeddedPanel(final Activity activity, String title,
@@ -1330,7 +1397,18 @@ public final class SettingsEntryHook {
                 statusBarH = module.dp(activity, 24);
             }
 
-            FrameLayout overlay = new FrameLayout(activity);
+            // 切换页面时旧面板刚被移除，同一次触摸的后续事件会落到新面板上（实测点「动态推送设置」
+            // 会顺手点开二级页同一位置的「关注的话题」）。这里给新面板加一个短暂的触摸屏蔽窗口。
+            final long swallowUntil = android.os.SystemClock.uptimeMillis() + 300L;
+            FrameLayout overlay = new FrameLayout(activity) {
+                @Override
+                public boolean dispatchTouchEvent(android.view.MotionEvent ev) {
+                    if (android.os.SystemClock.uptimeMillis() < swallowUntil) {
+                        return true;
+                    }
+                    return super.dispatchTouchEvent(ev);
+                }
+            };
             overlay.setBackgroundColor(pageBg);
             overlay.setClickable(true);
             overlay.setFocusable(true);
@@ -1640,6 +1718,9 @@ public final class SettingsEntryHook {
                         break;
                     case WATCH_IMPORT_FOLLOW:
                         setRowClick(itemCls, item, v -> importWatchFollowing(activity));
+                        break;
+                    case OPEN_PAGE:
+                        setRowClick(itemCls, item, v -> showModulePage(activity, editKey));
                         break;
                     case WATCH_V2:
                         setRowClick(itemCls, item, v -> showWatchV2Settings(activity));
@@ -2007,8 +2088,8 @@ public final class SettingsEntryHook {
         }
         ScrollView old = findScroller(panel);
         final int scrollY = old == null ? 0 : old.getScrollY();
-        if (mPanelV2) {
-            showWatchV2Settings(activity);
+        if (mCurrentPage != null) {
+            showModulePage(activity, mCurrentPage);
         } else {
             showEmbeddedSettings(activity);
         }

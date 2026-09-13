@@ -214,6 +214,7 @@ public final class WatchFetcher {
             if (!out.isEmpty()) {
                 break;
             }
+            logBody("关注话题 " + path, body);
             sleepQuiet(400);
         }
         if (out.isEmpty()) {
@@ -403,6 +404,17 @@ public final class WatchFetcher {
         if (!out.contains(w)) {
             out.add(w);
         }
+    }
+
+    /** 取数失败时把响应片段记进日志，便于定位参数问题 */
+    private static void logBody(String tag, String body) {
+        if (body == null) {
+            log(Log.WARN, tag + " 响应为空");
+            return;
+        }
+        String s = body.replace('\n', ' ').replace('\r', ' ').trim();
+        log(Log.WARN, tag + " body[" + body.length() + "]="
+                + (s.length() > 240 ? s.substring(0, 240) + "…" : s));
     }
 
     private static void sleepQuiet(long ms) {
