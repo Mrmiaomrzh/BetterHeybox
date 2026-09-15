@@ -18,6 +18,7 @@ import com.better.heybox.hooks.BrowserRedirectHook;
 import com.better.heybox.hooks.LiquidGlassBottomBarHook;
 import com.better.heybox.hooks.DailyTaskHook;
 import com.better.heybox.hooks.FavourAutoCleanHook;
+import com.better.heybox.hooks.FeedBannerHook;
 import com.better.heybox.hooks.GeneralHook;
 import com.better.heybox.hooks.ImageShareHook;
 import com.better.heybox.hooks.PromotePostHook;
@@ -183,6 +184,7 @@ public class MainModule extends XposedModule {
         installHook("底部导航", new BottomTabHook(this)::install, cl);
         installHook("液态玻璃底栏", new LiquidGlassBottomBarHook(this)::install, cl);
         installHook("推广贴", new PromotePostHook(this)::install, cl);
+        installHook("首页广告横幅", new FeedBannerHook(this)::install, cl);
         installHook("发帖过滤", postFilter::install, cl);
         installHook("失效收藏清理", new FavourAutoCleanHook(this)::install, cl);
         installHook("单列信息流", new SingleColumnFeedHook(this)::install, cl);

@@ -3,117 +3,112 @@ package com.better.heybox.hooks;
 import android.util.Log;
 
 import java.lang.reflect.Method;
+import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
 import com.better.heybox.App;
+import com.better.heybox.HeyboxTargets;
 import com.better.heybox.MainModule;
 
-/**
- * 推广贴屏蔽：按 content_type 28/29 及指定官方账号过滤帖子。
- *
- * <p>宿主 BBSLinkObj 列表有两条渲染链，缺一不可：
- * b.L（话题详情/概念链的 WaterfallLinkAdapter 专用）与
- * b.N（社区/搜索/新闻/频道列表的共用核心，b.M 及各 viewholderbinder 均转调它）。
- * 两方法参数不同处仅在：L 的第 2 参是独立的用户对象、ViewHolder 在第 3 参；
- * N 无用户参数、ViewHolder 在第 0 参。</p>
- */
+import io.github.libxposed.api.XposedInterface;
+
 public final class PromotePostHook {
 
     private final MainModule module;
+
+    private static final ConcurrentHashMap<Class<?>, Boolean> ITEM_VIEW_CLASSES = new ConcurrentHashMap<>();
 
     public PromotePostHook(MainModule module) {
         this.module = module;
     }
 
     public void install(ClassLoader cl) {
-        hookRenderMethod(cl, "L", 5);
-        hookRenderMethod(cl, "N", 7);
+        HeyboxTargets.install(PromoteDetector.TARGET_BBS_RENDER, this::hookOne);
     }
 
-    private void hookRenderMethod(ClassLoader cl, String methodName, int paramCount) {
-        try {
-            Class<?> clazz = Class.forName("com.max.xiaoheihe.module.bbs.utils.b", false, cl);
-            for (Method m : clazz.getDeclaredMethods()) {
-                Class<?>[] p = m.getParameterTypes();
-                if (methodName.equals(m.getName()) && p.length == paramCount
-                        && "BBSLinkObj".equals(p[1].getSimpleName())) {
-                    final boolean hasUserArg = "L".equals(methodName);
-                    module.hook(m).intercept(chain -> {
-                        Object bbsLink = chain.getArg(1);
-                        Object viewHolder = chain.getArg(hasUserArg ? 3 : 0);
-                        try {
-                            if (module.isEnabled(App.KEY_PROMOTE_AD, true)) {
-                                String ct = getContentType(bbsLink);
-                                if ("28".equals(ct) || "29".equals(ct)) {
-                                    module.logd(Log.INFO, module.TAG, "屏蔽推广贴 (content_type=" + ct + ")");
-                                    hideItemView(viewHolder);
-                                    return null; // 跳过原渲染
-                                }
-                                Object userInfo = hasUserArg ? chain.getArg(2) : getUser(bbsLink);
-                                String username = getUsername(userInfo);
-                                if ("小黑盒推广".equals(username) || "商城看板娘".equals(username)) {
-                                    module.logd(Log.INFO, module.TAG, "屏蔽账号帖子: " + username);
-                                    hideItemView(viewHolder);
-                                    return null;
-                                }
-                            }
-                        } catch (Throwable t) {
-                            module.logd(Log.WARN, module.TAG, "推广贴判断异常，放行: " + t);
-                        }
-                        // 委托发帖过滤
-                        PostFilterHook postFilter = PostFilterHook.get();
-                        if (postFilter != null && postFilter.onRenderBind(bbsLink, viewHolder)) {
-                            return null;
-                        }
-                        restoreItemView(viewHolder);
-                        return chain.proceed();
-                    });
-                    module.logd(Log.INFO, module.TAG, "✔ 推广贴屏蔽 Hook 已安装（" + methodName + "）");
-                    return;
-                }
-            }
-            module.logd(Log.WARN, module.TAG, "✘ 未找到推广贴渲染方法 " + methodName);
-        } catch (Throwable t) {
-            module.logd(Log.ERROR, module.TAG, "✘ 推广贴屏蔽 Hook 失败（" + methodName + "）", t);
-        }
+    private void hookOne(Method method) {
+        module.hook(method).intercept(this::onRender);
+        module.logd(Log.INFO, module.TAG, "\u2714 \u63a8\u5e7f\u5e16 Hook \u5df2\u5b89\u88c5: "
+                + method.getDeclaringClass().getName() + "#" + method.getName()
+                + "/" + method.getParameterCount());
     }
 
-    private String getContentType(Object bbsLink) {
+    private Object onRender(XposedInterface.Chain chain) throws Throwable {
+        List<Object> args = chain.getArgs();
+        Object bbsLink = findBbsLink(args);
+        Object viewHolder = findViewHolder(args);
         try {
-            Method getter = bbsLink.getClass().getMethod("getContent_type");
-            Object v = getter.invoke(bbsLink);
-            return v == null ? null : String.valueOf(v);
-        } catch (Throwable t) {
-            return null;
-        }
-    }
-
-    private Object getUser(Object bbsLink) {
-        try {
-            return bbsLink == null ? null : bbsLink.getClass().getMethod("getUser").invoke(bbsLink);
-        } catch (Throwable t) {
-            return null;
-        }
-    }
-
-    private String getUsername(Object userInfo) {
-        try {
-            if (userInfo == null) {
+            if (bbsLink != null && module.isEnabled(App.KEY_PROMOTE_AD, true)
+                    && PromoteDetector.isPromote(bbsLink)) {
+                String reason = PromoteDetector.matchReason(bbsLink);
+                String detail = module.isEnabled(App.KEY_VERBOSE_LOG, false)
+                        ? " | " + PromoteDetector.describe(bbsLink) : "";
+                module.logd(Log.INFO, module.TAG,
+                        "\u5c4f\u853d\u5185\u5bb9[\u65e7 BBS \u5217\u8868] \u539f\u56e0=" + (reason == null ? "\u63a8\u5e7f\u5185\u5bb9" : reason)
+                                + detail);
+                FeedItemHider.hide(FeedItemHider.getItemView(viewHolder));
                 return null;
             }
-            Method getter = userInfo.getClass().getMethod("getUsername");
-            Object v = getter.invoke(userInfo);
-            return v == null ? null : String.valueOf(v);
         } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "\u63a8\u5e7f\u5e16\u5224\u65ad\u5f02\u5e38\uff0c\u653e\u884c: " + t);
+        }
+        PostFilterHook postFilter = PostFilterHook.get();
+        if (postFilter != null && bbsLink != null
+                && postFilter.onRenderBind(bbsLink, viewHolder)) {
             return null;
         }
-    }
-
-    private void hideItemView(Object viewHolder) {
-        FeedItemHider.hide(FeedItemHider.getItemView(viewHolder));
-    }
-
-    /** 被隐藏的 ViewHolder 复用给正常帖子时恢复可见性，否则该帖子连带消失 */
-    private void restoreItemView(Object viewHolder) {
         FeedItemHider.restore(viewHolder);
+        return chain.proceed();
+    }
+
+    private static Object findBbsLink(List<Object> args) {
+        for (Object arg : args) {
+            if (arg == null) {
+                continue;
+            }
+            if (isInstanceNamed(arg.getClass(), PromoteDetector.BBS_LINK_OBJ)) {
+                return arg;
+            }
+        }
+        return null;
+    }
+
+    private static Object findViewHolder(List<Object> args) {
+        for (Object arg : args) {
+            if (arg == null) {
+                continue;
+            }
+            if (hasItemView(arg.getClass()) && FeedItemHider.getItemView(arg) != null) {
+                return arg;
+            }
+        }
+        return null;
+    }
+
+    private static boolean hasItemView(Class<?> cls) {
+        Boolean cached = ITEM_VIEW_CLASSES.get(cls);
+        if (cached != null) {
+            return cached;
+        }
+        boolean found;
+        try {
+            cls.getField("itemView");
+            found = true;
+        } catch (Throwable t) {
+            found = false;
+        }
+        ITEM_VIEW_CLASSES.put(cls, found);
+        return found;
+    }
+
+    private static boolean isInstanceNamed(Class<?> cls, String name) {
+        Class<?> walk = cls;
+        while (walk != null && walk != Object.class) {
+            if (name.equals(walk.getName())) {
+                return true;
+            }
+            walk = walk.getSuperclass();
+        }
+        return false;
     }
 }

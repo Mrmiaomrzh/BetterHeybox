@@ -174,7 +174,10 @@ public final class SettingsEntryHook {
                     new SwitchDef("屏蔽信息流广告", null, App.KEY_FEED_AD, true, false),
                     new SwitchDef("屏蔽气泡广告", null, App.KEY_BUBBLE_AD, true, false),
                     new SwitchDef("屏蔽角标广告", null, App.KEY_CORNER_AD, true, false),
-                    new SwitchDef("屏蔽推广贴", null, App.KEY_PROMOTE_AD, true, false),
+                    new SwitchDef("屏蔽推广贴", "首页推广卡、广告横幅、社区推广贴与广告位",
+                            App.KEY_PROMOTE_AD, true, false),
+                    new SwitchDef("诊断：记录首页流条目", "把每条首页流的判定信息写进日志",
+                            App.KEY_FLOW_DIAGNOSE, false, false),
             }),
             new SettingsGroup("视频下载", new SwitchDef[]{
                     new SwitchDef("下载视频", "视频上显示下载入口", App.KEY_VIDEO_DOWNLOAD, true, false),
