@@ -926,7 +926,8 @@ public final class SettingsEntryHook {
         String providerId = module.getString(App.KEY_AI_PROVIDER, "");
         SettingsGroup group = new SettingsGroup("发帖过滤", new SwitchDef[]{
                 new SwitchDef("屏蔽视频帖",
-                        "信息流中隐藏视频帖（首页推荐/瀑布流/列表）；按宿主 link_style 与 has_video 判定",
+                        "信息流中隐藏视频帖（首页推荐/瀑布流/社区/话题/榜单）；"
+                                + "按宿主 link_style 与 has_video 判定",
                         App.KEY_BLOCK_VIDEO_POST, false, false),
                 new SwitchDef("屏蔽低等级发帖",
                         minLevel > 0 ? "当前：屏蔽 Lv" + minLevel + " 以下"

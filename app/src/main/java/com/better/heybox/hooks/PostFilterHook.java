@@ -10,6 +10,7 @@ import java.util.WeakHashMap;
 import java.util.regex.Pattern;
 
 import com.better.heybox.App;
+import com.better.heybox.HeyboxTargets;
 import com.better.heybox.MainModule;
 import io.github.libxposed.api.XposedInterface;
 
@@ -88,8 +89,155 @@ public final class PostFilterHook {
     public void install(ClassLoader cl) {
         hookWaterfallCard(cl);
         hookNewsListAdapter(cl);
+        hookBbsLinkListAdapter(cl);
+        hookBbsLinkListGetter(cl);
         hookFeedsModelDeserializer(cl);
         hookRecommendFlowController(cl);
+    }
+
+    // ---------- BBS post lists ----------
+
+    /** Hooks the shared data source of BBS post lists. */
+    private void hookBbsLinkListGetter(ClassLoader cl) {
+        try {
+            HeyboxTargets.install(PromoteDetector.TARGET_BBS_LINKS_GETTER, method -> {
+                module.hook(method).intercept(chain -> {
+                    Object raw = chain.proceed();
+                    if (!(raw instanceof List) || !hasSyncRule() || isExcludedListCaller()) {
+                        return raw;
+                    }
+                    List<?> filtered = filterBbsLinks((List<?>) raw);
+                    return filtered == null ? raw : filtered;
+                });
+                module.logd(Log.INFO, module.TAG, "✔ 帖子列表数据层 Hook 已安装: "
+                        + method.getDeclaringClass().getName() + "#" + method.getName());
+            });
+            com.better.heybox.Checkpoint.mark("发帖过滤列表数据层安装: ok");
+        } catch (Throwable t) {
+            com.better.heybox.Checkpoint.mark("发帖过滤列表数据层安装失败: %s", String.valueOf(t));
+            module.logd(Log.WARN, module.TAG, "✘ 发帖过滤列表数据层 Hook 失败: " + t);
+        }
+    }
+
+    /** Hooks adapter bind as a fallback for the data layer. */
+    private void hookBbsLinkListAdapter(ClassLoader cl) {
+        try {
+            int[] installed = {0};
+            HeyboxTargets.installGroup(PromoteDetector.TARGET_BBS_LIST_BIND, method -> {
+                module.hook(method).intercept(this::onBbsListBind);
+                installed[0]++;
+                module.logd(Log.INFO, module.TAG, "✔ 帖子列表 Hook 已安装: "
+                        + method.getDeclaringClass().getName() + "#" + method.getName());
+            });
+            com.better.heybox.Checkpoint.mark("发帖过滤帖子列表安装: %d 处（异步补挂见 report）", installed[0]);
+        } catch (Throwable t) {
+            com.better.heybox.Checkpoint.mark("发帖过滤帖子列表安装失败: %s", String.valueOf(t));
+            module.logd(Log.WARN, module.TAG, "✘ 发帖过滤帖子列表 Hook 失败: " + t);
+        }
+    }
+
+    private Object onBbsListBind(XposedInterface.Chain chain) throws Throwable {
+        View itemView = FeedItemHider.getItemView(chain.getArg(0));
+        if (itemView != null) {
+            FeedItemHider.restore(itemView);
+        }
+        Object data = chain.getArg(1);
+        try {
+            if (isPostLike(data) && !isExcludedPageContext(itemView)) {
+                if (applySyncFilters(data, "社区列表")) {
+                    FeedItemHider.hide(itemView);
+                    return null;
+                }
+                aiCheck(data, postCacheKey(data), itemView);
+            }
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "社区列表过滤异常，放行: " + t);
+        }
+        return chain.proceed();
+    }
+
+    /** Drops blocked entries. */
+    private List<?> filterBbsLinks(List<?> raw) {
+        List<Object> keep = new ArrayList<>(raw.size());
+        int blocked = 0;
+        for (Object item : raw) {
+            if (!isPostLike(item)) {
+                keep.add(item);
+                continue;
+            }
+            String reason = blockReason(item, false);
+            if (reason == null) {
+                keep.add(item);
+                continue;
+            }
+            blocked++;
+            logBlocked("社区列表(数据层)", item, reason);
+        }
+        if (blocked == 0) {
+            return null;
+        }
+        module.logd(Log.INFO, module.TAG, "屏蔽内容[社区列表] 本页共屏蔽 " + blocked + " 条");
+        return keep;
+    }
+
+    /** True when the entry looks like a post. */
+    private boolean isPostLike(Object item) {
+        return item != null && safeInvoke(item, "getUser") != null;
+    }
+
+    /** Excluded pages, resolved from the call stack. */
+    private boolean isExcludedListCaller() {
+        try {
+            for (StackTraceElement frame : Thread.currentThread().getStackTrace()) {
+                if (isExcludedPageName(frame.getClassName())) {
+                    return true;
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return false;
+    }
+
+    /** Excluded pages, resolved from the item view context. */
+    private boolean isExcludedPageContext(View itemView) {
+        if (itemView == null) {
+            return false;
+        }
+        try {
+            android.content.Context context = itemView.getContext();
+            for (int depth = 0; depth < 8 && context != null; depth++) {
+                if (isExcludedPageName(context.getClass().getName())) {
+                    return true;
+                }
+                if (!(context instanceof android.content.ContextWrapper)) {
+                    break;
+                }
+                android.content.Context base = ((android.content.ContextWrapper) context).getBaseContext();
+                if (base == null || base == context) {
+                    break;
+                }
+                context = base;
+            }
+        } catch (Throwable ignored) {
+        }
+        return false;
+    }
+
+    private boolean isExcludedPageName(String name) {
+        return name != null && (name.startsWith("com.max.xiaoheihe.module.favour.")
+                || name.startsWith("com.max.xiaoheihe.module.bbs.DraftListActivity")
+                || name.startsWith("com.max.xiaoheihe.module.account.specificsearch."));
+    }
+
+    /** True when at least one filter is on. */
+    private boolean hasSyncRule() {
+        if (module.isEnabled(App.KEY_PROMOTE_AD, true)
+                || module.isEnabled(App.KEY_BLOCK_VIDEO_POST, false)
+                || module.isEnabled(App.KEY_POST_NO_LEVEL, false)) {
+            return true;
+        }
+        return parseIntSafe(module.getString(App.KEY_POST_MIN_LEVEL, "0")) > 0
+                || !keywordMatchers().isEmpty();
     }
 
     private void hookRecommendFlowController(ClassLoader cl) {
@@ -141,31 +289,24 @@ public final class PostFilterHook {
         java.util.Iterator<?> it = list.iterator();
         while (it.hasNext()) {
             Object item = it.next();
-            if (item == null || !isPostFlowModel(item)) {
+            if (item == null) {
+                continue;
+            }
+            String reason = blockReason(item, true);
+            if (reason != null) {
+                logBlocked("首页流列表", item, reason);
+                try {
+                    it.remove();
+                } catch (Throwable t) {
+                    return filteredCopy(list, aiEnabled);
+                }
+                continue;
+            }
+            if (!isPostFlowModel(item)) {
                 continue;
             }
             Object link = safeInvoke(item, "getLinkContent");
             String title = link == null ? "" : safeGet(link, "getTitle");
-            String desc = link == null ? "" : safeGet(link, "getDescription");
-            if (videoBlocked(item)) {
-                module.logd(Log.INFO, module.TAG, "屏蔽视频帖 (首页流列表) " + abbreviate(title));
-                try {
-                    it.remove();
-                } catch (Throwable t) {
-                    return filteredCopy(list, aiEnabled);
-                }
-                continue;
-            }
-            if (levelBlocked(item) || keywordBlockedText(title, desc)) {
-                module.logd(Log.INFO, module.TAG, "发帖过滤命中 (首页流列表, "
-                        + (levelBlocked(item) ? "lv" : "kw") + ") " + abbreviate(title));
-                try {
-                    it.remove();
-                } catch (Throwable t) {
-                    return filteredCopy(list, aiEnabled);
-                }
-                continue;
-            }
             if (aiEnabled && !title.isEmpty()
                     && AIClickbaitChecker.getCached(title) == null) {
                 AIClickbaitChecker.requestVerdicts(module, title, title, listAiCallback);
@@ -178,16 +319,19 @@ public final class PostFilterHook {
     private List<?> filteredCopy(List list, boolean aiEnabled) {
         List<Object> keep = new ArrayList<>(list.size());
         for (Object item : list) {
-            if (item == null || !isPostFlowModel(item)) {
+            if (item == null) {
+                keep.add(item);
+                continue;
+            }
+            if (blockReason(item, true) != null) {
+                continue;
+            }
+            if (!isPostFlowModel(item)) {
                 keep.add(item);
                 continue;
             }
             Object link = safeInvoke(item, "getLinkContent");
             String title = link == null ? "" : safeGet(link, "getTitle");
-            String desc = link == null ? "" : safeGet(link, "getDescription");
-            if (videoBlocked(item) || levelBlocked(item) || keywordBlockedText(title, desc)) {
-                continue;
-            }
             if (aiEnabled && !title.isEmpty()
                     && AIClickbaitChecker.getCached(title) == null) {
                 AIClickbaitChecker.requestVerdicts(module, title, title, aiCallback);
@@ -256,21 +400,22 @@ public final class PostFilterHook {
     private Object filterFlowModel(XposedInterface.Chain chain) throws Throwable {
         Object result = chain.proceed();
         try {
-            if (result == null || !isPostFlowModel(result)) {
+            if (result != null && module.isEnabled(App.KEY_FLOW_DIAGNOSE, false)) {
+                module.logd(Log.INFO, module.TAG, "首页流条目 " + PromoteDetector.describe(result));
+            }
+            if (result == null) {
+                return result;
+            }
+            String reason = blockReason(result, true);
+            if (reason != null) {
+                logBlocked("首页流", result, reason);
+                return null;
+            }
+            if (!isPostFlowModel(result)) {
                 return result;
             }
             Object link = safeInvoke(result, "getLinkContent");
             String title = link == null ? "" : safeGet(link, "getTitle");
-            String desc = link == null ? "" : safeGet(link, "getDescription");
-            if (videoBlocked(result)) {
-                module.logd(Log.INFO, module.TAG, "屏蔽视频帖 (首页流) " + abbreviate(title));
-                return null;
-            }
-            if (levelBlocked(result) || keywordBlockedText(title, desc)) {
-                module.logd(Log.INFO, module.TAG, "发帖过滤命中 (首页流, "
-                        + (levelBlocked(result) ? "lv" : "kw") + ") " + abbreviate(title));
-                return null;
-            }
             if (module.isEnabled(App.KEY_POST_AI_ENABLED, false) && !title.isEmpty()) {
                 Boolean verdict = AIClickbaitChecker.getCached(title);
                 if (verdict != null && verdict) {
@@ -459,15 +604,9 @@ public final class PostFilterHook {
             }
             Object link = safeInvoke(model, "getLinkContent");
             String title = link == null ? "" : safeGet(link, "getTitle");
-            String desc = link == null ? "" : safeGet(link, "getDescription");
-            if (videoBlocked(model)) {
-                module.logd(Log.INFO, module.TAG, "屏蔽视频帖 (首页卡片) " + abbreviate(title));
-                FeedItemHider.hide(cardView);
-                return result;
-            }
-            if (levelBlocked(model) || keywordBlockedText(title, desc)) {
-                module.logd(Log.INFO, module.TAG, "发帖过滤命中 (首页卡片, "
-                        + (levelBlocked(model) ? "lv" : "kw") + ") " + abbreviate(title));
+            String reason = blockReason(model, false);
+            if (reason != null) {
+                logBlocked("首页卡片", model, reason);
                 FeedItemHider.hide(cardView);
                 return result;
             }
@@ -494,34 +633,24 @@ public final class PostFilterHook {
 
     private void hookNewsListAdapter(ClassLoader cl) {
         try {
-            Class<?> a = Class.forName("com.max.xiaoheihe.module.news.adapter.a", false, cl);
-            Class<?> se = Class.forName("com.max.hbcommon.base.adapter.s$e", false, cl);
-            Class<?> fcbo = Class.forName(
-                    "com.max.xiaoheihe.bean.news.FeedsContentBaseObj", false, cl);
-            Method y = a.getDeclaredMethod("y", se, fcbo);
-            module.hook(y).intercept(chain -> {
-                Object holder = chain.getArg(0);
-                View itemView;
-                try {
-                    itemView = holder == null ? null
-                            : (View) se.getField("itemView").get(holder);
-                } catch (Throwable t) {
-                    itemView = null;
-                }
-                if (itemView != null) {
-                    FeedItemHider.restore(itemView);
-                }
-                Object data = chain.getArg(1);
-                try {
-                    if (applySyncFilters(data)) {
-                        FeedItemHider.hide(itemView);
-                        return null; // 跳过原绑定
+            HeyboxTargets.install(PromoteDetector.TARGET_FEEDS_BIND, method -> {
+                module.hook(method).intercept(chain -> {
+                    View itemView = FeedItemHider.getItemView(chain.getArg(0));
+                    if (itemView != null) {
+                        FeedItemHider.restore(itemView);
                     }
-                    aiCheck(data, postCacheKey(data), itemView);
-                } catch (Throwable t) {
-                    module.logd(Log.WARN, module.TAG, "列表过滤异常，放行: " + t);
-                }
-                return chain.proceed();
+                    Object data = chain.getArg(1);
+                    try {
+                        if (applySyncFilters(data)) {
+                            FeedItemHider.hide(itemView);
+                            return null;
+                        }
+                        aiCheck(data, postCacheKey(data), itemView);
+                    } catch (Throwable t) {
+                        module.logd(Log.WARN, module.TAG, "列表过滤异常，放行: " + t);
+                    }
+                    return chain.proceed();
+                });
             });
             com.better.heybox.Checkpoint.mark("发帖过滤列表 Hook 安装: ok");
         } catch (Throwable t) {
@@ -533,20 +662,16 @@ public final class PostFilterHook {
     // ---------- 同步过滤判定 ----------
 
     private boolean applySyncFilters(Object item) {
-        if (videoBlocked(item)) {
-            module.logd(Log.INFO, module.TAG, "屏蔽视频帖 (ct=" + getContentType(item) + ") "
-                    + abbreviate(safeTitle(item)));
-            return true;
+        return applySyncFilters(item, "列表绑定");
+    }
+
+    private boolean applySyncFilters(Object item, String where) {
+        String reason = blockReason(item, false);
+        if (reason == null) {
+            return false;
         }
-        if (levelBlocked(item)) {
-            module.logd(Log.INFO, module.TAG, "屏蔽低等级发帖 (ct=" + getContentType(item) + ")");
-            return true;
-        }
-        if (keywordBlocked(item)) {
-            module.logd(Log.INFO, module.TAG, "关键词命中屏蔽 (ct=" + getContentType(item) + ")");
-            return true;
-        }
-        return false;
+        logBlocked(where, item, reason);
+        return true;
     }
 
     /** AI 判定入口 */
@@ -607,16 +732,15 @@ public final class PostFilterHook {
 
     private Integer readUserLevel(Object item) {
         try {
-            Object user = item == null ? null
-                    : item.getClass().getMethod("getUser").invoke(item);
+            Object user = safeInvoke(item, "getUser");
             if (user == null) {
                 return null;
             }
-            Object info = user.getClass().getMethod("getLevel_info").invoke(user);
+            Object info = safeInvoke(user, "getLevel_info");
             if (info == null) {
                 return null;
             }
-            Object lv = info.getClass().getMethod("getLevel").invoke(info);
+            Object lv = safeInvoke(info, "getLevel");
             if (lv == null) {
                 return null;
             }
@@ -628,38 +752,146 @@ public final class PostFilterHook {
 
     // ---------- 关键词过滤 ----------
 
-    private boolean keywordBlocked(Object item) {
+    /** Matches the configured keywords against the entry. */
+    private String keywordHit(Object item) {
         if (item == null) {
-            return false;
+            return null;
         }
-        return keywordBlockedText(safeTitle(item), safeText(item));
-    }
-
-    /** 共用匹配核心 */
-    private boolean keywordBlockedText(String title, String text) {
         List<Object> matchers = keywordMatchers();
         if (matchers.isEmpty()) {
-            return false;
+            return null;
         }
-        if ((title == null || title.isEmpty()) && (text == null || text.isEmpty())) {
-            return false;
+        String hit = matchAny(matchers, safeTitle(item), safeText(item),
+                safeGet(item, "getDescription"));
+        if (hit != null) {
+            return hit;
         }
-        String titleLower = title == null ? "" : title.toLowerCase();
-        String textLower = text == null ? "" : text.toLowerCase();
+        Object link = safeInvoke(item, "getLinkContent");
+        if (link != null) {
+            return matchAny(matchers, safeGet(link, "getTitle"),
+                    safeGet(link, "getDescription"));
+        }
+        return null;
+    }
+
+    private String keywordHitText(String title, String text) {
+        List<Object> matchers = keywordMatchers();
+        if (matchers.isEmpty()) {
+            return null;
+        }
+        return matchAny(matchers, title, text);
+    }
+
+    /** Returns the first matching keyword. */
+    private String matchAny(List<Object> matchers, String... fields) {
+        boolean hasText = false;
+        String[] lower = new String[fields.length];
+        for (int i = 0; i < fields.length; i++) {
+            String value = fields[i];
+            lower[i] = value == null ? "" : value.toLowerCase();
+            if (!lower[i].isEmpty()) {
+                hasText = true;
+            }
+        }
+        if (!hasText) {
+            return null;
+        }
         for (Object m : matchers) {
             if (m instanceof Pattern) {
-                if (((Pattern) m).matcher(titleLower).find()
-                        || ((Pattern) m).matcher(textLower).find()) {
-                    return true;
+                Pattern pattern = (Pattern) m;
+                for (String value : lower) {
+                    if (pattern.matcher(value).find()) {
+                        return "regex:" + pattern.pattern();
+                    }
                 }
             } else {
                 String kw = (String) m;
-                if (titleLower.contains(kw) || textLower.contains(kw)) {
-                    return true;
+                for (String value : lower) {
+                    if (value.contains(kw)) {
+                        return kw;
+                    }
                 }
             }
         }
-        return false;
+        return null;
+    }
+
+    private boolean promoteBlocked(Object item) {
+        return module.isEnabled(App.KEY_PROMOTE_AD, true) && PromoteDetector.isPromote(item);
+    }
+
+    private String blockReason(Object item, boolean postOnly) {
+        if (item == null) {
+            return null;
+        }
+        if (promoteBlocked(item)) {
+            String reason = PromoteDetector.matchReason(item);
+            return reason == null ? "\u63a8\u5e7f\u5185\u5bb9" : reason;
+        }
+        if (postOnly && !isPostFlowModel(item)) {
+            return null;
+        }
+        if (videoBlocked(item)) {
+            return videoReason(item);
+        }
+        if (levelBlocked(item)) {
+            return levelReason(item);
+        }
+        String keyword = keywordHit(item);
+        return keyword == null ? null : "\u547d\u4e2d\u5173\u952e\u8bcd " + keyword;
+    }
+
+    private void logBlocked(String where, Object item, String reason) {
+        String detail = module.isEnabled(App.KEY_VERBOSE_LOG, false)
+                ? " | " + describeItem(item) : "";
+        module.logd(Log.INFO, module.TAG,
+                "\u5c4f\u853d\u5185\u5bb9[" + where + "] \u539f\u56e0=" + reason + detail);
+    }
+
+    private String describeItem(Object item) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("\u6807\u9898=").append(PromoteDetector.abbreviate(PromoteDetector.title(item)));
+        String author = PromoteDetector.author(item);
+        sb.append(", \u4f5c\u8005=").append(author == null ? "?" : author);
+        String level = PromoteDetector.level(item);
+        if (level != null) {
+            sb.append(", \u7b49\u7ea7=").append(level);
+        }
+        sb.append(", ct=").append(PromoteDetector.contentType(item));
+        return sb.toString();
+    }
+
+    private String videoReason(Object item) {
+        if (isPostFlowModel(item)) {
+            java.lang.reflect.Method hasVideo = hasVideoMethod(item.getClass());
+            if (hasVideo != null) {
+                try {
+                    Object value = hasVideo.invoke(item);
+                    if (value instanceof Boolean && (Boolean) value) {
+                        return "\u89c6\u9891\u5e16\uff08hasVideo()=true\uff09";
+                    }
+                } catch (Throwable ignored) {
+                }
+            }
+            Object style = safeInvoke(item, "getLinkStyle");
+            return "\u89c6\u9891\u5e16\uff08link_style=" + (style == null ? "?" : String.valueOf(style)) + "\uff09";
+        }
+        if (isTruthy(safeGet(item, "getHas_video"))) {
+            return "\u89c6\u9891\u5e16\uff08has_video=1\uff09";
+        }
+        if (!safeGet(item, "getVideo_url").isEmpty()) {
+            return "\u89c6\u9891\u5e16\uff08video_url \u975e\u7a7a\uff09";
+        }
+        return "\u89c6\u9891\u5e16\uff08video_info \u975e\u7a7a\uff09";
+    }
+
+    private String levelReason(Object item) {
+        int min = parseIntSafe(module.getString(App.KEY_POST_MIN_LEVEL, "0"));
+        Integer level = readUserLevel(item);
+        if (level == null) {
+            return "\u65e0\u7b49\u7ea7\u6570\u636e < \u9608\u503c Lv" + min;
+        }
+        return "\u7b49\u7ea7 Lv" + level + " < \u9608\u503c Lv" + min;
     }
 
     /** 条目为小写子串或预编译正则 */
@@ -717,12 +949,43 @@ public final class PostFilterHook {
         return safeGet(item, "getText");
     }
 
+    /** Cached reflective getters. */
+    private final java.util.concurrent.ConcurrentHashMap<Class<?>, java.util.concurrent.ConcurrentHashMap<String, Object>>
+            getterCache = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static final Object NO_METHOD = new Object();
+
+    private Method findGetter(Class<?> cls, String name) {
+        java.util.concurrent.ConcurrentHashMap<String, Object> byName = getterCache.get(cls);
+        if (byName == null) {
+            java.util.concurrent.ConcurrentHashMap<String, Object> created =
+                    new java.util.concurrent.ConcurrentHashMap<>();
+            java.util.concurrent.ConcurrentHashMap<String, Object> prev = getterCache.putIfAbsent(cls, created);
+            byName = prev == null ? created : prev;
+        }
+        Object cached = byName.get(name);
+        if (cached != null) {
+            return cached == NO_METHOD ? null : (Method) cached;
+        }
+        Method found = null;
+        try {
+            found = cls.getMethod(name);
+        } catch (Throwable ignored) {
+        }
+        byName.put(name, found == null ? NO_METHOD : found);
+        return found;
+    }
+
     private String safeGet(Object item, String getter) {
         try {
             if (item == null) {
                 return "";
             }
-            Object v = item.getClass().getMethod(getter).invoke(item);
+            Method method = findGetter(item.getClass(), getter);
+            if (method == null) {
+                return "";
+            }
+            Object v = method.invoke(item);
             return v == null ? "" : String.valueOf(v).trim();
         } catch (Throwable t) {
             return "";
@@ -731,19 +994,13 @@ public final class PostFilterHook {
 
     private Object safeInvoke(Object item, String getter) {
         try {
-            return item == null ? null : item.getClass().getMethod(getter).invoke(item);
+            if (item == null) {
+                return null;
+            }
+            Method method = findGetter(item.getClass(), getter);
+            return method == null ? null : method.invoke(item);
         } catch (Throwable t) {
             return null;
-        }
-    }
-
-    private String getContentType(Object item) {
-        try {
-            Object v = item == null ? null
-                    : item.getClass().getMethod("getContent_type").invoke(item);
-            return v == null ? "?" : String.valueOf(v);
-        } catch (Throwable t) {
-            return "?";
         }
     }
 
