@@ -173,6 +173,9 @@ public class MainModule extends XposedModule {
         Checkpoint.mark(">>> 开始安装 Hook");
         long t0 = SystemClock.elapsedRealtime();
 
+        HeyboxTargets.init(cl, App.resolveAppContext());
+        Checkpoint.mark("目标解析: %s", HeyboxTargets.report().replace('\n', ' '));
+
         PostFilterHook postFilter = new PostFilterHook(this);
         installHook("通用", new GeneralHook(this)::install, cl);
         installHook("广告过滤", new AdFilterHook(this)::install, cl);

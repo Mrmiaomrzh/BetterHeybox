@@ -48,6 +48,7 @@ import com.better.heybox.ConfigBackup;
 import com.better.heybox.DexKitResolver;
 import com.better.heybox.GlassProvider;
 import com.better.heybox.HeyboxPrefs;
+import com.better.heybox.HeyboxTargets;
 import com.better.heybox.LogExport;
 import com.better.heybox.LogRecorder;
 import com.better.heybox.ThemeUtils;
@@ -1049,11 +1050,14 @@ public final class SettingsEntryHook {
         for (int i = 0; i < groups.size(); i++) {
             SettingsGroup g = groups.get(i);
             if (TITLE_GENERAL.equals(g.title)) {
-                SwitchDef[] items = new SwitchDef[g.items.length + 1];
+                SwitchDef[] items = new SwitchDef[g.items.length + 2];
                 System.arraycopy(g.items, 0, items, 0, g.items.length);
                 items[g.items.length] = new SwitchDef(
                         "运行状态", "查看模块运行检查点", null, false, false,
                         true, null, Action.RUNTIME_STATUS);
+                items[g.items.length + 1] = new SwitchDef(
+                        "目标解析状态", "查看混淆名定位结果与判定依据", null, false, false,
+                        true, null, Action.TARGET_STATUS);
                 groups.set(i, new SettingsGroup(g.title, items));
                 return;
             }
@@ -1940,6 +1944,9 @@ public final class SettingsEntryHook {
                         break;
                     case RUNTIME_STATUS:
                         setRowClick(itemCls, item, v -> showEmbeddedRuntimeStatus(activity));
+                        break;
+                    case TARGET_STATUS:
+                        setRowClick(itemCls, item, v -> showTargetStatus(activity));
                         break;
                     case CLEAR_LOG:
                         setRowClick(itemCls, item, v -> confirmClearLogs(activity));
@@ -3397,6 +3404,21 @@ public final class SettingsEntryHook {
             refreshEmbeddedPanel(activity);
         } catch (Throwable t) {
             module.logd(Log.WARN, module.TAG, "清除日志失败: " + t);
+        }
+    }
+
+    private void showTargetStatus(Activity activity) {
+        try {
+            StringBuilder sb = new StringBuilder();
+            sb.append("广告 content_type: ").append(PromoteDetector.contentTypesInfo()).append('\n');
+            sb.append(HeyboxTargets.report());
+            new AlertDialog.Builder(activity)
+                    .setTitle("目标解析状态")
+                    .setMessage(sb.toString())
+                    .setPositiveButton("确定", null)
+                    .show();
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "目标解析状态弹窗失败: " + t);
         }
     }
 

@@ -1,15 +1,15 @@
 package com.better.heybox.hooks;
 
 import android.util.Log;
+
 import java.lang.reflect.Method;
 
 import com.better.heybox.App;
+import com.better.heybox.HeyboxTargets;
 import com.better.heybox.MainModule;
+
 import io.github.libxposed.api.XposedInterface;
 
-/**
- * 广告过滤：开屏广告 / 信息流广告（Gson 反序列化过滤）/ 气泡广告 / 角标广告。
- */
 public final class AdFilterHook {
 
     private final MainModule module;
@@ -19,50 +19,72 @@ public final class AdFilterHook {
     }
 
     public void install(ClassLoader cl) {
-        hookOpenScreenAd(cl);
+        hookOpenScreenAd();
         hookFeedAds(cl);
-        hookBubbleAndCornerAds(cl);
+        hookBubbleAd();
+        hookCornerAd();
     }
 
-    private void hookOpenScreenAd(ClassLoader cl) {
-        try {
-            Class<?> clazz = Class.forName("com.max.xiaoheihe.module.ads.e", false, cl);
-            Method g = clazz.getDeclaredMethod("g", boolean.class);
-            module.hook(g).intercept(chain -> {
+    private void hookOpenScreenAd() {
+        HeyboxTargets.install(PromoteDetector.TARGET_ADS_SPLASH, method -> {
+            module.hook(method).intercept(chain -> {
                 if (module.isEnabled(App.KEY_OPEN_SCREEN, true)) {
-                    module.logd(Log.INFO, module.TAG, "拦截开屏广告 e.g()");
+                    module.logd(Log.INFO, module.TAG, "\u5c4f\u853d\u5f00\u5c4f\u5e7f\u544a | \u76ee\u6807=" + name(method)
+                            + " [\u6765\u6e90=" + HeyboxTargets.sourceOf(PromoteDetector.TARGET_ADS_SPLASH) + "]");
                     return null;
                 }
                 return chain.proceed();
             });
-            module.logd(Log.INFO, module.TAG, "✔ 开屏广告 Hook 已安装");
-        } catch (Throwable t) {
-            module.logd(Log.ERROR, module.TAG, "✘ 开屏广告 Hook 失败", t);
-        }
+            module.logd(Log.INFO, module.TAG, "\u2714 \u5f00\u5c4f\u5e7f\u544a Hook \u5df2\u5b89\u88c5 " + name(method));
+        });
+    }
+
+    private void hookBubbleAd() {
+        HeyboxTargets.install(PromoteDetector.TARGET_ADS_BUBBLE, method -> {
+            module.hook(method).intercept(chain -> {
+                if (module.isEnabled(App.KEY_BUBBLE_AD, true)) {
+                    module.logd(Log.INFO, module.TAG, "\u5c4f\u853d\u6c14\u6ce1\u5e7f\u544a | \u76ee\u6807=" + name(method)
+                            + " [\u6765\u6e90=" + HeyboxTargets.sourceOf(PromoteDetector.TARGET_ADS_BUBBLE) + "]");
+                    return null;
+                }
+                return chain.proceed();
+            });
+            module.logd(Log.INFO, module.TAG, "\u2714 \u6c14\u6ce1\u5e7f\u544a Hook \u5df2\u5b89\u88c5 " + name(method));
+        });
+    }
+
+    private void hookCornerAd() {
+        HeyboxTargets.install(PromoteDetector.TARGET_ADS_CORNER, method -> {
+            module.hook(method).intercept(chain -> {
+                if (module.isEnabled(App.KEY_CORNER_AD, true)) {
+                    module.logd(Log.INFO, module.TAG, "\u5c4f\u853d\u89d2\u6807\u5e7f\u544a\u62c9\u53d6 | \u76ee\u6807=" + name(method)
+                            + " [\u6765\u6e90=" + HeyboxTargets.sourceOf(PromoteDetector.TARGET_ADS_CORNER) + "]");
+                    return null;
+                }
+                return chain.proceed();
+            });
+            module.logd(Log.INFO, module.TAG, "\u2714 \u89d2\u6807\u5e7f\u544a Hook \u5df2\u5b89\u88c5 " + name(method));
+        });
     }
 
     private void hookFeedAds(ClassLoader cl) {
         try {
             Class<?> clazz = Class.forName("com.max.xiaoheihe.network.gson.FeedsContentDeserializer", false, cl);
-            // 必须用小黑盒的 classloader 加载 gson（单参 Class.forName 会用模块自己的 classloader）
             Class<?> jsonElement = Class.forName("com.google.gson.JsonElement", false, cl);
             Class<?> type = Class.forName("java.lang.reflect.Type", false, cl);
             Class<?> ctx = Class.forName("com.google.gson.JsonDeserializationContext", false, cl);
-
-            try {
-                Method a = clazz.getDeclaredMethod("a", jsonElement, type, ctx);
-                module.hook(a).intercept(chain -> filterFeedAd(chain));
-                module.logd(Log.INFO, module.TAG, "✔ 信息流广告 Hook 已安装 (a)");
-            } catch (NoSuchMethodException ignored) {
+            int installed = 0;
+            for (String methodName : new String[]{"a", "deserialize"}) {
+                try {
+                    Method method = clazz.getDeclaredMethod(methodName, jsonElement, type, ctx);
+                    module.hook(method).intercept(chain -> filterFeedAd(chain));
+                    installed++;
+                } catch (NoSuchMethodException ignored) {
+                }
             }
-            try {
-                Method deserialize = clazz.getDeclaredMethod("deserialize", jsonElement, type, ctx);
-                module.hook(deserialize).intercept(chain -> filterFeedAd(chain));
-                module.logd(Log.INFO, module.TAG, "✔ 信息流广告 Hook 已安装 (deserialize)");
-            } catch (NoSuchMethodException ignored) {
-            }
+            module.logd(Log.INFO, module.TAG, "\u2714 \u4fe1\u606f\u6d41\u5e7f\u544a Hook \u5df2\u5b89\u88c5 (" + installed + " \u5904)");
         } catch (Throwable t) {
-            module.logd(Log.ERROR, module.TAG, "✘ 信息流广告 Hook 失败", t);
+            module.logd(Log.ERROR, module.TAG, "\u2718 \u4fe1\u606f\u6d41\u5e7f\u544a Hook \u5931\u8d25", t);
         }
     }
 
@@ -76,19 +98,22 @@ public final class AdFilterHook {
                         Object ct = obj.getClass().getMethod("get", String.class).invoke(obj, "content_type");
                         if (ct != null) {
                             String ctStr = (String) ct.getClass().getMethod("getAsString").invoke(ct);
-                            if ("23".equals(ctStr)) {
-                                module.logd(Log.INFO, module.TAG, "过滤信息流广告条目 (content_type=23)");
+                            if (PromoteDetector.contentTypes().contains(ctStr)) {
+                                String detail = module.isEnabled(App.KEY_VERBOSE_LOG, false)
+                                        ? " | " + describeFeedEntry(obj) : "";
+                                module.logd(Log.INFO, module.TAG,
+                                        "\u5c4f\u853d\u4fe1\u606f\u6d41\u5e7f\u544a\u6761\u76ee \u539f\u56e0=content_type=" + ctStr
+                                                + " \u5c5e\u4e8e\u5bbf\u4e3b\u5e7f\u544a\u5e38\u91cf\u8868" + detail);
                                 return createEmptyFeedObj(chain.getThisObject());
                             }
                         }
                     }
                 }
             } catch (Throwable t) {
-                module.logd(Log.WARN, module.TAG, "信息流广告判断异常，放行: " + t);
+                module.logd(Log.WARN, module.TAG, "\u4fe1\u606f\u6d41\u5e7f\u544a\u5224\u65ad\u5f02\u5e38\uff0c\u653e\u884c: " + t);
             }
         }
         Object result = chain.proceed();
-        // 委托发帖过滤
         PostFilterHook postFilter = PostFilterHook.get();
         if (postFilter != null && result != null) {
             Object replacement = postFilter.onDeserialized(result);
@@ -97,6 +122,31 @@ public final class AdFilterHook {
             }
         }
         return result;
+    }
+
+    private String describeFeedEntry(Object jsonObject) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("\u6807\u9898=").append(jsonField(jsonObject, "title"));
+        sb.append(", \u4f5c\u8005=").append(jsonField(jsonObject, "author"));
+        sb.append(", link_id=").append(jsonField(jsonObject, "link_id"));
+        return sb.toString();
+    }
+
+    private String jsonField(Object jsonObject, String name) {
+        if (jsonObject == null) {
+            return "?";
+        }
+        try {
+            Object field = jsonObject.getClass().getMethod("get", String.class)
+                    .invoke(jsonObject, name);
+            if (field == null) {
+                return "-";
+            }
+            Object text = field.getClass().getMethod("getAsString").invoke(field);
+            return PromoteDetector.abbreviate(text == null ? null : String.valueOf(text));
+        } catch (Throwable t) {
+            return "-";
+        }
     }
 
     private Object createEmptyFeedObj(Object thisObj) {
@@ -112,88 +162,13 @@ public final class AdFilterHook {
             }
             return empty;
         } catch (Throwable t) {
-            module.logd(Log.WARN, module.TAG, "创建空 FeedsContentBaseObj 失败: " + t);
+            module.logd(Log.WARN, module.TAG, "\u521b\u5efa\u7a7a FeedsContentBaseObj \u5931\u8d25: " + t);
             return null;
         }
     }
 
-    private void hookBubbleAndCornerAds(ClassLoader cl) {
-        Class<?> clazz;
-        Class<?> callback;
-        try {
-            clazz = Class.forName("com.max.xiaoheihe.module.ads.h", false, cl);
-            callback = Class.forName("com.max.xiaoheihe.utils.x0$g", false, cl);
-        } catch (Throwable t) {
-            module.logd(Log.ERROR, module.TAG, "✘ 未找到 module.ads.h / x0$g，气泡与角标广告 Hook 跳过", t);
-            return;
-        }
-        hookBubbleAd(clazz, cl);
-        hookCornerAd(clazz, callback);
-    }
-
-    /**
-     * 跨版本候选：{方法名, 回调内部类全名}
-     * <p>1.3.395 做了一次成段混淆重排，module.ads.h 的方法从 10 个扩到 30 个：
-     * <pre>
-     *   394 h(x0$g)  -> 395 i(x0$g)      广告拉取（签名不变，可靠）
-     *   394 l(h$g)   -> 395 s(h$i)       气泡展示（方法名与内部类同时改名）
-     * </pre>
-     * 注意 395 里 h$g 仍然存在，但已是角标广告相关的新类型，因此旧签名不会误命中，只会落空。
-     */
-    private void hookBubbleAd(Class<?> clazz, ClassLoader cl) {
-        final String[][] candidates = {
-                {"s", "com.max.xiaoheihe.module.ads.h$i"},   // 1.3.395
-                {"l", "com.max.xiaoheihe.module.ads.h$g"},   // 1.3.393 / 1.3.394
-        };
-        for (String[] cand : candidates) {
-            final String methodName = cand[0];
-            final String innerName = cand[1];
-            try {
-                Class<?> inner = Class.forName(innerName, false, cl);
-                Method m = clazz.getDeclaredMethod(methodName, inner);
-                module.hook(m).intercept(chain -> {
-                    if (module.isEnabled(App.KEY_BUBBLE_AD, true)) {
-                        module.logd(Log.INFO, module.TAG, "拦截气泡广告 h." + methodName + "()");
-                        return null;
-                    }
-                    return chain.proceed();
-                });
-                module.logd(Log.INFO, module.TAG, "✔ 气泡广告 Hook 已安装 ("
-                        + methodName + "(" + inner.getSimpleName() + "))");
-                return;
-            } catch (ClassNotFoundException | NoSuchMethodException e) {
-                // 该版本没有这个候选，继续试下一个
-            } catch (Throwable t) {
-                module.logd(Log.WARN, module.TAG, "气泡广告候选 " + methodName + " 安装异常: " + t);
-            }
-        }
-        module.logd(Log.WARN, module.TAG,
-                "✘ 气泡广告 Hook 未安装：s(h$i) / l(h$g) 均不可用，该版本可能又改名了，气泡广告过滤将失效");
-    }
-
-    /** 广告拉取入口：阻断后角标数据源消失。394 = h(x0$g)，395 = i(x0$g) */
-    private void hookCornerAd(Class<?> clazz, Class<?> callback) {
-        final String[] candidates = {"i", "h"};
-        for (String cand : candidates) {
-            final String methodName = cand;
-            try {
-                Method m = clazz.getDeclaredMethod(methodName, callback);
-                module.hook(m).intercept(chain -> {
-                    if (module.isEnabled(App.KEY_CORNER_AD, true)) {
-                        module.logd(Log.INFO, module.TAG, "拦截广告拉取 h." + methodName + "()");
-                        return null;
-                    }
-                    return chain.proceed();
-                });
-                module.logd(Log.INFO, module.TAG, "✔ 角标广告拉取 Hook 已安装 (" + methodName + "(x0$g))");
-                return;
-            } catch (NoSuchMethodException e) {
-                // 该版本没有这个候选，继续试下一个
-            } catch (Throwable t) {
-                module.logd(Log.WARN, module.TAG, "角标广告候选 " + methodName + " 安装异常: " + t);
-            }
-        }
-        module.logd(Log.WARN, module.TAG,
-                "✘ 角标广告 Hook 未安装：i(x0$g) / h(x0$g) 均不可用，该版本可能又改名了，角标广告过滤将失效");
+    private static String name(Method method) {
+        return method.getDeclaringClass().getName() + "#" + method.getName()
+                + "/" + method.getParameterCount();
     }
 }
