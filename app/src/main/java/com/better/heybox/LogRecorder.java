@@ -3,8 +3,11 @@ package com.better.heybox;
 import android.content.Context;
 import android.util.Log;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.InputStream;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -27,6 +30,7 @@ public final class LogRecorder {
 
     private static volatile Context sContext;
     private static volatile boolean sEnabled;
+    private static volatile boolean sVerbose;
     private static final Object LOCK = new Object();
     private static final SimpleDateFormat TIME_FORMAT =
             new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US);
@@ -44,8 +48,19 @@ public final class LogRecorder {
         sEnabled = enabled;
     }
 
+    public static void setVerbose(boolean verbose) {
+        sVerbose = verbose;
+    }
+
+    public static boolean isVerbose() {
+        return sVerbose;
+    }
+
     public static void record(int level, String tag, String msg) {
         if (!sEnabled || msg == null) {
+            return;
+        }
+        if (!sVerbose && level != Log.ERROR) {
             return;
         }
         if (!Logs.shouldLog(level)) {
@@ -56,6 +71,9 @@ public final class LogRecorder {
 
     public static void record(int level, String tag, String msg, Throwable tr) {
         if (!sEnabled) {
+            return;
+        }
+        if (!sVerbose && level != Log.ERROR) {
             return;
         }
         if (!Logs.shouldLog(level)) {
@@ -74,6 +92,91 @@ public final class LogRecorder {
             return null;
         }
         return new File(new File(ctx.getFilesDir(), DIR_NAME), FILE_NAME).getAbsolutePath();
+    }
+
+    public static String readTail(int maxLines) {
+        Context ctx = sContext != null ? sContext : App.resolveAppContext();
+        if (ctx == null) {
+            return null;
+        }
+        File file = new File(new File(ctx.getFilesDir(), DIR_NAME), FILE_NAME);
+        if (!file.isFile() || file.length() == 0) {
+            return null;
+        }
+        try {
+            byte[] data;
+            try (InputStream in = new FileInputStream(file)) {
+                long skip = Math.max(0L, file.length() - 256L * 1024L);
+                long skipped = 0;
+                while (skipped < skip) {
+                    long step = in.skip(skip - skipped);
+                    if (step <= 0) {
+                        break;
+                    }
+                    skipped += step;
+                }
+                ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+                byte[] chunk = new byte[8192];
+                int read;
+                while ((read = in.read(chunk)) != -1) {
+                    buffer.write(chunk, 0, read);
+                }
+                data = buffer.toByteArray();
+            }
+            String text = new String(data, StandardCharsets.UTF_8);
+            String[] lines = text.split("\n");
+            if (lines.length <= maxLines) {
+                return text;
+            }
+            StringBuilder sb = new StringBuilder();
+            for (int i = lines.length - maxLines; i < lines.length; i++) {
+                sb.append(lines[i]).append('\n');
+            }
+            return sb.toString();
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    public static String sizeInfo() {
+        Context ctx = sContext != null ? sContext : App.resolveAppContext();
+        if (ctx == null) {
+            return "?";
+        }
+        File dir = new File(ctx.getFilesDir(), DIR_NAME);
+        long total = 0;
+        int count = 0;
+        for (String name : new String[]{FILE_NAME, BACKUP_NAME}) {
+            File file = new File(dir, name);
+            if (file.isFile()) {
+                total += file.length();
+                count++;
+            }
+        }
+        return count == 0 ? "\u65e0\u65e5\u5fd7\u6587\u4ef6" : count + " \u4e2a\u6587\u4ef6 / " + (total / 1024) + " KB";
+    }
+
+    public static String clear() {
+        synchronized (LOCK) {
+            Context ctx = sContext != null ? sContext : App.resolveAppContext();
+            if (ctx == null) {
+                return null;
+            }
+            File dir = new File(ctx.getFilesDir(), DIR_NAME);
+            long freed = 0;
+            int removed = 0;
+            for (String name : new String[]{FILE_NAME, BACKUP_NAME}) {
+                File file = new File(dir, name);
+                if (!file.isFile()) {
+                    continue;
+                }
+                freed += file.length();
+                if (file.delete()) {
+                    removed++;
+                }
+            }
+            return removed == 0 ? null : removed + " 个文件 / " + (freed / 1024) + " KB";
+        }
     }
 
     /** log.1.txt 备份路径 */

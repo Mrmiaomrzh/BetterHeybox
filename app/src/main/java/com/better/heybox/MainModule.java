@@ -104,6 +104,22 @@ public class MainModule extends XposedModule {
             Context appContext = app instanceof Context ? (Context) app : null;
             if (appContext != null) {
                 HeyboxPrefs.init(appContext);
+            }
+        } catch (Throwable ignored) {
+        }
+        if (isEnabled(App.KEY_DEBUG_NO_DOWNGRADE, false)) {
+            try {
+                HeyboxPrefs.setString(App.KEY_MODULE_VERSION_FLOOR, "0");
+            } catch (Throwable ignored) {
+            }
+            Checkpoint.mark("调试开关开启：已清除模块版本降级限制");
+            logd(Log.WARN, TAG, "调试开关开启：已清除模块版本降级限制，按常规激活");
+            installHooks(param);
+            return;
+        }
+        try {
+            Context appContext = app instanceof Context ? (Context) app : null;
+            if (appContext != null) {
                 String stored = HeyboxPrefs.getString(App.KEY_MODULE_VERSION_FLOOR, null);
                 if (stored != null && !stored.trim().isEmpty()) {
                     floor = Long.parseLong(stored.trim());
@@ -269,6 +285,7 @@ public class MainModule extends XposedModule {
         try {
             boolean logEnabled = isEnabled(App.KEY_LOG, false);
             LogRecorder.setEnabled(logEnabled);
+            LogRecorder.setVerbose(isEnabled(App.KEY_VERBOSE_LOG, false));
             if (logEnabled) {
                 LogRecorder.record(level, tag, msg);
             }
@@ -283,6 +300,7 @@ public class MainModule extends XposedModule {
         try {
             boolean logEnabled = isEnabled(App.KEY_LOG, false);
             LogRecorder.setEnabled(logEnabled);
+            LogRecorder.setVerbose(isEnabled(App.KEY_VERBOSE_LOG, false));
             if (logEnabled) {
                 LogRecorder.record(level, tag, msg, tr);
             }

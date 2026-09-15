@@ -151,6 +151,12 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     /** 发帖过滤：首页信息流屏蔽视频帖 */
     public static final String KEY_BLOCK_VIDEO_POST = "block_video_post";
 
+    /** 诊断：记录首页流条目判定信息 */
+    public static final String KEY_FLOW_DIAGNOSE = "flow_diagnose";
+
+    /** 详细屏蔽日志：屏蔽日志附带标题、作者、等级等帖子信息 */
+    public static final String KEY_VERBOSE_LOG = "verbose_log";
+
     /** 收藏：打开收藏列表发现失效内容时自动清理 */
     public static final String KEY_FAVOUR_AUTO_CLEAN = "favour_auto_clean";
 
@@ -185,6 +191,9 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     /** 免责声明 */
     public static final String KEY_DISCLAIMER_ACCEPTED = "disclaimer_accepted";
     public static final String KEY_MODULE_VERSION_FLOOR = "module_version_floor";
+
+    /** 调试：忽略并清除模块版本降级限制（允许装回更旧的模块） */
+    public static final String KEY_DEBUG_NO_DOWNGRADE = "debug_no_downgrade";
     public static final String KEY_TARGET_HINT_VISIBLE = "target_hint_visible";
 
     // ===== 动态推送（关注作者 / 关键词监控）=====
@@ -266,9 +275,12 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
         m.put(KEY_POST_AI_ENABLED, false);
         m.put(KEY_POST_NO_LEVEL, false);
         m.put(KEY_BLOCK_VIDEO_POST, false);
+        m.put(KEY_FLOW_DIAGNOSE, false);
+        m.put(KEY_VERBOSE_LOG, false);
         m.put(KEY_FAVOUR_AUTO_CLEAN, false);
         m.put(KEY_DISCLAIMER_ACCEPTED, false);
         m.put(KEY_TARGET_HINT_VISIBLE, true);
+        m.put(KEY_DEBUG_NO_DOWNGRADE, false);
         // 动态推送（默认关闭：涉及自动请求；开启后默认用横幅 + 通知提醒）
         m.put(KEY_WATCH_ENABLED, false);
         m.put(KEY_WATCH_BANNER, true);
@@ -308,6 +320,7 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
         sService = service;
         Checkpoint.mark("XposedService 已绑定: %s", describe(service));
         LogRecorder.setEnabled(readBoolean(KEY_LOG, false));
+        LogRecorder.setVerbose(readBoolean(KEY_VERBOSE_LOG, false));
         LogRecorder.recordEvent("XposedService 已绑定: " + describe(service));
         SharedPreferences pending = getSharedPreferences(PENDING_PREFS, MODE_PRIVATE);
         Logs.i(TAG, "XposedService 已绑定: service=" + describe(service)

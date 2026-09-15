@@ -49,6 +49,13 @@ public final class Checkpoint {
         LogRecorder.recordEvent("检查点: " + msg);
     }
 
+    public static void clear() {
+        synchronized (LOCK) {
+            sEntries.clear();
+            sStart = -1;
+        }
+    }
+
     public static String dump() {
         return dump(Integer.MAX_VALUE);
     }

@@ -115,7 +115,7 @@ public final class SettingsEntryHook {
 
     enum Action {
         NONE, EDIT_LINK, CLEAR_DAILY, CHANNEL, EXPORT, IMPORT,
-        EXPORT_LOG, RUNTIME_STATUS, OPEN_WEB, PICK_DIR, RESET_GLASS, CHOOSE_GLASS,
+        EXPORT_LOG, CLEAR_LOG, VIEW_LOG, RUNTIME_STATUS, TARGET_STATUS, OPEN_WEB, PICK_DIR, RESET_GLASS, CHOOSE_GLASS,
         POST_LEVEL, POST_KEYWORDS, AI_PROVIDER, AI_PROMPT, AI_TEST, AI_MAX_TOKENS,
         REDIRECT_FORCE, REDIRECT_BLOCK, REDIRECT_TARGET, WEB_LOG, ABOUT,
         WATCH_USERS, WATCH_KEYWORDS, WATCH_IMPORT_FOLLOW, WATCH_TEST_PUSH, WATCH_CHECK,
@@ -206,6 +206,14 @@ public final class SettingsEntryHook {
                     new SwitchDef("伪装通知权限", "伪装通知已开启，获得签到加成", App.KEY_FAKE_NOTIFICATION, false, false),
                     new SwitchDef("屏蔽更新", "屏蔽小黑盒更新入口", App.KEY_BLOCK_UPDATE, false, false),
                     new SwitchDef("记录日志", null, App.KEY_LOG, false, false),
+                    new SwitchDef("调试：忽略版本降级限制", "清除版本下限，允许装回更旧的模块",
+                            App.KEY_DEBUG_NO_DOWNGRADE, false, false),
+                    new SwitchDef("详细日志", "关闭时只记错误日志；开启后记录全部并附带帖子信息",
+                            App.KEY_VERBOSE_LOG, false, false),
+                    new SwitchDef("查看日志", "预览最近 200 行模块日志", null, false, false,
+                            true, null, Action.VIEW_LOG),
+                    new SwitchDef("清除日志", "删除模块日志文件与运行检查点", null, false, false,
+                            true, null, Action.CLEAR_LOG),
                     new SwitchDef("导出日志", null, null, false, false, true, null, Action.EXPORT_LOG),
             }),
             new SettingsGroup("配置备份", new SwitchDef[]{
@@ -1933,6 +1941,12 @@ public final class SettingsEntryHook {
                     case RUNTIME_STATUS:
                         setRowClick(itemCls, item, v -> showEmbeddedRuntimeStatus(activity));
                         break;
+                    case CLEAR_LOG:
+                        setRowClick(itemCls, item, v -> confirmClearLogs(activity));
+                        break;
+                    case VIEW_LOG:
+                        setRowClick(itemCls, item, v -> showLogPreview(activity));
+                        break;
                     case OPEN_WEB:
                         setRowClick(itemCls, item, v -> showOpenWebDialog(activity));
                         break;
@@ -2074,6 +2088,17 @@ public final class SettingsEntryHook {
                         // 小白条沉浸：即时刷新玻璃条避让与窗口导航栏，无需重启
                         if (App.KEY_GLASS_IMMERSIVE.equals(def.key)) {
                             LiquidGlassInstaller.refreshGlassWith(activity);
+                        }
+                        if (App.KEY_DEBUG_NO_DOWNGRADE.equals(def.key)) {
+                            if (isChecked) {
+                                HeyboxPrefs.setString(App.KEY_MODULE_VERSION_FLOOR, "0");
+                                LogRecorder.recordEvent("已清除模块版本降级限制");
+                                Toast.makeText(activity, "已清除模块版本降级限制", Toast.LENGTH_SHORT).show();
+                            } else {
+                                LogRecorder.recordEvent("版本降级限制将在下次启动重新生效");
+                                Toast.makeText(activity, "版本降级限制将在下次启动重新生效",
+                                        Toast.LENGTH_SHORT).show();
+                            }
                         }
                         applySwitchMutex(activity, def.key, isChecked);
                     } catch (Throwable t) {
@@ -3249,6 +3274,132 @@ public final class SettingsEntryHook {
             module.logd(Log.WARN, module.TAG, "运行状态弹窗失败: " + t);
         }
     }
+    private void showLogPreview(final Activity activity) {
+        withHeyboxDialog(activity,
+                spec -> showLogPreviewNative(activity, spec),
+                () -> showLogPreviewFallback(activity));
+    }
+
+    private TextView buildLogPreviewText(Activity activity) {
+        String tail = LogRecorder.readTail(200);
+        TextView text = buildDialogMessage(activity, tail == null
+                ? "暂无日志：请先开启「记录日志」；关闭「详细日志」时只会记录错误日志"
+                : "当前日志：" + LogRecorder.sizeInfo() + "（以下为最近 200 行）\n\n" + tail);
+        text.setTextIsSelectable(true);
+        return text;
+    }
+
+    private void copyLogPreview(Activity activity) {
+        try {
+            String tail = LogRecorder.readTail(2000);
+            if (tail == null) {
+                Toast.makeText(activity, "暂无可复制的日志", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            android.content.ClipboardManager cm = (android.content.ClipboardManager)
+                    activity.getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm != null) {
+                cm.setPrimaryClip(android.content.ClipData.newPlainText(
+                        "BetterHeybox \u65e5\u5fd7", tail));
+                Toast.makeText(activity, "已复制最近日志", Toast.LENGTH_SHORT).show();
+            }
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "日志复制失败", t);
+        }
+    }
+
+    private void showLogPreviewNative(final Activity activity,
+                                      DexKitResolver.HeyboxDialogSpec spec) throws Exception {
+        int pad = module.dp(activity, 10);
+        ScrollView scroller = new ScrollView(activity);
+        LinearLayout box = new LinearLayout(activity);
+        box.setOrientation(LinearLayout.VERTICAL);
+        TextView copyRow = new TextView(activity);
+        copyRow.setText("复制最近日志");
+        copyRow.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        copyRow.setPadding(pad, pad, pad, 0);
+        copyRow.setTextColor(hostColor(activity, "color_text_link_day_night", 0xFF1677FF));
+        copyRow.setClickable(true);
+        copyRow.setOnClickListener(v -> copyLogPreview(activity));
+        box.addView(copyRow, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        box.addView(buildLogPreviewText(activity));
+        scroller.addView(box, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        scroller.setLayoutParams(new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, module.dp(activity, 400)));
+        spec.buildAndShow(activity, "模块日志", scroller,
+                "清空", (d, w) -> {
+                    doClearLogs(activity);
+                    d.dismiss();
+                },
+                "关闭", (d, w) -> d.dismiss());
+    }
+
+    private void showLogPreviewFallback(final Activity activity) {
+        try {
+            ScrollView scroller = new ScrollView(activity);
+            scroller.addView(buildLogPreviewText(activity));
+            new AlertDialog.Builder(activity)
+                    .setTitle("模块日志")
+                    .setView(scroller)
+                    .setPositiveButton("清空", (d, w) -> doClearLogs(activity))
+                    .setNeutralButton("复制最近日志", (d, w) -> copyLogPreview(activity))
+                    .setNegativeButton("关闭", null)
+                    .show();
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "日志预览弹窗失败: " + t);
+        }
+    }
+
+    private void confirmClearLogs(final Activity activity) {
+        withHeyboxDialog(activity,
+                spec -> clearLogsNative(activity, spec),
+                () -> clearLogsFallback(activity));
+    }
+
+    private void clearLogsNative(Activity activity, DexKitResolver.HeyboxDialogSpec spec) throws Exception {
+        TextView message = buildDialogMessage(activity,
+                "将删除模块日志文件（log.txt / log.1.txt）与运行检查点，确定继续？");
+        spec.buildAndShow(activity, "清除日志", message, "清除",
+                (d, w) -> {
+                    doClearLogs(activity);
+                    d.dismiss();
+                },
+                "取消", (d, w) -> d.dismiss());
+        module.logd(Log.INFO, module.TAG, "✔ 使用小黑盒原生弹窗确认清除日志");
+    }
+
+    private void clearLogsFallback(final Activity activity) {
+        try {
+            new AlertDialog.Builder(activity)
+                    .setTitle("清除日志")
+                    .setMessage("将删除模块日志文件（log.txt / log.1.txt）与运行检查点，确定继续？")
+                    .setPositiveButton("清除", (d, w) -> doClearLogs(activity))
+                    .setNegativeButton("取消", null)
+                    .show();
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "清除日志弹窗失败: " + t);
+        }
+    }
+
+    private void doClearLogs(Activity activity) {
+        try {
+            LogRecorder.setContext(activity);
+            String freed = LogRecorder.clear();
+            Checkpoint.clear();
+            LogRecorder.recordEvent("模块日志已清除: " + (freed == null ? "无日志文件" : freed));
+            String text = freed == null
+                    ? "已清除运行检查点（暂无日志文件）"
+                    : "已清除日志 " + freed + " 与运行检查点";
+            Toast.makeText(activity, text, Toast.LENGTH_SHORT).show();
+            module.logd(Log.INFO, module.TAG, text);
+            refreshEmbeddedPanel(activity);
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "清除日志失败: " + t);
+        }
+    }
+
     private void startEmbeddedImport(final Activity activity) {
         withHeyboxDialog(activity, spec -> startEmbeddedImportNative(activity, spec),
                 () -> showEmbeddedImportConfirmFallback(activity));
