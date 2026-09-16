@@ -2111,7 +2111,9 @@ public final class SettingsEntryHook {
                                         Toast.LENGTH_SHORT).show();
                             }
                         }
-                        applySwitchMutex(activity, def.key, isChecked);
+                        if (!mutexApplying) {
+                            applySwitchMutex(activity, def.key, isChecked);
+                        }
                     } catch (Throwable t) {
                         module.logd(Log.ERROR, module.TAG, "开关监听回调异常: " + def.title, t);
                     }
@@ -2136,17 +2138,34 @@ public final class SettingsEntryHook {
         }
     }
 
+    /** true while a linked write runs: suppresses the re-entrant listener */
+    private boolean mutexApplying;
+
     /**
-     * 开关联动（互斥/主从），原地更新联动开关：
-     * 重定向外部链接 ↔ 网页 DevTools 互斥；包含小黑盒域名为从开关，跟随重定向主开关
+     * Linked switches (mutex / master-slave). Enabling the redirect master switch resets
+     * the include-Heybox-domains slave; disabling the master clears the slave as well.
      */
     private void applySwitchMutex(Activity activity, String key, boolean checked) {
+        mutexApplying = true;
+        try {
+            applySwitchMutexInner(activity, key, checked);
+        } finally {
+            mutexApplying = false;
+        }
+    }
+
+    /** Body of applySwitchMutex; runs with mutexApplying set */
+    private void applySwitchMutexInner(Activity activity, String key, boolean checked) {
         if (App.KEY_BROWSER_REDIRECT.equals(key)) {
             if (checked) {
-                // 重定向开启：页面转出内置浏览器，DevTools 失去意义
+                // DevTools is pointless once pages leave the built-in WebView
                 setSwitchPref(activity, App.KEY_WEBVIEW_DEVTOOLS, false);
+                // reset the include-Heybox-domains slave: official pages and mini programs
+                // need the built-in WebView cookies, and a swallowed load used to leave a
+                // blank container behind (#33). Default back to external links only.
+                setSwitchPref(activity, App.KEY_BROWSER_REDIRECT_KNOWN, false);
             } else {
-                // 主开关关闭：从开关一并关闭
+                // master off: clear the slave too
                 setSwitchPref(activity, App.KEY_BROWSER_REDIRECT_KNOWN, false);
             }
         } else if (App.KEY_WEBVIEW_DEVTOOLS.equals(key)) {
@@ -2155,7 +2174,7 @@ public final class SettingsEntryHook {
                 setSwitchPref(activity, App.KEY_BROWSER_REDIRECT_KNOWN, false);
             }
         } else if (App.KEY_BROWSER_REDIRECT_KNOWN.equals(key) && checked) {
-            // 从开关打开时主开关必须开启
+            // slave on implies master on
             setSwitchPref(activity, App.KEY_BROWSER_REDIRECT, true);
         }
     }

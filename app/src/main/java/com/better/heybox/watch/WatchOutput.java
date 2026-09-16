@@ -23,15 +23,22 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * 输出层：本地通知栏 + 应用内横幅 + 第三方推送（钉钉 / WxPusher / OneBot / 自定义 webhook）。
+ * Output layer: notification, in-app banner, third-party push (DingTalk / WxPusher /
+ * OneBot / custom webhook).
  *
- * <p>通知渠道自建（与 VideoDownloadManager 同一套做法），挂在宿主包名下，
- * 因此复用小黑盒已有的通知权限，无需额外申请。
+ * The channel is self-made and registered under the host package, so the host's
+ * existing notification permission is reused.
  */
 public final class WatchOutput {
 
     public static final String CHANNEL_ID = "betterheybox_watch";
     private static final String CHANNEL_NAME = "动态推送";
+
+    /** Host router: dispatches a web/share url to post / web / native pages */
+    private static final String HOST_ROUTER = "com.max.xiaoheihe.RouterActivity";
+    /** Host post page used when the router is missing (needs link_id) */
+    private static final String HOST_POST_PAGE =
+            "com.max.xiaoheihe.module.bbs.post.ui.activitys.NormalPostPageActivity";
 
     private static volatile MainModule sModule;
 
@@ -42,7 +49,7 @@ public final class WatchOutput {
         sModule = module;
     }
 
-    // ------------------------------------------------------------ 通知栏
+    // ---- notification ----
 
     private static void ensureChannel(Context ctx) {
         try {
@@ -59,7 +66,7 @@ public final class WatchOutput {
         }
     }
 
-    /** @return 是否成功发出（测试面板据此显示结果） */
+    /** @return true when the notification was posted */
     public static boolean notifyPost(Context ctx, WatchItem item) {
         try {
             ensureChannel(ctx);
@@ -67,7 +74,14 @@ public final class WatchOutput {
             if (nm == null) {
                 return false;
             }
-            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(item.webUrl()));
+            // stay in-app: target the host's own component. An implicit ACTION_VIEW is
+            // resolved by the system and lands in a browser (no login, no in-app comments)
+            Intent intent = buildPostIntent(ctx, item);
+            if (intent == null) {
+                // host names changed and both components are missing: fall back to the browser
+                intent = new Intent(Intent.ACTION_VIEW, Uri.parse(item.webUrl()));
+            }
+            // posted from outside the process: NEW_TASK required
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             int code = item.linkId.hashCode();
             int flags = PendingIntent.FLAG_UPDATE_CURRENT;
@@ -91,7 +105,7 @@ public final class WatchOutput {
         }
     }
 
-    // ------------------------------------------------------------ 应用内横幅
+    // ---- in-app banner ----
 
     public static void bannerOrToast(final Activity activity, final WatchItem item) {
         if (activity == null) {
@@ -107,7 +121,7 @@ public final class WatchOutput {
         }
     }
 
-    /** 一批多条时的汇总横幅（避免连续弹很多条） */
+    /** Summary banner when a batch has several posts */
     public static void bannerSummary(Activity activity, String title, String sub, Runnable onClick) {
         if (activity == null) {
             return;
@@ -119,22 +133,80 @@ public final class WatchOutput {
         }
     }
 
+    /** Open a post in-app (banner / summary banner / debug push) */
     public static void openPost(Context ctx, WatchItem item) {
+        if (ctx == null || item == null) {
+            return;
+        }
+        Intent i = buildPostIntent(ctx, item);
+        if (i != null) {
+            try {
+                startActivity(ctx, i);
+                return;
+            } catch (Throwable t) {
+                log(Log.WARN, "应用内打开帖子失败，回退浏览器: " + t);
+            }
+        }
         try {
-            Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(item.webUrl()));
-            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            ctx.startActivity(i);
+            startActivity(ctx, new Intent(Intent.ACTION_VIEW, Uri.parse(item.webUrl())));
         } catch (Throwable t) {
             log(Log.WARN, "打开帖子失败: " + t);
         }
     }
 
-    // ------------------------------------------------------------ 第三方推送
+    /** Non-Activity context (app context, background thread): NEW_TASK required */
+    private static void startActivity(Context ctx, Intent intent) {
+        if (!(ctx instanceof Activity)) {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        }
+        ctx.startActivity(intent);
+    }
 
     /**
-     * 测试用应用内横幅：点击只提示回调是否正常，不跳转（测试条目的链接是占位值）。
+     * Post intent: the host router with the web/share url first, then the post page with
+     * link_id. Explicit components keep the tap in-app, while an implicit ACTION_VIEW is
+     * resolved by the system and can land in a browser.
      *
-     * @return 是否成功弹出
+     * @return null when neither component exists (caller falls back to the browser)
+     */
+    private static Intent buildPostIntent(Context ctx, WatchItem item) {
+        if (ctx == null || item == null || item.linkId == null || item.linkId.isEmpty()) {
+            return null;
+        }
+        ClassLoader cl = ctx.getClassLoader();
+        Class<?> router = loadHostClass(cl, HOST_ROUTER);
+        if (router != null) {
+            return new Intent(ctx, router).setData(Uri.parse(item.webUrl()));
+        }
+        Class<?> postPage = loadHostClass(cl, HOST_POST_PAGE);
+        if (postPage != null) {
+            return new Intent(ctx, postPage).putExtra("link_id", item.linkId);
+        }
+        log(Log.WARN, "宿主路由页与帖子详情页均未找到，本次改走浏览器: " + item.linkId);
+        return null;
+    }
+
+    /** Null instead of throwing when the host class is missing */
+    private static Class<?> loadHostClass(ClassLoader cl, String name) {
+        if (cl != null) {
+            try {
+                return Class.forName(name, false, cl);
+            } catch (Throwable ignored) {
+            }
+        }
+        try {
+            return Class.forName(name);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    // ---- third-party push ----
+
+    /**
+     * Debug banner: tapping only reports whether the callback fires, no navigation.
+     *
+     * @return true when the banner was shown
      */
     public static boolean testBanner(final Activity activity, final WatchItem item) {
         if (activity == null || item == null) {
@@ -154,7 +226,7 @@ public final class WatchOutput {
         }
     }
 
-    /** 依次发送到所有已配置渠道；返回成功条数 */
+    /** Send to every configured channel; returns the success count */
     public static int pushAll(WatchConfig cfg, WatchItem item) {
         if (!cfg.pushEnabled) {
             return 0;
@@ -177,7 +249,7 @@ public final class WatchOutput {
         return ok;
     }
 
-    /** 钉钉机器人：access_token 或完整 webhook 均可 */
+    /** DingTalk bot: access_token or a full webhook url */
     private static boolean sendDingtalk(String cfg, String title, String text) {
         String url = cfg.startsWith("http") ? cfg : ("https://oapi.dingtalk.com/robot/send?access_token=" + cfg);
         try {
@@ -194,7 +266,7 @@ public final class WatchOutput {
         }
     }
 
-    /** WxPusher：格式 appToken|topicId 或 appToken|uid:UID */
+    /** WxPusher: appToken|topicId or appToken|uid:UID */
     private static boolean sendWxPusher(String cfg, String title, String text) {
         try {
             String[] parts = cfg.split("\\|");
@@ -224,16 +296,15 @@ public final class WatchOutput {
     }
 
     /**
-     * AstrBot / OneBot v11 机器人（AstrBot 的 aiocqhttp 适配器、NapCat、Lagrange 等）。
+     * AstrBot / OneBot v11 (AstrBot's aiocqhttp adapter, NapCat, Lagrange, ...).
      *
-     * <p>配置格式（用 | 分隔，后两段可省）：
+     * <p>Config, pipe separated:
      * <pre>
-     *   http://主机:6199|群号
-     *   http://主机:6199|群号|访问令牌
-     *   http://主机:6199|private:QQ号|访问令牌
+     *   http://host:6199|group
+     *   http://host:6199|group|access_token
+     *   http://host:6199|private:QQ|access_token
      * </pre>
-     * AstrBot 的 aiocqhttp 适配器默认监听 6199；若其配置里设了 access_token，
-     * 需要填第三段（以 Authorization: Bearer 形式发送）。
+     * aiocqhttp listens on 6199 by default; the token is sent as Authorization: Bearer.
      */
     private static boolean sendOneBot(String cfg, WatchItem item) {
         try {
@@ -251,7 +322,7 @@ public final class WatchOutput {
                 o.put("group_id", Long.parseLong(target.isEmpty() ? "0" : target));
             }
             o.put("message", "【小黑盒】" + item.displayTitle() + "\n" + item.webUrl());
-            // 不让标题里的 [CQ:...] 被当成 CQ 码解析
+            // keep [CQ:...] in the title from being parsed as CQ codes
             o.put("auto_escape", true);
             Map<String, String> headers = new HashMap<>();
             if (!token.isEmpty()) {
@@ -264,7 +335,7 @@ public final class WatchOutput {
         }
     }
 
-    /** 自定义 webhook：支持 {title} {author} {link} {desc} 占位符；URL 可直接带 query */
+    /** Custom webhook: {title} {author} {link} {desc} placeholders; query allowed */
     private static boolean sendCustom(String cfg, WatchItem item) {
         try {
             String url = cfg
@@ -346,7 +417,7 @@ public final class WatchOutput {
         }
     }
 
-    /** 设置面板"测试推送"用 */
+    /** Used by the settings panel "test push" */
     public static Map<String, String> testPayload() {
         Map<String, String> m = new HashMap<>();
         m.put("title", "测试消息");
