@@ -54,6 +54,7 @@ import com.better.heybox.LogRecorder;
 import com.better.heybox.ThemeUtils;
 import com.better.heybox.VersionUtils;
 import com.better.heybox.VideoDownloadManager;
+import com.better.heybox.liquidglass.GlassSettingsSheet;
 import com.better.heybox.liquidglass.LiquidGlassInstaller;
 import com.better.heybox.MainModule;
 import com.better.heybox.PreferenceReceiver;
@@ -117,6 +118,7 @@ public final class SettingsEntryHook {
     enum Action {
         NONE, EDIT_LINK, CLEAR_DAILY, CHANNEL, EXPORT, IMPORT,
         EXPORT_LOG, CLEAR_LOG, VIEW_LOG, RUNTIME_STATUS, TARGET_STATUS, OPEN_WEB, PICK_DIR, RESET_GLASS, CHOOSE_GLASS,
+        /** Opens the liquid glass sheet (width / side insets / look). */ GLASS_SHEET,
         POST_LEVEL, POST_KEYWORDS, AI_PROVIDER, AI_PROMPT, AI_TEST, AI_MAX_TOKENS,
         REDIRECT_FORCE, REDIRECT_BLOCK, REDIRECT_TARGET, WEB_LOG, ABOUT,
         WATCH_USERS, WATCH_KEYWORDS, WATCH_IMPORT_FOLLOW, WATCH_TEST_PUSH, WATCH_CHECK,
@@ -1035,7 +1037,12 @@ public final class SettingsEntryHook {
             rows.add(new SwitchDef("液态玻璃底栏", "底栏显示液态玻璃", App.KEY_LIQUID_GLASS, true, false));
             rows.add(new SwitchDef("沉浸式小白条", "底栏延伸至手势区域", App.KEY_GLASS_IMMERSIVE, true, false));
             rows.add(new SwitchDef("自适应反色", "文字图标随背景反色", App.KEY_GLASS_ADAPTIVE, true, false));
-            rows.add(new SwitchDef("玻璃宽度自适应", "宽度随可见标签收缩", App.KEY_GLASS_FIT_TABS, false, false));
+            rows.add(new SwitchDef("加长选中 Tab",
+                    "隐藏标签后选中项加长，底栏随可见数量收缩",
+                    App.KEY_GLASS_FIT_TABS, false, false));
+            rows.add(new SwitchDef("玻璃条宽度",
+                    "宽度模式 / 左右边距 / Tab 宽度，打开调节面板",
+                    null, false, false, true, null, Action.GLASS_SHEET));
             rows.add(new SwitchDef("暗色模式底色", "例如 #000000", null, false, false, true, App.KEY_GLASS_DARK_COLOR));
             rows.add(new SwitchDef("暗色模式不透明度", "5-98 的百分比", null, false, false, true, App.KEY_GLASS_DARK_ALPHA));
             rows.add(new SwitchDef("亮色模式底色", "例如 #FFFFFF", null, false, false, true, App.KEY_GLASS_LIGHT_COLOR));
@@ -1967,6 +1974,9 @@ public final class SettingsEntryHook {
                     case CHOOSE_GLASS:
                         setRowClick(itemCls, item, v -> showGlassProviderDialog(activity));
                         break;
+                    case GLASS_SHEET:
+                        setRowClick(itemCls, item, v -> GlassSettingsSheet.show(activity));
+                        break;
                     case POST_LEVEL:
                         setRowClick(itemCls, item, v -> showPostLevelDialog(activity));
                         break;
@@ -2096,8 +2106,12 @@ public final class SettingsEntryHook {
                         if (App.KEY_LIQUID_GLASS.equals(def.key)) {
                             LiquidGlassInstaller.applyGlassEnabled(activity);
                         }
-                        // 小白条沉浸：即时刷新玻璃条避让与窗口导航栏，无需重启
-                        if (App.KEY_GLASS_IMMERSIVE.equals(def.key)) {
+                        // Gesture bar / adaptive chrome / elongate tab: reload GlassConfig
+                        // before refreshing, otherwise the panel only writes prefs and the
+                        // cached statics stay stale until the host restarts (#34).
+                        if (App.KEY_GLASS_IMMERSIVE.equals(def.key)
+                                || App.KEY_GLASS_ADAPTIVE.equals(def.key)
+                                || App.KEY_GLASS_FIT_TABS.equals(def.key)) {
                             LiquidGlassInstaller.refreshGlassWith(activity);
                         }
                         if (App.KEY_DEBUG_NO_DOWNGRADE.equals(def.key)) {
@@ -2936,6 +2950,14 @@ public final class SettingsEntryHook {
         HeyboxPrefs.setString(App.KEY_GLASS_LIGHT_ALPHA, "64");
         HeyboxPrefs.setString(App.KEY_GLASS_BAR_HEIGHT, "0");
         HeyboxPrefs.setString(App.KEY_GLASS_BAR_OFFSET, "16");
+        // Width settings (#34) reset too, otherwise "restore defaults" keeps the old width.
+        HeyboxPrefs.setBoolean(App.KEY_GLASS_FIT_TABS, false);
+        HeyboxPrefs.setString(App.KEY_GLASS_SIDE_MARGIN, "16");
+        HeyboxPrefs.setString(App.KEY_GLASS_BAR_WIDTH_MODE, "0");
+        HeyboxPrefs.setString(App.KEY_GLASS_BAR_WIDTH_PCT, "100");
+        HeyboxPrefs.setString(App.KEY_GLASS_TAB_WIDTH_PCT, "100");
+        HeyboxPrefs.setString(App.KEY_GLASS_BAR_LAYOUT, "0");
+        maybeRefreshGlassRuntime(activity, App.KEY_LIQUID_GLASS);
         Toast.makeText(activity, "液态玻璃设置已恢复默认", Toast.LENGTH_SHORT).show();
         View panel = mSettingsPanel == null ? null : mSettingsPanel.get();
         if (panel != null && panel.getParent() != null) showEmbeddedSettings(activity);
@@ -2972,6 +2994,7 @@ public final class SettingsEntryHook {
         DialogInterface.OnClickListener saveListener = (d, w) -> {
             try {
                 HeyboxPrefs.setString(key, input.getText().toString().trim());
+                maybeRefreshGlassRuntime(activity, key);
                 Toast.makeText(activity, "已保存", Toast.LENGTH_SHORT).show();
                 module.logd(Log.INFO, module.TAG, "分享链接已保存: " + key);
             } catch (Throwable t) {
@@ -2997,6 +3020,7 @@ public final class SettingsEntryHook {
                     .setPositiveButton("保存", (dialog, which) -> {
                         try {
                             HeyboxPrefs.setString(key, input.getText().toString().trim());
+                            maybeRefreshGlassRuntime(activity, key);
                             Toast.makeText(activity, "已保存", Toast.LENGTH_SHORT).show();
                             module.logd(Log.INFO, module.TAG, "分享链接已保存: " + key);
                         } catch (Throwable t) {
@@ -3545,6 +3569,24 @@ public final class SettingsEntryHook {
         } catch (Throwable ignored) {
         }
         return "com.better.heybox";
+    }
+
+    /**
+     * The in-app panel writes prefs while the glass code reads GlassConfig statics, so glass
+     * keys must reload and re-layout immediately, otherwise they only apply after a restart.
+     */
+    private void maybeRefreshGlassRuntime(Activity activity, String key) {
+        if (key == null || activity == null) {
+            return;
+        }
+        if (!App.KEY_LIQUID_GLASS.equals(key) && !key.startsWith("glass_")) {
+            return;
+        }
+        try {
+            LiquidGlassInstaller.refreshGlassWith(activity);
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "玻璃设置运行时刷新失败: " + key, t);
+        }
     }
 
     private boolean writeEmbeddedBoolean(Activity activity, String key, boolean value) {

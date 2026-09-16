@@ -229,6 +229,15 @@ public final class GlassSettingsSheet {
                     return value + "dp";
                 }));
         layoutCard.addView(divider(activity, divider, density));
+        layoutCard.addView(sliderRow(activity, "左右边距",
+                GlassConfig.barSideMarginDp + "dp", textPrimary, textSecondary, accent,
+                0, 40, GlassConfig.barSideMarginDp, density, value -> {
+                    GlassConfig.barSideMarginDp = value;
+                    GlassConfig.save(activity);
+                    LiquidGlassInstaller.applyBarGeometry();
+                    return value + "dp";
+                }));
+        layoutCard.addView(divider(activity, divider, density));
         layoutCard.addView(widthModeGroup(activity, textPrimary, textSecondary,
                 accent, divider, density));
         layoutCard.addView(divider(activity, divider, density));
@@ -256,14 +265,14 @@ public final class GlassSettingsSheet {
         group.setOrientation(LinearLayout.VERTICAL);
         group.setPadding(0, (int) (10f * density), 0, (int) (6f * density));
         TextView title = new TextView(activity);
-        title.setText("玻璃条宽度");
+        title.setText("玻璃条宽度与留白");
         title.setTextColor(textPrimary);
         title.setTextSize(15f);
         group.addView(title, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         View slider = sliderRow(activity, "自定义宽度",
                 GlassConfig.barWidthPct + "%", textPrimary, textSecondary, accent,
-                50, 100, GlassConfig.barWidthPct, density, value -> {
+                40, 100, GlassConfig.barWidthPct, density, value -> {
                     GlassConfig.barWidthPct = value;
                     GlassConfig.save(activity);
                     LiquidGlassInstaller.applyBarGeometry();
@@ -293,7 +302,8 @@ public final class GlassSettingsSheet {
         group.addView(chips, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         TextView hint = new TextView(activity);
-        hint.setText("自适应：按标签数量取合适宽度并居中；自定义时可用下方滑杆");
+        hint.setText("自适应：按标签内容取宽并居中；占满：撑满可用宽度；"
+                + "自定义：可用下方滑杆。三者都保留「左右边距」");
         hint.setTextColor(textSecondary);
         hint.setTextSize(12f);
         hint.setPadding(0, (int) (6f * density), 0, 0);

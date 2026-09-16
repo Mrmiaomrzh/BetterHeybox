@@ -119,11 +119,14 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     public static final String KEY_GLASS_LIGHT_ALPHA = "glass_light_alpha";
     public static final String KEY_GLASS_BAR_HEIGHT = "glass_bar_height";
     public static final String KEY_GLASS_BAR_OFFSET = "glass_bar_offset";
+    /** Glass bar side inset in dp (0-40), honored by every width mode (#34). */
+    public static final String KEY_GLASS_SIDE_MARGIN = "glass_side_margin";
 
     public static final String KEY_GLASS_FIT_TABS = "glass_fit_tabs";
 
     /** 玻璃条宽度模式：0=自适应（按内容居中）1=占满 2=自定义百分比（glass_bar_width_pct） */
     public static final String KEY_GLASS_BAR_WIDTH_MODE = "glass_bar_width_mode";
+    /** Custom width: percent of the usable width (side insets excluded), 40-100. */
     public static final String KEY_GLASS_BAR_WIDTH_PCT = "glass_bar_width_pct";
     /** Tab 项宽度缩放，等分默认值的百分比（50-150） */
     public static final String KEY_GLASS_TAB_WIDTH_PCT = "glass_tab_width_pct";

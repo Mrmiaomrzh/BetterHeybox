@@ -27,6 +27,7 @@ public final class ConfigBackup {
             App.KEY_GLASS_LIGHT_ALPHA,
             App.KEY_GLASS_BAR_HEIGHT,
             App.KEY_GLASS_BAR_OFFSET,
+            App.KEY_GLASS_SIDE_MARGIN,
             App.KEY_GLASS_BAR_WIDTH_MODE,
             App.KEY_GLASS_BAR_WIDTH_PCT,
             App.KEY_GLASS_TAB_WIDTH_PCT,

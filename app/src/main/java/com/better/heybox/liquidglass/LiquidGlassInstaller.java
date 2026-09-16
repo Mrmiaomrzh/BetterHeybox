@@ -544,6 +544,16 @@ public final class LiquidGlassInstaller {
     private static final float FIT_TAB_MAX_WIDTH_DP = 96f;
     private static final float SELECTED_TAB_WEIGHT = 1.4f;
     private static final float OTHER_TAB_WEIGHT = 0.9f;
+    /** Adaptive width: minimum tab cell width in dp (keeps icons/labels off the edges). */
+    private static final float MIN_TAB_WIDTH_DP = 52f;
+    /** Adaptive width: extra horizontal padding added around measured tab content, in dp. */
+    private static final float TAB_CONTENT_PAD_DP = 18f;
+    /** Adaptive width: fallback tab cell width in dp when content cannot be measured. */
+    private static final float FALLBACK_TAB_WIDTH_DP = 54f;
+    /** Adaptive width: minimum center gap dp, must fit the ~56dp publish button. */
+    private static final float MIN_PLUS_GAP_DP = 64f;
+    /** Upper bound of the configurable glass bar side inset, in dp. */
+    private static final int MAX_SIDE_MARGIN_DP = 40;
     private static final long FIT_ANIM_MS = 380L;
     private static final float FIT_ANIM_TENSION = 1.1f;
     private static volatile boolean sTabBarActive;
@@ -1253,7 +1263,14 @@ public final class LiquidGlassInstaller {
             sFitActive = fit;
             float[] before = glide ? captureTabCenters(row) : null;
             int selected = Math.max(0, Math.min(selectedIndex, tabs - 1));
+            // Adaptive mode weights are plain dp values; adaptiveBarWidth derives the bar
+            // width from the very same metrics, so bar and content always stay in sync.
+            float den = sDensity > 0 ? sDensity
+                    : barV.getResources().getDisplayMetrics().density;
+            float[] metrics = !fit && GlassConfig.barWidthMode == 0
+                    ? adaptiveMetricsDp(den) : null;
             float gap = fit ? CENTER_GAP_WEIGHT
+                    : metrics != null ? Math.max(metrics[1], 0.3f)
                     : Math.max(0.3f, (tabs + CENTER_GAP_WEIGHT) / f - tabs);
             int tabIndex = 0;
             for (int i = 0; i < row.getChildCount(); i++) {
@@ -1271,7 +1288,7 @@ public final class LiquidGlassInstaller {
                     w = fit
                             ? (tabIndex == selected
                             ? SELECTED_TAB_WEIGHT : OTHER_TAB_WEIGHT)
-                            : f;
+                            : metrics != null ? metrics[0] : f;
                     tabIndex++;
                 } else {
                     continue;
@@ -1960,21 +1977,27 @@ public final class LiquidGlassInstaller {
             if (parentWidth <= 0) {
                 return;
             }
+            // Side insets apply to every mode: even "fill" only fills the usable width (#34).
+            float den = sDensity > 0 ? sDensity
+                    : host.getResources().getDisplayMetrics().density;
+            int side = sideMarginPx(den);
+            int usable = Math.max(0, parentWidth - side * 2);
             int target;
             switch (GlassConfig.barWidthMode) {
                 case 0:
                     target = adaptiveBarWidth(host, parentWidth);
                     break;
                 case 2:
-                    int pct = Math.max(50,
+                    int pct = Math.max(40,
                             Math.min(GlassConfig.barWidthPct, 100));
-                    target = Math.round(parentWidth * pct / 100f);
+                    target = Math.round(usable * pct / 100f);
                     break;
                 default:
-                    target = parentWidth;
+                    target = usable;
                     break;
             }
-            int margin = Math.max(0, (parentWidth - target) / 2);
+            target = Math.max(0, Math.min(target, usable));
+            int margin = side + Math.max(0, (usable - target) / 2);
             if (lp.leftMargin == margin && lp.rightMargin == margin) {
                 return;
             }
@@ -1986,11 +2009,15 @@ public final class LiquidGlassInstaller {
         }
     }
 
+    /**
+     * Adaptive width: size the bar to the measured tab content and center it (#34).
+     * The old code treated the 96dp/tab cap as the real width, so 5 tabs asked for 584dp
+     * and always got clamped to the parent width - adaptive behaved exactly like "fill".
+     * Now it is content width + center gap, bounded by the side insets.
+     */
     private static int adaptiveBarWidth(View host, int parentWidth) {
         float den = sDensity > 0 ? sDensity
                 : host.getResources().getDisplayMetrics().density;
-        float scale = Math.max(50, Math.min(GlassConfig.tabWidthPct, 150))
-                / 100f;
         android.widget.RadioGroup radio = sRadioBarRef.get();
         int tabs = 0;
         if (radio != null) {
@@ -2002,15 +2029,120 @@ public final class LiquidGlassInstaller {
                 }
             }
         }
+        int max = Math.max(0, parentWidth - sideMarginPx(den) * 2);
         if (tabs == 0) {
-            return parentWidth;
+            return max;
         }
-        float perTab = FIT_TAB_MAX_WIDTH_DP * den * scale;
-        float w = tabs * perTab + Math.round(8f * den);
-        if (!sCircleMode && !sPlusHidden) {
-            w += CENTER_GAP_WEIGHT * perTab;
+        float[] metrics = adaptiveMetricsDp(den);
+        // Weights are dp, so bar width = visible tabs + center gap + bar padding.
+        float w = (tabs * metrics[0] + metrics[1]) * den + Math.round(8f * den);
+        return Math.max(Math.round(MIN_TAB_WIDTH_DP * den),
+                Math.min(Math.round(w), max));
+    }
+
+    /** Glass bar side inset in px, clamped to 0-40dp. */
+    private static int sideMarginPx(float den) {
+        int dp = Math.max(0, Math.min(
+                GlassConfig.barSideMarginDp, MAX_SIDE_MARGIN_DP));
+        return Math.round(dp * den);
+    }
+
+    /**
+     * Adaptive width metrics in dp: {tab cell width, center gap width}.
+     * Shared with the weights written by {@link #applyTabWidths(int)}.
+     */
+    private static float[] adaptiveMetricsDp(float den) {
+        float scale = Math.max(50, Math.min(GlassConfig.tabWidthPct, 150)) / 100f;
+        float content = measureTabContentDp(den);
+        float tab = (content > 0f ? content + TAB_CONTENT_PAD_DP
+                : FALLBACK_TAB_WIDTH_DP) * scale;
+        tab = Math.max(MIN_TAB_WIDTH_DP * scale,
+                Math.min(tab, FIT_TAB_MAX_WIDTH_DP * scale));
+        if (content > 0f) {
+            // Never shrink a cell below its own content: smaller only clips icon/label.
+            tab = Math.max(tab, content);
         }
-        return Math.min(parentWidth, Math.round(w));
+        float gap = sCircleMode || sPlusHidden ? 0f : plusGapDp(den, tab);
+        return new float[]{tab, gap};
+    }
+
+    /** Center gap width in dp: measured publish button + padding, 64dp fallback. */
+    private static float plusGapDp(float den, float tabDp) {
+        float gap = MIN_PLUS_GAP_DP;
+        try {
+            View mid = sMidTabRef == null ? null : sMidTabRef.get();
+            int w = mid == null ? 0 : mid.getMeasuredWidth();
+            if (w > 0) {
+                gap = Math.max(gap, w / den + 8f);
+            }
+        } catch (Throwable ignored) {
+        }
+        return Math.max(gap, tabDp);
+    }
+
+    /** Measured content width of the widest tab in dp (text via Paint, icon intrinsic). */
+    private static float measureTabContentDp(float den) {
+        try {
+            View barV = sTabBarRef.get();
+            if (!(barV instanceof ViewGroup) || ((ViewGroup) barV).getChildCount() == 0
+                    || !(((ViewGroup) barV).getChildAt(0) instanceof ViewGroup)) {
+                return 0f;
+            }
+            ViewGroup row = (ViewGroup) ((ViewGroup) barV).getChildAt(0);
+            int best = 0;
+            for (int i = 0; i < row.getChildCount(); i++) {
+                View tab = row.getChildAt(i);
+                if (!(tab instanceof ViewGroup)
+                        || tab instanceof android.widget.Space) {
+                    continue;
+                }
+                int w = tabContentPx((ViewGroup) tab, den);
+                if (w > best) {
+                    best = w;
+                }
+            }
+            return best > 0 ? best / den : 0f;
+        } catch (Throwable t) {
+            LiquidGlassLog.logErr("tab content measure failed", t);
+            return 0f;
+        }
+    }
+
+    private static int tabContentPx(ViewGroup tab, float den) {
+        int best = 0;
+        for (int i = 0; i < tab.getChildCount(); i++) {
+            View c = tab.getChildAt(i);
+            if (c.getVisibility() == View.GONE) {
+                continue;
+            }
+            int w = 0;
+            if (c instanceof android.widget.TextView) {
+                CharSequence text = ((android.widget.TextView) c).getText();
+                if (text != null && text.length() > 0) {
+                    w = Math.round(((android.widget.TextView) c).getPaint()
+                            .measureText(text.toString()));
+                }
+            } else if (c instanceof android.widget.ImageView) {
+                android.graphics.drawable.Drawable icon =
+                        ((android.widget.ImageView) c).getDrawable();
+                if (icon != null) {
+                    w = icon.getIntrinsicWidth();
+                }
+                if (w <= 0) {
+                    w = c.getMeasuredWidth();
+                }
+            } else {
+                w = c.getMeasuredWidth();
+            }
+            if (w > best) {
+                best = w;
+            }
+        }
+        if (best <= 0) {
+            return 0;
+        }
+        // Hard content only (icon/label + tab padding); breathing room is added by callers.
+        return best + tab.getPaddingLeft() + tab.getPaddingRight();
     }
 
     static void applyBarGeometry() {
