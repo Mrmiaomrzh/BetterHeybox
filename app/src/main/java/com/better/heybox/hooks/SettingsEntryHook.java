@@ -189,6 +189,7 @@ public final class SettingsEntryHook {
             new SettingsGroup("解除复制", new SwitchDef[]{
                     new SwitchDef("解除复制", "恢复系统文本选择", App.KEY_COPY_POST, true, false),
                     new SwitchDef("自绘制文本选择", "修复选区异常", App.KEY_CUSTOM_TEXT_SELECT, false, false),
+                    new SwitchDef("评论区自由复制", "长按菜单的复制可自由选择", App.KEY_COMMENT_FREE_COPY, true, false),
                     new SwitchDef("系统分享图片", "图片长按加入系统分享", App.KEY_SYSTEM_SHARE, true, false),
             }),
             new SettingsGroup("分享净化", new SwitchDef[]{
@@ -2101,6 +2102,10 @@ public final class SettingsEntryHook {
                         if (App.KEY_CUSTOM_TEXT_SELECT.equals(def.key)
                                 || App.KEY_COPY_POST.equals(def.key)) {
                             TextSelectHook.refresh();
+                        }
+                        // 评论区自由复制：立即对已绑定的评论控件生效 / 拆除
+                        if (App.KEY_COMMENT_FREE_COPY.equals(def.key)) {
+                            CommentCopyHook.refresh();
                         }
                         // 液态玻璃开关：运行时安装/卸载玻璃底栏，无需重启
                         if (App.KEY_LIQUID_GLASS.equals(def.key)) {

@@ -39,6 +39,13 @@ import java.util.WeakHashMap;
  */
 public final class CustomTextSelection {
 
+    /** Marker for our own listeners (used to avoid re-entrancy) */
+    public interface OwnListener {
+    }
+
+    /** Delay before showing the selection after the host sheet closes */
+    private static final long MENU_DISMISS_DELAY_MS = 220L;
+
     private static final String TAG = "BetterHeybox";
     private static final int DEFAULT_ACCENT = 0xFF1677FF;
     private static final Map<TextView, Controller> CONTROLLERS =
@@ -64,18 +71,97 @@ public final class CustomTextSelection {
         outLine[0] = line;
         return x;
     }
+    /** Attach with long-press takeover (post body) */
     public static void attach(TextView tv) {
+        attach(tv, true, null);
+    }
+
+    /** Attach with long-press takeover into an explicit overlay host (e.g. a dialog decor) */
+    public static void attach(TextView tv, ViewGroup overlayHost) {
+        attach(tv, true, overlayHost);
+    }
+
+    /**
+     * Passive attach (comments): wraps only the touch listener (records the down point
+     * and forwards events); OnLongClickListener is left alone, so the host comment menu
+     * still opens. Use {@link #beginSelection(TextView, float, float)} to start selecting.
+     * Safe to call repeatedly (the host resets OnTouchListener on every bind).
+     */
+    public static void attachPassive(TextView tv) {
+        attach(tv, false, null);
+    }
+
+    /**
+     * Attach (if needed) and start selecting immediately at x/y (negative => whole text).
+     * Used as a fallback when the system text selection refuses to start in our dialog.
+     */
+    public static boolean startSelectionNow(TextView tv, ViewGroup overlayHost, float x, float y) {
+        if (tv == null) {
+            return false;
+        }
+        attach(tv, true, overlayHost);
+        Controller controller;
+        synchronized (CONTROLLERS) {
+            controller = CONTROLLERS.get(tv);
+        }
+        return controller != null && controller.beginSelectionNow(x, y);
+    }
+
+    private static void attach(TextView tv, boolean takeLongPress, ViewGroup overlayHost) {
         if (tv == null) {
             return;
         }
         synchronized (CONTROLLERS) {
-            if (CONTROLLERS.containsKey(tv)) {
+            Controller existing = CONTROLLERS.get(tv);
+            if (existing != null) {
+                existing.updateOverlayHost(overlayHost);
+                existing.rebind(takeLongPress);
                 return;
             }
-            Controller controller = new Controller(tv);
+            Controller controller = new Controller(tv, takeLongPress, overlayHost);
             CONTROLLERS.put(tv, controller);
             controller.attach();
         }
+    }
+
+    /** True when the listener belongs to this module */
+    public static boolean isOwnListener(Object listener) {
+        return listener instanceof OwnListener;
+    }
+
+    /**
+     * Start selecting programmatically (host "copy" tap). x/y are view-local; negative
+     * means unknown (select all). false => caller must fall back to the host copy.
+     */
+    public static boolean beginSelection(TextView tv, float x, float y) {
+        if (tv == null || tv.getWindowToken() == null || !tv.isShown()) {
+            return false;
+        }
+        Controller controller;
+        synchronized (CONTROLLERS) {
+            controller = CONTROLLERS.get(tv);
+        }
+        if (controller == null) {
+            return false;
+        }
+        return controller.beginSelectionAt(x, y);
+    }
+
+    /** Last ACTION_DOWN point of that view (picks the word under the finger) */
+    public static boolean lastDownPoint(TextView tv, float[] out) {
+        if (tv == null || out == null || out.length < 2) {
+            return false;
+        }
+        Controller controller;
+        synchronized (CONTROLLERS) {
+            controller = CONTROLLERS.get(tv);
+        }
+        if (controller == null || !controller.hasDownPoint()) {
+            return false;
+        }
+        out[0] = controller.downX;
+        out[1] = controller.downY;
+        return true;
     }
     public static void detach(TextView tv) {
         if (tv == null) {
@@ -100,10 +186,15 @@ public final class CustomTextSelection {
         }
     }
 
-    private static final class Controller implements View.OnTouchListener, View.OnLongClickListener {
+    private static final class Controller implements View.OnTouchListener, View.OnLongClickListener,
+            OwnListener {
 
         private final TextView tv;
-        private final View.OnTouchListener prevTouch;
+        /** Where the highlight / handles / menu are added; null = the view's activity decor */
+        private ViewGroup overlayHost;
+        /** Long-press takeover: true = post body, false = comments (host menu keeps it) */
+        private boolean takeLongPress;
+        private View.OnTouchListener prevTouch;
         private final View.OnLongClickListener prevLongClick;
 
         private final int accentColor;
@@ -115,6 +206,7 @@ public final class CustomTextSelection {
         private int selEnd = -1;
         private float downX;
         private float downY;
+        private boolean hasDown;
 
         private HighlightOverlay overlay;
         private SelectionHandle startHandle;
@@ -144,8 +236,10 @@ public final class CustomTextSelection {
             }
         };
 
-        Controller(TextView tv) {
+        Controller(TextView tv, boolean takeLongPress, ViewGroup overlayHost) {
             this.tv = tv;
+            this.takeLongPress = takeLongPress;
+            this.overlayHost = overlayHost;
             this.prevTouch = readListener(tv, "mOnTouchListener");
             this.prevLongClick = readListener(tv, "mOnLongClickListener");
             this.accentColor = ThemeUtils.resolveAccent(tv.getContext());
@@ -163,21 +257,56 @@ public final class CustomTextSelection {
             }
         }
 
+        void updateOverlayHost(ViewGroup host) {
+            if (host != null) {
+                overlayHost = host;
+            }
+        }
+
+        private ViewGroup overlayHost() {
+            return overlayHost != null ? overlayHost : ViewUtils.findDecor(tv);
+        }
+
         void attach() {
             tv.setOnTouchListener(this);
-            tv.setOnLongClickListener(this);
-            tv.addOnLayoutChangeListener(layoutListener);
-            if (tv.isTextSelectable()) {
-                tv.setTextIsSelectable(false);
+            if (takeLongPress) {
+                // keep no system selection / link movement method while self-drawing (post body)
+                if (tv.isTextSelectable()) {
+                    tv.setTextIsSelectable(false);
+                }
+                tv.setMovementMethod(null);
+                // re-assert: setTextIsSelectable(false) clears clickable/longClickable, so this
+                // must come last or long-press would never fire
+                tv.setOnLongClickListener(this);
             }
-            tv.setMovementMethod(null);
+            tv.addOnLayoutChangeListener(layoutListener);
+        }
+
+        /**
+         * Refresh after the host reset its touch listener: remember the new one as prevTouch
+         * (still chained) and install ours again; runs right after the host set it.
+         */
+        void rebind(boolean takeLongPressNow) {
+            if (takeLongPress && !takeLongPressNow) {
+                // takeover -> passive: hand the host long-press listener back
+                tv.setOnLongClickListener(prevLongClick);
+            }
+            takeLongPress = takeLongPressNow;
+            View.OnTouchListener current = readListener(tv, "mOnTouchListener");
+            if (current != null && !(current instanceof OwnListener)) {
+                prevTouch = current;
+            }
+            attach();
         }
 
         void detach() {
             cancel();
             tv.removeOnLayoutChangeListener(layoutListener);
             tv.setOnTouchListener(prevTouch);
-            tv.setOnLongClickListener(prevLongClick);
+            if (takeLongPress) {
+                // restore only if we took over long-press (never clobber the host's own listener)
+                tv.setOnLongClickListener(prevLongClick);
+            }
         }
 
         @Override
@@ -186,6 +315,7 @@ public final class CustomTextSelection {
                 case MotionEvent.ACTION_DOWN: {
                     downX = event.getX();
                     downY = event.getY();
+                    hasDown = true;
                     if (selecting || menuScrim != null) {
                         cancel();
                     }
@@ -215,6 +345,64 @@ public final class CustomTextSelection {
                 default:
                     return prevTouch != null && prevTouch.onTouch(v, event);
             }
+        }
+
+        /**
+         * Triggered by the sheet's "copy": wait for the host dialog to close, then select.
+         * Picks the word at the last down point (CJK per char, latin per word); none => all.
+         */
+        boolean beginSelectionAt(final float x, final float y) {
+            try {
+                tv.postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        selectAt(x, y);
+                    }
+                }, MENU_DISMISS_DELAY_MS);
+                return true;
+            } catch (Throwable t) {
+                Log.w(TAG, "安排选择态失败: " + t);
+                return false;
+            }
+        }
+
+        /** Select right now (caller already waited); picks the word at x/y, negative => all */
+        boolean beginSelectionNow(float x, float y) {
+            selectAt(x, y);
+            return selStart >= 0 && selEnd > selStart;
+        }
+
+        private void selectAt(float x, float y) {
+            try {
+                if (!tv.isShown() || tv.getWindowToken() == null
+                        || tv.getLayout() == null || tv.getWidth() <= 0) {
+                    return;
+                }
+                cancelAll();
+                CharSequence text = tv.getText();
+                int len = text == null ? 0 : text.length();
+                if (len == 0) {
+                    return;
+                }
+                int start = 0;
+                int end = len;
+                if (x >= 0 && y >= 0) {
+                    int[] word = wordBoundary(tv.getOffsetForPosition(x, y));
+                    if (word[1] > word[0]) {
+                        start = word[0];
+                        end = word[1];
+                    }
+                }
+                startSelection(start, end);
+                // finger is up: go straight to the finish path and show the action bar
+                finishSelection();
+            } catch (Throwable t) {
+                Log.w(TAG, "进入选择态失败: " + t);
+            }
+        }
+
+        boolean hasDownPoint() {
+            return hasDown;
         }
 
         @Override
@@ -320,7 +508,7 @@ public final class CustomTextSelection {
             if (overlay != null) {
                 return;
             }
-            ViewGroup decor = ViewUtils.findDecor(tv);
+            ViewGroup decor = overlayHost();
             if (decor == null) {
                 return;
             }
@@ -401,7 +589,7 @@ public final class CustomTextSelection {
                 return;
             }
             if (startHandle == null || endHandle == null) {
-                ViewGroup decor = ViewUtils.findDecor(tv);
+                ViewGroup decor = overlayHost();
                 if (decor == null) {
                     return;
                 }
@@ -511,7 +699,7 @@ public final class CustomTextSelection {
                 return;
             }
             removeMenu();
-            ViewGroup decor = ViewUtils.findDecor(tv);
+            ViewGroup decor = overlayHost();
             if (decor == null) {
                 cancel();
                 return;
@@ -807,7 +995,8 @@ public final class CustomTextSelection {
             try {
                 ClipboardManager cm = (ClipboardManager) context.getSystemService(Context.CLIPBOARD_SERVICE);
                 if (cm != null) {
-                    cm.setPrimaryClip(ClipData.newPlainText("BetterHeybox", text.subSequence(selStart, selEnd)));
+                    cm.setPrimaryClip(ClipData.newPlainText("BetterHeybox",
+                            copyText(text.subSequence(selStart, selEnd))));
                 }
                 Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show();
             } catch (Throwable t) {
@@ -825,7 +1014,7 @@ public final class CustomTextSelection {
             try {
                 Intent send = new Intent(Intent.ACTION_SEND);
                 send.setType("text/plain");
-                send.putExtra(Intent.EXTRA_TEXT, text.subSequence(selStart, selEnd).toString());
+                send.putExtra(Intent.EXTRA_TEXT, copyText(text.subSequence(selStart, selEnd)).toString());
                 Intent chooser = Intent.createChooser(send, null);
                 Activity activity = ViewUtils.findActivity(context);
                 if (activity != null) {
@@ -902,6 +1091,25 @@ public final class CustomTextSelection {
                 e = Math.min(len, o + 1);
             }
             return new int[]{s, e};
+        }
+
+        /**
+         * Copy/share sanitising: strip zero-width chars the host parks in comment text
+         */
+        private static CharSequence copyText(CharSequence src) {
+            if (src == null) {
+                return "";
+            }
+            StringBuilder sb = new StringBuilder(src.length());
+            for (int i = 0; i < src.length(); i++) {
+                char ch = src.charAt(i);
+                if (ch == '\uFEFF' || ch == '\u200B' || ch == '\u200C'
+                        || ch == '\u200D' || ch == '\u2060') {
+                    continue;
+                }
+                sb.append(ch);
+            }
+            return sb.toString();
         }
 
         private static boolean isWordChar(char ch, boolean cjk) {

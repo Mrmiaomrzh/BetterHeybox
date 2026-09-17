@@ -41,6 +41,9 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     /** 自绘制文本选择：由模块自行实现选区/高亮/复制，绕过小黑盒与系统原生选择 UI */
     public static final String KEY_CUSTOM_TEXT_SELECT = "custom_text_select";
 
+    /** Comment free-copy: the menu "copy" opens a centered selectable-text card */
+    public static final String KEY_COMMENT_FREE_COPY = "comment_free_copy";
+
     public static final String KEY_BLOCK_UPDATE = "block_update";
     public static final String KEY_SYSTEM_SHARE = "system_share";
 
@@ -257,6 +260,7 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
         m.put(KEY_HIDE_ADD, false);
         m.put(KEY_COPY_POST, true);
         m.put(KEY_CUSTOM_TEXT_SELECT, false);
+        m.put(KEY_COMMENT_FREE_COPY, true);
         m.put(KEY_SYSTEM_SHARE, true);
         m.put(KEY_VIDEO_DOWNLOAD, true);
         m.put(KEY_VIDEO_TO_MP4, true);
