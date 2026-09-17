@@ -44,6 +44,24 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     /** Comment free-copy: the menu "copy" opens a centered selectable-text card */
     public static final String KEY_COMMENT_FREE_COPY = "comment_free_copy";
 
+    public static final String KEY_SEARCH_HIDE_BANNER = "search_hide_banner";
+
+    public static final String KEY_SEARCH_HIDE_DISCOVER = "search_hide_discover";
+
+    public static final String KEY_SEARCH_HIDE_HOT_RANK = "search_hide_hot_rank";
+
+    public static final String KEY_GAME_LIB_HIDE_BANNER = "game_lib_hide_banner";
+
+    public static final String KEY_GAME_LIB_HIDE_MENU = "game_lib_hide_menu";
+
+    public static final String KEY_GAME_LIB_HIDE_SECTIONS = "game_lib_hide_sections";
+
+    public static final String KEY_GAME_LIB_HIDE_TYPES = "game_lib_hide_types";
+
+    public static final String KEY_GAME_LIB_HIDE_ENTRIES = "game_lib_hide_entries";
+
+    public static final String KEY_GAME_LIB_HIDE_SECTION_NAMES = "game_lib_hide_section_names";
+
     public static final String KEY_BLOCK_UPDATE = "block_update";
     public static final String KEY_SYSTEM_SHARE = "system_share";
 
@@ -261,6 +279,12 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
         m.put(KEY_COPY_POST, true);
         m.put(KEY_CUSTOM_TEXT_SELECT, false);
         m.put(KEY_COMMENT_FREE_COPY, true);
+        m.put(KEY_SEARCH_HIDE_BANNER, false);
+        m.put(KEY_SEARCH_HIDE_DISCOVER, false);
+        m.put(KEY_SEARCH_HIDE_HOT_RANK, false);
+        m.put(KEY_GAME_LIB_HIDE_BANNER, false);
+        m.put(KEY_GAME_LIB_HIDE_MENU, false);
+        m.put(KEY_GAME_LIB_HIDE_SECTIONS, false);
         m.put(KEY_SYSTEM_SHARE, true);
         m.put(KEY_VIDEO_DOWNLOAD, true);
         m.put(KEY_VIDEO_TO_MP4, true);

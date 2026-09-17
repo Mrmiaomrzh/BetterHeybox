@@ -29,6 +29,7 @@ import org.luckypray.dexkit.query.matchers.MethodMatcher;
 import org.luckypray.dexkit.result.ClassData;
 import org.luckypray.dexkit.result.MethodData;
 
+import com.better.heybox.hooks.GameLibraryCleanHook;
 import com.better.heybox.hooks.PromoteDetector;
 
 public final class HeyboxTargets {
@@ -641,6 +642,41 @@ public final class HeyboxTargets {
         return type.getName().startsWith("com.max.hbcommon.base.adapter.s$");
     }
 
+    private static boolean isRecommendBinder(Method method) {
+        if (method.getReturnType() != void.class || method.getParameterCount() != 2) {
+            return false;
+        }
+        Class<?>[] types = method.getParameterTypes();
+        return types[1] == Object.class && isViewHolderParam(types[0]);
+    }
+
+    private static boolean isBigBrotherBinder(Method method) {
+        if (method.getReturnType() != void.class || method.getParameterCount() != 2) {
+            return false;
+        }
+        Class<?>[] types = method.getParameterTypes();
+        return types[1] == int.class
+                && isViewHolderParam(types[0])
+                && !"androidx.recyclerview.widget.RecyclerView$ViewHolder"
+                .equals(types[0].getName());
+    }
+
+    private static boolean isBBDelegateBinder(Method method) {
+        if (method.getReturnType() != void.class || method.getParameterCount() != 3) {
+            return false;
+        }
+        Class<?>[] types = method.getParameterTypes();
+        if (types[2] == Object.class || !isViewHolderParam(types[0])) {
+            return false;
+        }
+        for (Class<?> cls = types[1]; cls != null && cls != Object.class; cls = cls.getSuperclass()) {
+            if ("com.max.hbcommon.base.adapter.s".equals(cls.getName())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** List getter signature. */
     private static boolean isLinksGetter(Method method) {
         return !method.isBridge()
@@ -665,6 +701,30 @@ public final class HeyboxTargets {
 
     private static Target[] baseDefinitions() {
         return new Target[]{
+                new Target(GameLibraryCleanHook.TARGET_GAME_REC_BIND,
+                        new String[]{GameLibraryCleanHook.ADAPTER_CLASS},
+                        new String[0],
+                        GameLibraryCleanHook.CLASS_ANCHORS,
+                        new String[0],
+                        2, 2,
+                        HeyboxTargets::isRecommendBinder),
+
+                new Target(GameLibraryCleanHook.TARGET_GAME_REC_WRAPPER,
+                        new String[]{GameLibraryCleanHook.WRAPPER_CLASS},
+                        new String[0],
+                        new String[0],
+                        new String[0],
+                        2, 2,
+                        HeyboxTargets::isBigBrotherBinder),
+
+                new Target(GameLibraryCleanHook.TARGET_GAME_REC_BB,
+                        new String[]{GameLibraryCleanHook.BB_DELEGATE_CLASS},
+                        new String[0],
+                        GameLibraryCleanHook.BB_CLASS_ANCHORS,
+                        new String[0],
+                        3, 3,
+                        HeyboxTargets::isBBDelegateBinder),
+
                 new Target(PromoteDetector.TARGET_BBS_RENDER,
                         new String[]{
                                 "com.max.xiaoheihe.module.bbs.utils.b",
