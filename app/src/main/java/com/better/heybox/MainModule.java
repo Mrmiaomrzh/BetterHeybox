@@ -112,7 +112,15 @@ public class MainModule extends XposedModule {
             }
         } catch (Throwable ignored) {
         }
-        if (isEnabled(App.KEY_DEBUG_NO_DOWNGRADE, false)) {
+        if (!BuildFlags.DEBUG) {
+            try {
+                if (HeyboxPrefs.getBoolean(App.KEY_DEBUG_NO_DOWNGRADE, false)) {
+                    HeyboxPrefs.setBoolean(App.KEY_DEBUG_NO_DOWNGRADE, false);
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        if (BuildFlags.DEBUG && isEnabled(App.KEY_DEBUG_NO_DOWNGRADE, false)) {
             try {
                 HeyboxPrefs.setString(App.KEY_MODULE_VERSION_FLOOR, "0");
             } catch (Throwable ignored) {

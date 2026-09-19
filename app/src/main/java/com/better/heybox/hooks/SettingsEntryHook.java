@@ -87,7 +87,6 @@ public final class SettingsEntryHook {
                     Object self = chain.getThisObject();
                     if (self instanceof Activity) {
                         final Activity activity = (Activity) self;
-                        // 等首帧渲染完成再弹，避免盖在启动画面上
                         activity.getWindow().getDecorView().postDelayed(
                                 () -> maybeShowDisclaimer(activity), 1000L);
                     }
@@ -128,7 +127,7 @@ public final class SettingsEntryHook {
         WATCH_TOPIC_SEARCH,GAME_LIB_TYPES, GAME_LIB_ENTRIES,GAME_LIB_SECTIONS,GAME_LIB_DIAG
     }
 
-    private static class SwitchDef {
+    static class SwitchDef {
         final String title;
         final String desc;
         final String key;
@@ -160,7 +159,7 @@ public final class SettingsEntryHook {
         }
     }
 
-        private static class SettingsGroup {
+    static class SettingsGroup {
         final String title;
         final SwitchDef[] items;
         SettingsGroup(String title, SwitchDef[] items) {
@@ -220,8 +219,6 @@ public final class SettingsEntryHook {
                     new SwitchDef("伪装通知权限", "伪装通知已开启，获得签到加成", App.KEY_FAKE_NOTIFICATION, false, false),
                     new SwitchDef("屏蔽更新", "屏蔽小黑盒更新入口", App.KEY_BLOCK_UPDATE, false, false),
                     new SwitchDef("记录日志", null, App.KEY_LOG, false, false),
-                    new SwitchDef("调试：忽略版本降级限制", "清除版本下限，允许装回更旧的模块",
-                            App.KEY_DEBUG_NO_DOWNGRADE, false, false),
                     new SwitchDef("详细日志", "关闭时只记错误日志；开启后记录全部并附带帖子信息",
                             App.KEY_VERBOSE_LOG, false, false),
                     new SwitchDef("查看日志", "预览最近 200 行模块日志", null, false, false,
@@ -412,10 +409,20 @@ public final class SettingsEntryHook {
     private static void addBase(List<SettingsGroup> out, String title) {
         for (SettingsGroup g : BASE_GROUPS) {
             if (g.title.equals(title)) {
-                out.add(g);
+                out.add(withExtraRows(g, DebugSettings.generalRows()));
                 return;
             }
         }
+    }
+
+    private static SettingsGroup withExtraRows(SettingsGroup g, SwitchDef[] extra) {
+        if (extra == null || extra.length == 0) {
+            return g;
+        }
+        SwitchDef[] rows = new SwitchDef[g.items.length + extra.length];
+        System.arraycopy(g.items, 0, rows, 0, g.items.length);
+        System.arraycopy(extra, 0, rows, g.items.length, extra.length);
+        return new SettingsGroup(g.title, rows);
     }
 
     private static final String TITLE_AD_FILTER = "广告过滤";
@@ -487,15 +494,15 @@ public final class SettingsEntryHook {
                         null, false, false, true, App.KEY_WATCH_PUSH_CUSTOM),
         }));
 
-        groups.add(new SettingsGroup("测试与调试", new SwitchDef[]{
-                new SwitchDef("测试提醒", "发送一条测试消息",
-                        null, false, false, true, null, Action.WATCH_TEST_PUSH),
-                new SwitchDef("立即检查", "手动检查一次",
-                        null, false, false, true, null, Action.WATCH_CHECK),
-                new SwitchDef("调试：推送最近 3 条",
-                        "立即推送最近 3 条",
-                        null, false, false, true, null, Action.WATCH_DEBUG_PUSH3),
-        }));
+        List<SwitchDef> testRows = new ArrayList<>();
+        testRows.add(new SwitchDef("测试提醒", "发送一条测试消息",
+                null, false, false, true, null, Action.WATCH_TEST_PUSH));
+        testRows.add(new SwitchDef("立即检查", "手动检查一次",
+                null, false, false, true, null, Action.WATCH_CHECK));
+        testRows.add(new SwitchDef("调试：推送最近 3 条",
+                "立即推送最近 3 条",
+                null, false, false, true, null, Action.WATCH_DEBUG_PUSH3));
+        groups.add(new SettingsGroup("测试与调试", testRows.toArray(new SwitchDef[0])));
 
         return groups;
     }
