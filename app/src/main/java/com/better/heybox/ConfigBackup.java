@@ -12,7 +12,6 @@ public final class ConfigBackup {
     private static final String KEY_EXPORTED_AT = "exportedAt";
     private static final String KEY_BOOLEANS = "booleans";
     private static final String KEY_STRINGS = "strings";
-    /** 派生自 {@link App#BOOLEAN_DEFAULTS} */
     private static final String[] BOOLEAN_KEYS =
             App.BOOLEAN_DEFAULTS.keySet().toArray(new String[0]);
     private static final String[] STRING_KEYS = {
@@ -36,6 +35,7 @@ public final class ConfigBackup {
             App.KEY_GLASS_LIGHT_PRESET,
             App.KEY_POST_MIN_LEVEL,
             App.KEY_POST_KEYWORDS,
+            App.KEY_COMMENT_KEYWORDS,
             App.KEY_GAME_LIB_HIDE_TYPES,
             App.KEY_GAME_LIB_HIDE_ENTRIES,
             App.KEY_GAME_LIB_HIDE_SECTION_NAMES,
@@ -47,7 +47,6 @@ public final class ConfigBackup {
             App.KEY_AI_MODEL,
             App.KEY_AI_PROMPT,
             App.KEY_AI_MAX_TOKENS,
-            // 动态推送（#26）：目标与推送配置是字符串，需要在备份里单独列出
             App.KEY_WATCH_USERS,
             App.KEY_WATCH_TOPICS,
             App.KEY_WATCH_KEYWORDS,

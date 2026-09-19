@@ -75,7 +75,6 @@ public final class SettingsEntryHook {
         hookLaunchPrompt(cl);
     }
 
-    /** 首次检测到独立液态玻璃模块且未做选择时，小黑盒打开即弹实现选择（每次进程启动至多一次） */
     private static volatile boolean sLaunchPromptShown;
 
     private void hookLaunchPrompt(ClassLoader cl) {
@@ -121,7 +120,7 @@ public final class SettingsEntryHook {
     enum Action {
         NONE, EDIT_LINK, CLEAR_DAILY, CHANNEL, EXPORT, IMPORT,
         EXPORT_LOG, CLEAR_LOG, VIEW_LOG, RUNTIME_STATUS, TARGET_STATUS, OPEN_WEB, PICK_DIR, RESET_GLASS, CHOOSE_GLASS,GLASS_SHEET,
-        POST_LEVEL, POST_KEYWORDS, AI_PROVIDER, AI_PROMPT, AI_TEST, AI_MAX_TOKENS,
+        POST_LEVEL, POST_KEYWORDS, COMMENT_KEYWORDS, AI_PROVIDER, AI_PROMPT, AI_TEST, AI_MAX_TOKENS,
         REDIRECT_FORCE, REDIRECT_BLOCK, REDIRECT_TARGET, WEB_LOG, ABOUT,
         WATCH_USERS, WATCH_KEYWORDS, WATCH_IMPORT_FOLLOW, WATCH_TEST_PUSH, WATCH_CHECK,
         WATCH_DEBUG_PUSH3,WATCH_V2,OPEN_PAGE,
@@ -314,7 +313,7 @@ public final class SettingsEntryHook {
                 com.better.heybox.watch.WatchConfig.load(module);
         groups.add(new SettingsGroup("功能分类", new SwitchDef[]{
                 entry(PAGE_ADS, "广告与内容过滤",
-                        "广告、推广贴、发帖过滤、搜索 / 游戏库精简、分享净化"),
+                        "广告、推广贴、发帖过滤、评论过滤、搜索 / 游戏库精简、分享净化"),
                 entry(PAGE_UI, "界面与外观",
                         "液态玻璃、底栏隐藏、单列信息流"),
                 entry(PAGE_BROWSE, "浏览与下载",
@@ -367,6 +366,7 @@ public final class SettingsEntryHook {
         if (PAGE_ADS.equals(pageId)) {
             addBase(groups, "广告过滤");
             insertPostFilterGroup(groups);
+            insertCommentFilterGroup(groups);
             addBase(groups, "搜索页精简");
             groups.add(buildGameLibGroup());
             addBase(groups, TITLE_SHARE_PURIFY);
@@ -942,8 +942,7 @@ public final class SettingsEntryHook {
         String providerId = module.getString(App.KEY_AI_PROVIDER, "");
         SettingsGroup group = new SettingsGroup("发帖过滤", new SwitchDef[]{
                 new SwitchDef("屏蔽视频帖",
-                        "信息流中隐藏视频帖（首页推荐/瀑布流/社区/话题/榜单）；"
-                                + "按宿主 link_style 与 has_video 判定",
+                        "信息流中隐藏视频帖；",
                         App.KEY_BLOCK_VIDEO_POST, false, false),
                 new SwitchDef("屏蔽低等级发帖",
                         minLevel > 0 ? "当前：屏蔽 Lv" + minLevel + " 以下"
@@ -980,6 +979,30 @@ public final class SettingsEntryHook {
         int insertAt = groups.size();
         for (int i = 0; i < groups.size(); i++) {
             if (TITLE_AD_FILTER.equals(groups.get(i).title)) {
+                insertAt = i + 1;
+                break;
+            }
+        }
+        groups.add(insertAt, group);
+    }
+
+    private void insertCommentFilterGroup(List<SettingsGroup> groups) {
+        int kwCount = countConfiguredLines(module.getString(App.KEY_COMMENT_KEYWORDS, ""));
+        SettingsGroup group = new SettingsGroup("评论过滤", new SwitchDef[]{
+                new SwitchDef("屏蔽插眼评论",
+                        "在数据/列表层直接摘掉带 Cy 标的评论",
+                        App.KEY_HOST_HIDE_CY, true, false),
+                new SwitchDef("评论关键词屏蔽/ 无意义评论",
+                        "关键词屏蔽评论",
+                        App.KEY_BLOCK_CY_COMMENT, false, false),
+                new SwitchDef("评论关键词屏蔽",
+                        kwCount > 0 ? "已配置 " + kwCount + " 个"
+                                : "命中评论正文即屏蔽",
+                        null, false, false, true, null, Action.COMMENT_KEYWORDS),
+        });
+        int insertAt = groups.size();
+        for (int i = 0; i < groups.size(); i++) {
+            if ("发帖过滤".equals(groups.get(i).title)) {
                 insertAt = i + 1;
                 break;
             }
@@ -1978,6 +2001,9 @@ public final class SettingsEntryHook {
                     case POST_KEYWORDS:
                         setRowClick(itemCls, item, v -> showPostKeywordsDialog(activity));
                         break;
+                    case COMMENT_KEYWORDS:
+                        setRowClick(itemCls, item, v -> showCommentKeywordsDialog(activity));
+                        break;
                     case GAME_LIB_TYPES:
                         setRowClick(itemCls, item, v -> showGameLibPicker(activity,
                                 GameLibraryCleanHook.PICK_TYPE, "自定义隐藏类型"));
@@ -2490,6 +2516,11 @@ public final class SettingsEntryHook {
                 "一行一个，命中标题或正文即屏蔽；regex: 前缀为正则", false);
     }
 
+    private void showCommentKeywordsDialog(Activity activity) {
+        showMultilineEditDialog(activity, "评论关键词", App.KEY_COMMENT_KEYWORDS,
+                "一行一个，命中评论正文即屏蔽；regex: 前缀为正则", false);
+    }
+
     private void showAiPromptDialog(Activity activity) {
         showMultilineEditDialog(activity, "判定提示词", App.KEY_AI_PROMPT,
                 "留空使用内置默认提示词", true);
@@ -2734,6 +2765,9 @@ public final class SettingsEntryHook {
             normalized = raw.trim();
         }
         HeyboxPrefs.setString(key, normalized);
+        if (App.KEY_COMMENT_KEYWORDS.equals(key)) {
+            CommentFilterHook.refresh();
+        }
         LogRecorder.recordEvent(title + " 已保存");
         Toast.makeText(activity, "已保存，立即生效", Toast.LENGTH_SHORT).show();
         refreshEmbeddedPanel(activity);
@@ -3693,6 +3727,9 @@ public final class SettingsEntryHook {
         }
         if (App.KEY_CUSTOM_TEXT_SELECT.equals(key) || App.KEY_COPY_POST.equals(key)) {
             TextSelectHook.refresh();
+        }
+        if (App.KEY_BLOCK_CY_COMMENT.equals(key) || App.KEY_HOST_HIDE_CY.equals(key)) {
+            CommentFilterHook.refresh();
         }
         return localOk;
     }

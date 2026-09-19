@@ -174,6 +174,14 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
 
     /** 发帖过滤：首页信息流屏蔽视频帖 */
     public static final String KEY_BLOCK_VIDEO_POST = "block_video_post";
+    /** 评论过滤：强制开启小黑盒自带的「屏蔽插眼」 */
+    public static final String KEY_HOST_HIDE_CY = "host_hide_cy";
+
+    /** 评论过滤：模块兜底屏蔽 cy（插眼）/ 无意义灌水评论 */
+    public static final String KEY_BLOCK_CY_COMMENT = "block_cy_comment";
+
+    /** 评论过滤：关键词，一行一个，命中评论正文即屏蔽 */
+    public static final String KEY_COMMENT_KEYWORDS = "comment_filter_keywords";
 
     /** 诊断：记录首页流条目判定信息 */
     public static final String KEY_FLOW_DIAGNOSE = "flow_diagnose";
@@ -306,6 +314,8 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
         m.put(KEY_POST_AI_ENABLED, false);
         m.put(KEY_POST_NO_LEVEL, false);
         m.put(KEY_BLOCK_VIDEO_POST, false);
+        m.put(KEY_HOST_HIDE_CY, true);
+        m.put(KEY_BLOCK_CY_COMMENT, false);
         m.put(KEY_FLOW_DIAGNOSE, false);
         m.put(KEY_VERBOSE_LOG, false);
         m.put(KEY_FAVOUR_AUTO_CLEAN, false);
