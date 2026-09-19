@@ -2,6 +2,7 @@ package com.better.heybox.hooks;
 
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
@@ -37,8 +38,6 @@ public final class CommentFilterHook {
     private static final String BASE_ADAPTER_HOLDER_CLASS =
             "com.max.hbcommon.base.adapter.s$e";
     private static final String SUB_COMMENT_VIEW_CLASS = "com.max.xiaoheihe.view.SubCommentView";
-    private static final String SUB_COMMENTS_OBJ_CLASS = "com.max.basebbs.bean.BBSSubCommentsObj";
-
 
     private static final String HOLDER_PREFIX = "com.max.hbcommon.base.adapter.s$";
     private static final String VIEW_HOLDER_CLASS =
@@ -60,9 +59,15 @@ public final class CommentFilterHook {
     /** Seen adapters (weak). */
     private final WeakHashMap<Object, Boolean> adapterRefs = new WeakHashMap<>();
 
-    /** Floors already auto-loaded (weak, key = main comment). */
-    private final java.util.Map<Object, Boolean> autoLoadedFloors =
+    /** Auto load-more count per floor (weak, key = main comment). */
+    private final java.util.Map<Object, Integer> autoLoadCounts =
             java.util.Collections.synchronizedMap(new WeakHashMap<>());
+
+    private static final int VISIBLE_TARGET = 6;
+    private static final int MAX_AUTO_LOADS = 12;
+    private static final long AUTO_LOAD_GAP_MS = 700L;
+
+    private volatile long lastAutoLoadAt;
 
     private final Handler main = createMainHandler();
 
@@ -93,7 +98,7 @@ public final class CommentFilterHook {
         // generic comment adapter
         boolean broad = hookBaseAdapterBind(cl);
         int legacy = broad ? 0 : hookCommentAdapterBinds(cl);
-        // sub-comments: drop cy rows at list level
+        // sub-comments: preview watcher + auto load more
         boolean subList = hookSubCommentListFilter(cl);
         // sub-comment rows: data-based hide (container kept)
         int subRows = hookSubCommentRowBinds(cl);
@@ -392,19 +397,10 @@ public final class CommentFilterHook {
         return result;
     }
 
-    // ---------- sub-comment list ----------
-
-    /** setTotalList([main, subs...]): pass a cy-filtered copy. */
     private boolean hookSubCommentListFilter(ClassLoader cl) {
         try {
             Class<?> cls = Class.forName(SUB_COMMENT_VIEW_CLASS, false, cl);
             module.hook(cls.getDeclaredMethod("setTotalList", List.class)).intercept(this::onSetTotalList);
-            try {
-                Class<?> sub = Class.forName(SUB_COMMENTS_OBJ_CLASS, false, cl);
-                module.hook(cls.getDeclaredMethod("q", sub)).intercept(this::onAppendSubComments);
-            } catch (Throwable t) {
-                module.logd(Log.WARN, module.TAG, "楼中楼追加挂点跳过: " + t);
-            }
             Checkpoint.mark("评论过滤楼中楼列表安装: ok");
             return true;
         } catch (Throwable t) {
@@ -415,53 +411,86 @@ public final class CommentFilterHook {
     }
 
     private Object onSetTotalList(XposedInterface.Chain chain) throws Throwable {
-        Object arg = chain.getArg(0);
-        List<?> filtered = null;
+        Object result = chain.proceed();
         try {
+            Object arg = chain.getArg(0);
             if (cyMarkFilterActive() && arg instanceof List) {
-                filtered = filterSubComments((List<?>) arg);
+                List<?> list = (List<?>) arg;
+                if (list.size() > 1) {
+                    Object floorKey = list.get(0);
+                    int hidden = countFilteredSubComments(list);
+                    int loaded = list.size() - 1;
+                    int total = parseInt(safeGet(floorKey, "getChildNum"), 0);
+                    boolean needMore = total > 0 ? loaded < total : loaded - hidden < VISIBLE_TARGET;
+                    if (hidden > 0 && needMore) {
+                        module.logd(Log.INFO, module.TAG, "楼中楼自动补数据：已加载 " + loaded + "/"
+                                + (total > 0 ? String.valueOf(total) : "?") + " 条、屏蔽 " + hidden
+                                + " 条，下一页游标=" + safeGet(list.get(list.size() - 1), "getCommentid"));
+                        scheduleAutoLoadMore(chain.getThisObject(), floorKey);
+                    }
+                }
             }
         } catch (Throwable t) {
-            module.logd(Log.WARN, module.TAG, "楼中楼列表过滤异常，放行: " + t);
+            module.logd(Log.WARN, module.TAG, "楼中楼预览检查异常，放行: " + t);
         }
-        if (filtered != null && filtered.size() <= 1) {
-            // all loaded subs filtered: keep container, auto load more once
-            Object result = chain.proceed();
-            scheduleAutoLoadMore(chain.getThisObject(), arg instanceof List ? (List<?>) arg : null);
-            return result;
-        }
-        return filtered == null ? chain.proceed() : chain.proceed(new Object[]{filtered});
+        return result;
     }
 
-
-    /** Auto click view-more once per floor. */
-    private void scheduleAutoLoadMore(Object sub, List<?> original) {
-        if (main == null || !(sub instanceof ViewGroup) || original == null || original.isEmpty()) {
-            return;
-        }
-        Object key = original.get(0);
-        if (key == null) {
-            return;
-        }
-        synchronized (autoLoadedFloors) {
-            if (autoLoadedFloors.containsKey(key)) {
-                return;
+    private int countFilteredSubComments(List<?> list) {
+        int hidden = 0;
+        for (int i = 1; i < list.size(); i++) {
+            Object comment = list.get(i);
+            if (comment != null && (isEnabled() ? singleReason(comment) : cyMarkReason(comment)) != null) {
+                hidden++;
             }
-            autoLoadedFloors.put(key, Boolean.TRUE);
+        }
+        return hidden;
+    }
+
+    private static int parseInt(String text, int def) {
+        try {
+            return Integer.parseInt(text.trim());
+        } catch (Throwable t) {
+            return def;
+        }
+    }
+
+    private void scheduleAutoLoadMore(Object sub, Object floorKey) {
+        if (main == null || !(sub instanceof ViewGroup) || floorKey == null) {
+            return;
         }
         final ViewGroup group = (ViewGroup) sub;
-        main.post(() -> {
-            try {
-                View footer = findLoadMoreFooter(group);
-                if (footer == null) {
+        main.post(() -> tryAutoLoad(group, floorKey, 0));
+    }
+
+    private void tryAutoLoad(ViewGroup group, Object floorKey, int retry) {
+        try {
+            if (SystemClock.elapsedRealtime() - lastAutoLoadAt < AUTO_LOAD_GAP_MS) {
+                if (retry < 3) {
+                    main.postDelayed(() -> tryAutoLoad(group, floorKey, retry + 1), AUTO_LOAD_GAP_MS);
+                }
+                return;
+            }
+            synchronized (autoLoadCounts) {
+                Integer done = autoLoadCounts.get(floorKey);
+                if (done != null && done >= MAX_AUTO_LOADS) {
                     return;
                 }
-                footer.performClick();
-                module.logd(Log.INFO, module.TAG, "楼中楼预览全被屏蔽，已自动加载一次更多回复");
-            } catch (Throwable t) {
-                module.logd(Log.WARN, module.TAG, "自动加载更多回复失败: " + t);
             }
-        });
+            View footer = findLoadMoreFooter(group);
+            if (footer == null) {
+                return;
+            }
+                synchronized (autoLoadCounts) {
+                    Integer done = autoLoadCounts.get(floorKey);
+                    autoLoadCounts.put(floorKey, done == null ? 1 : done + 1);
+                }
+                lastAutoLoadAt = SystemClock.elapsedRealtime();
+                footer.performClick();
+                module.logd(Log.INFO, module.TAG, "楼中楼可显示评论不足，已自动加载下一页");
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "自动加载更多回复失败: " + t);
+        }
     }
 
     /** Find view-more footer (text based, skip collapse). */
@@ -497,62 +526,6 @@ public final class CommentFilterHook {
             }
         }
         return "";
-    }
-
-    /** Filter cy out of load-more response. */
-    private Object onAppendSubComments(XposedInterface.Chain chain) throws Throwable {
-        try {
-            if (cyMarkFilterActive()) {
-                Object value = safeInvoke(chain.getArg(0), "getComments");
-                if (value instanceof List) {
-                    List<?> list = (List<?>) value;
-                    int total = list.size();
-                    int removed = 0;
-                    for (int i = list.size() - 1; i >= 0; i--) {
-                        if (cyMarkReason(list.get(i)) != null) {
-                            removeAt(list, i);
-                            removed++;
-                        }
-                    }
-                    module.logd(Log.INFO, module.TAG, "楼中楼加载更多：响应 " + total
-                            + " 条，摘除 " + removed + " 条带 Cy 标");
-                }
-            }
-        } catch (Throwable t) {
-            module.logd(Log.WARN, module.TAG, "楼中楼追加过滤异常，放行: " + t);
-        }
-        return chain.proceed();
-    }
-
-    @SuppressWarnings("unchecked")
-    private void removeAt(List<?> list, int index) {
-        ((List<Object>) list).remove(index);
-    }
-
-    /** Filtered copy; null = pass through. */
-    private List<?> filterSubComments(List<?> list) {
-        if (list.size() <= 1) {
-            return null;
-        }
-        List<Object> keep = new ArrayList<>(list.size());
-        keep.add(list.get(0));
-        int blocked = 0;
-        for (int i = 1; i < list.size(); i++) {
-            Object comment = list.get(i);
-            String reason = isEnabled() ? singleReason(comment) : cyMarkReason(comment);
-            if (reason == null) {
-                keep.add(comment);
-                continue;
-            }
-            blocked++;
-            logBlocked("楼中楼", comment, reason);
-        }
-        if (blocked == 0) {
-            return null;
-        }
-        module.logd(Log.INFO, module.TAG, "屏蔽评论[楼中楼] 本楼共屏蔽 " + blocked
-                + " 条、保留 " + (keep.size() - 1) + " 条子评论（原始 " + list.size() + " 条）");
-        return keep;
     }
 
     private void hideCyView(View view) {
