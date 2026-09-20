@@ -9,11 +9,11 @@ public final class ModuleStats {
 
     /** copy-helper calls seen (includes non-comment copies: row bindings also hit helpers) */
     public static final AtomicInteger commentCopyHelperCalls = new AtomicInteger();
-    /** helper calls with a pending comment long-press record (real comment copy) */
+    /** helper calls where the long-press record was available (one-view fast path) */
     public static final AtomicInteger commentCopyWithRecord = new AtomicInteger();
-    /** helper calls without such a record: passed straight to the host */
+    /** helper calls with no record: window search is required (some builds never record) */
     public static final AtomicInteger commentCopyNoRecord = new AtomicInteger();
-    /** full decor-view DFS runs; stays 0 after #37 */
+    /** budgeted window DFS runs (one per record-less helper call, only on real copies) */
     public static final AtomicInteger commentDfsRuns = new AtomicInteger();
     /** total View nodes visited by the DFS */
     public static final AtomicLong commentDfsNodes = new AtomicLong();

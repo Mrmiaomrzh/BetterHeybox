@@ -202,7 +202,9 @@ public final class CommentCopyHook {
     }
 
     private void hookCopyMethod(final Class<?> clazz, final Method method) {
-        final int textIdx = textParamIndex(method.getParameterTypes());
+        final Class<?>[] params = method.getParameterTypes();
+        final int textIdx = textParamIndex(params);
+        final int ctxIdx = contextParamIndex(params);
         module.hook(method).intercept(chain -> {
             try {
                 if (canIntercept() && !inRecentSheetWindow()) {
@@ -211,25 +213,29 @@ public final class CommentCopyHook {
                             && ((CharSequence) textArg).length() > 0) {
                         CharSequence text = (CharSequence) textArg;
                         ModuleStats.commentCopyHelperCalls.incrementAndGet();
-                        // #37 gate: no pending comment long-press -> not a comment copy (row binds,
-                        // broadcasts and toasts all go through these helpers); pass through, never scan
+                        // Do NOT require a long-press record here: on some builds the comment long-press
+                        // never reaches View#performLongClick, so a record-less copy must still be matched
+                        // by text inside the window (that is the only path that ever worked before #37).
                         View recorded = validRecordedView();
-                        if (recorded == null) {
-                            ModuleStats.commentCopyNoRecord.incrementAndGet();
-                        } else {
+                        Activity activity = activityOfArg(chain.getArg(ctxIdx));
+                        if (activity == null && recorded != null) {
+                            activity = ViewUtils.findActivity(recorded);
+                        }
+                        if (recorded != null) {
                             ModuleStats.commentCopyWithRecord.incrementAndGet();
-                            View comment = findCommentView(
-                                    ViewUtils.findActivity(recorded), text, recorded);
-                            if (comment instanceof TextView) {
-                                markIntercepted();
-                                module.logd(Log.WARN, module.TAG,
-                                        "[评论自由复制] 拦下评论复制（助手 "
-                                                + clazz.getSimpleName() + "#"
-                                                + method.getName() + "）："
-                                                + summarize(text.toString()) + " → 改弹二级菜单");
-                                showCopySheet((TextView) comment, text, null);
-                                return null;
-                            }
+                        } else {
+                            ModuleStats.commentCopyNoRecord.incrementAndGet();
+                        }
+                        View comment = findCommentView(activity, text, recorded);
+                        if (comment instanceof TextView) {
+                            markIntercepted();
+                            module.logd(Log.WARN, module.TAG,
+                                    "[评论自由复制] 拦下评论复制（助手 "
+                                            + clazz.getSimpleName() + "#"
+                                            + method.getName() + "）："
+                                            + summarize(text.toString()) + " → 改弹二级菜单");
+                            showCopySheet((TextView) comment, text, null);
+                            return null;
                         }
                     }
                 }
@@ -258,6 +264,16 @@ public final class CommentCopyHook {
             }
         }
         return -1;
+    }
+
+    private Activity activityOfArg(Object arg) {
+        if (arg instanceof View) {
+            return ViewUtils.findActivity((View) arg);
+        }
+        if (arg instanceof Context) {
+            return ViewUtils.findActivity((Context) arg);
+        }
+        return null;
     }
 
     // ---- (1b) clipboard exit

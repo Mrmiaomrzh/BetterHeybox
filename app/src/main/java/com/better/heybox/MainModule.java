@@ -424,7 +424,8 @@ public class MainModule extends XposedModule {
                 logd(Log.INFO, TAG, "运行状态检查点已写入 RemotePreferences");
             }
         } catch (Throwable t) {
-            logd(Log.WARN, TAG, "运行状态检查点写入失败", t);
+            // RemotePreferences is read-only on some frameworks: stay quiet, no stack trace
+            logv(TAG, "运行状态检查点写入失败（框架只读）");
         }
     }
     public boolean isEnabled(String key, boolean def) {
