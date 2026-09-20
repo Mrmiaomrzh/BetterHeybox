@@ -13,10 +13,6 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
 
-/**
- * 模块日志导出：把「运行状态检查点 + 日志文件」打包成排查文本。
- * 小黑盒进程日志因沙箱不可读，但其检查点已写入 RemotePreferences，合并进同一份导出
- */
 public final class LogExport {
 
     private static final String TAG = "BetterHeybox";
@@ -49,12 +45,14 @@ public final class LogExport {
                 : "----- 本进程（小黑盒）检查点 -----\n")
                 .append(Checkpoint.dump()).append('\n');
 
+        sb.append('\n').append("----- 模块统计（本进程） -----\n")
+                .append(ModuleStats.snapshot()).append('\n');
+
         appendFile(sb, LogRecorder.getLogFilePath(), "日志 log.txt");
         appendFile(sb, LogRecorder.getLogBackupFilePath(), "上一份日志 log.1.txt");
         return sb.toString();
     }
 
-    /** 进程名是否以 com.better.heybox 开头 */
     private static boolean isModuleProcess() {
         String name = App.currentProcessName();
         return name != null && name.startsWith("com.better.heybox");

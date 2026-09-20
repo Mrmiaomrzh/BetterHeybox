@@ -2098,16 +2098,21 @@ public final class SettingsEntryHook {
                         setRowClick(itemCls, item, v -> suggestWatchKeywords(activity));
                         break;
                     case WATCH_TEST_PUSH:
-                        setRowClick(itemCls, item, v -> testWatchPush(activity));
+                        setRowClick(itemCls, item, v -> {
+                            module.forceInstallHook(App.KEY_WATCH_ENABLED);
+                            testWatchPush(activity);
+                        });
                         break;
                     case WATCH_DEBUG_PUSH3:
                         setRowClick(itemCls, item, v -> {
                             Toast.makeText(activity, "正在拉取最近 3 条并推送…", Toast.LENGTH_SHORT).show();
+                            module.forceInstallHook(App.KEY_WATCH_ENABLED);
                             com.better.heybox.watch.WatchEngine.debugPushLatest(activity, 3);
                         });
                         break;
                     case WATCH_CHECK:
                         setRowClick(itemCls, item, v -> {
+                            module.forceInstallHook(App.KEY_WATCH_ENABLED);
                             com.better.heybox.watch.WatchEngine.checkNow(activity, true);
                             Toast.makeText(activity, "已触发检查，结果见日志", Toast.LENGTH_SHORT).show();
                         });
@@ -3082,6 +3087,8 @@ public final class SettingsEntryHook {
     private void resetLiquidGlassSettings(Activity activity) {
         HeyboxPrefs.setBoolean(App.KEY_LIQUID_GLASS, true);
         HeyboxPrefs.setBoolean(App.KEY_GLASS_IMMERSIVE, true);
+        module.onSettingChanged(App.KEY_LIQUID_GLASS);
+        module.onSettingChanged(App.KEY_GLASS_IMMERSIVE);
         HeyboxPrefs.setBoolean(App.KEY_GLASS_ADAPTIVE, true);
         HeyboxPrefs.setString(App.KEY_GLASS_DARK_COLOR, "#000000");
         HeyboxPrefs.setString(App.KEY_GLASS_DARK_ALPHA, "56");
@@ -3719,6 +3726,10 @@ public final class SettingsEntryHook {
         LogRecorder.setContext(activity);
         HeyboxPrefs.init(activity);
         boolean localOk = HeyboxPrefs.setBoolean(key, value);
+        // drop the log-switch cache so a verbose-log toggle applies on the next call (#37)
+        module.invalidateLogSwitches();
+        // install hooks skipped at startup: enabling a switch takes effect without a restart (#37)
+        module.onSettingChanged(key);
         LogRecorder.recordEvent("内嵌面板开关已写入小黑盒本地配置: key=" + key
                 + ", value=" + value + ", ok=" + localOk);
         try {

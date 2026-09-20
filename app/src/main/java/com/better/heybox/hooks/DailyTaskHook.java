@@ -8,6 +8,7 @@ import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
@@ -26,6 +27,7 @@ import com.better.heybox.App;
 import com.better.heybox.HeyboxPrefs;
 import com.better.heybox.Logs;
 import com.better.heybox.MainModule;
+import com.better.heybox.ModuleStats;
 import com.better.heybox.ViewUtils;
 
 /**
@@ -70,6 +72,12 @@ public final class DailyTaskHook {
     private static final long STEP_TIMEOUT_MS = 15000L;
 
     /**
+     * Min interval for the "no share link configured" warning (#37): the check runs on every
+     * MainActivity.onResume, so the old code spammed one WARN per browse-time resume.
+     */
+    private static final long NO_LINK_LOG_INTERVAL_MS = 10 * 60_000L;
+
+    /**
      * UMeng 各渠道分享入口：{类名, 成功回调默认渠道, 日志名}。
      * 必须在 handler.share() 入口拦截——QQ/微信 handler 内部先判断 isInstall()，
      * 未安装就跳 QQ/微信的「下载页面」（log.umsns.com 的 link 落地页），
@@ -100,6 +108,8 @@ public final class DailyTaskHook {
 
     /** 缓存的 applicationContext（微信/微博回调拿不到 Context 时兜底） */
     private volatile Context autoContext;
+
+    private volatile long lastNoLinkLogAt;
 
     /**
      * TitleBar 当前 action 图标资源名：同一 setter 在不同页面语义不同
@@ -1001,12 +1011,18 @@ public final class DailyTaskHook {
         if (!module.isEnabled(App.KEY_DAILY_TASK_ENABLED, false)) {
             return;
         }
+        ModuleStats.dailyTaskResumeChecks.incrementAndGet();
         handleResetFlag();
         if (isTodayDone()) {
             return;
         }
         if (!hasAnyLink()) {
-            module.logd(Log.WARN, module.TAG, "每日任务：未配置分享链接（帖子/游戏详情/游戏评价）");
+            ModuleStats.dailyTaskNoLink.incrementAndGet();
+            long now = SystemClock.uptimeMillis();
+            if (now - lastNoLinkLogAt >= NO_LINK_LOG_INTERVAL_MS) {
+                lastNoLinkLogAt = now;
+                module.logd(Log.WARN, module.TAG, "每日任务：未配置分享链接（帖子/游戏详情/游戏评价）");
+            }
             return;
         }
         autoActive = true;

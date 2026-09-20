@@ -31,6 +31,7 @@ import java.util.List;
 import com.better.heybox.App;
 import com.better.heybox.CustomTextSelection;
 import com.better.heybox.MainModule;
+import com.better.heybox.ModuleStats;
 import com.better.heybox.ThemeUtils;
 import com.better.heybox.ViewUtils;
 
@@ -52,6 +53,8 @@ public final class CommentCopyHook {
     private static final long MENU_DISMISS_DELAY_MS = 200L;
     private static final long SHEET_WINDOW_MS = 1_500L;
     private static final long TOAST_SUPPRESS_MS = 2_500L;
+    private static final int MAX_SCAN_NODES = 4_000;
+    private static final long NO_MATCH_LOG_INTERVAL_MS = 2_000L;
 
     private final MainModule module;
 
@@ -64,6 +67,7 @@ public final class CommentCopyHook {
     private volatile long lastLongPressAt;
     private volatile long lastSheetAt;
     private volatile long suppressToastUntil;
+    private volatile long lastNoMatchLogAt;
     // let clipboard writes through while the card is open
     private volatile boolean freeCopyScreenShowing;
 
@@ -104,55 +108,65 @@ public final class CommentCopyHook {
 
     // ---- (1a) host copy helpers
 
+    /**
+     * #37: only {@code t(Context, CharSequence)} in com.max.xiaoheihe.utils.h writes the clipboard
+     * (same in 1.3.393/394/395/396). A whole-class signature scan matched 21 unrelated methods
+     * (Lv.xx row bindings, medal cards, broadcast helpers...), so every row bind ran a full-tree scan
+     * plus one WARN. Now: hook exactly when found, otherwise warn once and rely on the (1b) clipboard
+     * exit - never fall back to a full-class scan.
+     */
     private boolean hookCopyHelpers(ClassLoader cl) {
         boolean any = false;
-        any |= hookCopyHelper(cl, "com.max.xiaoheihe.utils.h");
-        any |= hookCopyHelper(cl, "com.max.hbutils.utils.y");
-        any |= hookCopyHelper(cl, "com.max.accelworld.c");
+        any |= hookNamedCopyHelper(cl, "com.max.xiaoheihe.utils.h", "t");
+        // every static void method below ends in setPrimaryClip -> copy-only classes, scanning is safe
+        any |= hookCopyOnlyClass(cl, "com.max.hbutils.utils.y");
+        any |= hookCopyOnlyClass(cl, "com.max.accelworld.c");
         return any;
     }
 
-    private boolean hookCopyHelper(ClassLoader cl, String className) {
+    /** Name-pinned hook: only same-name methods are shape-matched (String/CharSequence tolerant). */
+    private boolean hookNamedCopyHelper(ClassLoader cl, String className, String methodName) {
         try {
             Class<?> clazz = Class.forName(className, false, cl);
             int hooked = 0;
-            for (final Method method : clazz.getDeclaredMethods()) {
-                if (!java.lang.reflect.Modifier.isStatic(method.getModifiers())
-                        || method.getReturnType() != void.class) {
+            StringBuilder names = new StringBuilder();
+            for (Method method : clazz.getDeclaredMethods()) {
+                if (!methodName.equals(method.getName()) || !isCopyHelperShape(method)) {
                     continue;
                 }
-                final Class<?>[] params = method.getParameterTypes();
-                final int textIdx = textParamIndex(params);
-                final int ctxIdx = contextParamIndex(params);
-                if (textIdx < 0 || ctxIdx < 0 || textIdx == ctxIdx) {
+                hookCopyMethod(clazz, method);
+                hooked++;
+                if (names.length() > 0) {
+                    names.append(" / ");
+                }
+                names.append(method.getName()).append('(')
+                        .append(describeParams(method.getParameterTypes())).append(')');
+            }
+            if (hooked == 0) {
+                module.logd(Log.WARN, module.TAG, "✘ 复制助手精确挂点缺失: " + className + "#"
+                        + methodName + "（该版实现可能改名，已由剪贴板出口兜底）");
+            } else {
+                module.logd(Log.WARN, module.TAG, "✔ 复制助手精确挂点: " + className
+                        + "#" + names + " ×" + hooked + " 处");
+            }
+            return hooked > 0;
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "复制助手精确挂点跳过 " + className + "#"
+                    + methodName + ": " + t);
+            return false;
+        }
+    }
+
+    /** Signature scan for a copy-only class (every static void method writes the clipboard). */
+    private boolean hookCopyOnlyClass(ClassLoader cl, String className) {
+        try {
+            Class<?> clazz = Class.forName(className, false, cl);
+            int hooked = 0;
+            for (Method method : clazz.getDeclaredMethods()) {
+                if (!isCopyHelperShape(method)) {
                     continue;
                 }
-                module.hook(method).intercept(chain -> {
-                    try {
-                        if (canIntercept() && !inRecentSheetWindow()) {
-                            Object textArg = chain.getArg(textIdx);
-                            Object ctxArg = chain.getArg(ctxIdx);
-                            if (textArg instanceof CharSequence
-                                    && ((CharSequence) textArg).length() > 0) {
-                                CharSequence text = (CharSequence) textArg;
-                                View comment = findCommentView(activityOfArg(ctxArg), text);
-                                if (comment instanceof TextView) {
-                                    markIntercepted();
-                                    module.logd(Log.WARN, module.TAG,
-                                            "[评论自由复制] 拦下评论复制（助手 "
-                                                    + clazz.getSimpleName() + "#"
-                                                    + method.getName() + "）："
-                                                    + summarize(text.toString()) + " → 改弹二级菜单");
-                                    showCopySheet((TextView) comment, text, null);
-                                    return null;
-                                }
-                            }
-                        }
-                    } catch (Throwable t) {
-                        module.logd(Log.WARN, module.TAG, "复制助手拦截异常（放行）: " + t);
-                    }
-                    return chain.proceed();
-                });
+                hookCopyMethod(clazz, method);
                 hooked++;
             }
             if (hooked > 0) {
@@ -163,6 +177,67 @@ public final class CommentCopyHook {
             module.logd(Log.WARN, module.TAG, "复制助手 Hook 跳过 " + className + ": " + t);
             return false;
         }
+    }
+
+    private static boolean isCopyHelperShape(Method method) {
+        if (!java.lang.reflect.Modifier.isStatic(method.getModifiers())
+                || method.getReturnType() != void.class) {
+            return false;
+        }
+        Class<?>[] params = method.getParameterTypes();
+        int textIdx = textParamIndex(params);
+        int ctxIdx = contextParamIndex(params);
+        return textIdx >= 0 && ctxIdx >= 0 && textIdx != ctxIdx;
+    }
+
+    private static String describeParams(Class<?>[] params) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < params.length; i++) {
+            if (i > 0) {
+                sb.append(", ");
+            }
+            sb.append(params[i].getSimpleName());
+        }
+        return sb.toString();
+    }
+
+    private void hookCopyMethod(final Class<?> clazz, final Method method) {
+        final int textIdx = textParamIndex(method.getParameterTypes());
+        module.hook(method).intercept(chain -> {
+            try {
+                if (canIntercept() && !inRecentSheetWindow()) {
+                    Object textArg = chain.getArg(textIdx);
+                    if (textArg instanceof CharSequence
+                            && ((CharSequence) textArg).length() > 0) {
+                        CharSequence text = (CharSequence) textArg;
+                        ModuleStats.commentCopyHelperCalls.incrementAndGet();
+                        // #37 gate: no pending comment long-press -> not a comment copy (row binds,
+                        // broadcasts and toasts all go through these helpers); pass through, never scan
+                        View recorded = validRecordedView();
+                        if (recorded == null) {
+                            ModuleStats.commentCopyNoRecord.incrementAndGet();
+                        } else {
+                            ModuleStats.commentCopyWithRecord.incrementAndGet();
+                            View comment = findCommentView(
+                                    ViewUtils.findActivity(recorded), text, recorded);
+                            if (comment instanceof TextView) {
+                                markIntercepted();
+                                module.logd(Log.WARN, module.TAG,
+                                        "[评论自由复制] 拦下评论复制（助手 "
+                                                + clazz.getSimpleName() + "#"
+                                                + method.getName() + "）："
+                                                + summarize(text.toString()) + " → 改弹二级菜单");
+                                showCopySheet((TextView) comment, text, null);
+                                return null;
+                            }
+                        }
+                    }
+                }
+            } catch (Throwable t) {
+                module.logd(Log.WARN, module.TAG, "复制助手拦截异常（放行）: " + t);
+            }
+            return chain.proceed();
+        });
     }
 
     private static int textParamIndex(Class<?>[] params) {
@@ -183,16 +258,6 @@ public final class CommentCopyHook {
             }
         }
         return -1;
-    }
-
-    private Activity activityOfArg(Object arg) {
-        if (arg instanceof View) {
-            return ViewUtils.findActivity((View) arg);
-        }
-        if (arg instanceof Context) {
-            return ViewUtils.findActivity((Context) arg);
-        }
-        return null;
     }
 
     // ---- (1b) clipboard exit
@@ -463,7 +528,7 @@ public final class CommentCopyHook {
             return start;
         }
         List<View> inSelf = new ArrayList<>();
-        collectCommentViews(start, inSelf, 0);
+        collectCommentViews(start, inSelf, 0, new Scan());
         if (!inSelf.isEmpty()) {
             return inSelf.get(0);
         }
@@ -472,7 +537,7 @@ public final class CommentCopyHook {
         while (parent instanceof View && depth++ < 4) {
             View ancestor = (View) parent;
             List<View> found = new ArrayList<>();
-            collectCommentViews(ancestor, found, 0);
+            collectCommentViews(ancestor, found, 0, new Scan());
             if (found.size() == 1) {
                 return found.get(0);
             }
@@ -484,10 +549,11 @@ public final class CommentCopyHook {
         return null;
     }
 
-    private void collectCommentViews(View root, List<View> out, int depth) {
-        if (root == null || depth > 40 || out.size() > 64) {
+    private void collectCommentViews(View root, List<View> out, int depth, Scan scan) {
+        if (root == null || depth > 40 || out.size() > 64 || scan.nodes >= MAX_SCAN_NODES) {
             return;
         }
+        scan.nodes++;
         if (isCommentView(root)) {
             out.add(root);
             return;
@@ -495,9 +561,14 @@ public final class CommentCopyHook {
         if (root instanceof ViewGroup) {
             ViewGroup group = (ViewGroup) root;
             for (int i = 0; i < group.getChildCount(); i++) {
-                collectCommentViews(group.getChildAt(i), out, depth + 1);
+                collectCommentViews(group.getChildAt(i), out, depth + 1, scan);
             }
         }
+    }
+
+    /** Per-traversal node budget (#37): large lists are no longer walked end to end. */
+    private static final class Scan {
+        int nodes;
     }
 
     private static boolean isCommentView(View view) {
@@ -511,15 +582,15 @@ public final class CommentCopyHook {
     // ---- target lookup
 
     private View findCommentViewFor(CharSequence copied) {
-        return findCommentView(activityOf(validRecordedView()), copied);
+        View recorded = validRecordedView();
+        return findCommentView(activityOf(recorded), copied, recorded);
     }
 
-    private View findCommentView(Activity activity, CharSequence copied) {
+    private View findCommentView(Activity activity, CharSequence copied, View recorded) {
         String wanted = normalize(copied);
         if (wanted.length() == 0) {
             return null;
         }
-        View recorded = validRecordedView();
         if (recorded instanceof TextView
                 && textMatches(normalize(((TextView) recorded).getText()), wanted)) {
             return recorded;
@@ -527,25 +598,64 @@ public final class CommentCopyHook {
         if (activity == null || activity.isFinishing()) {
             return null;
         }
-        List<View> candidates = new ArrayList<>();
+        ModuleStats.commentDfsRuns.incrementAndGet();
+        long startAt = SystemClock.uptimeMillis();
+        Scan scan = new Scan();
+        View found = null;
         try {
-            collectCommentViews(activity.getWindow().getDecorView(), candidates, 0);
+            found = findCommentByText(activity.getWindow().getDecorView(), wanted, scan);
         } catch (Throwable ignored) {
         }
-        for (View view : candidates) {
-            if (view instanceof TextView
-                    && textMatches(normalize(((TextView) view).getText()), wanted)) {
-                return view;
+        long cost = SystemClock.uptimeMillis() - startAt;
+        ModuleStats.commentDfsNodes.addAndGet(scan.nodes);
+        ModuleStats.commentDfsMillis.addAndGet(cost);
+        ModuleStats.slow("评论复制整树查找", cost);
+        if (found != null) {
+            ModuleStats.commentCopyMatched.incrementAndGet();
+            return found;
+        }
+        ModuleStats.commentCopyNoMatch.incrementAndGet();
+        logNoMatch(scan.nodes, copied, recorded);
+        return null;
+    }
+
+    private View findCommentByText(View root, String wanted, Scan scan) {
+        if (root == null || scan.nodes >= MAX_SCAN_NODES) {
+            return null;
+        }
+        scan.nodes++;
+        if (isCommentView(root)) {
+            if (root instanceof TextView
+                    && textMatches(normalize(((TextView) root).getText()), wanted)) {
+                return root;
+            }
+
+            return null;
+        }
+        if (root instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) root;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                View found = findCommentByText(group.getChildAt(i), wanted, scan);
+                if (found != null) {
+                    return found;
+                }
+                if (scan.nodes >= MAX_SCAN_NODES) {
+                    break;
+                }
             }
         }
-        module.logd(Log.WARN, module.TAG, "[评论自由复制] 文本未匹配到评论（界面内 "
-                + candidates.size() + " 个评论控件），放行宿主复制"
-                + (module.isEnabled(App.KEY_VERBOSE_LOG, false)
-                ? "；复制文本=" + summarize(copied.toString())
-                + " / 长按记录=" + (recorded instanceof TextView
-                ? summarize(String.valueOf(((TextView) recorded).getText())) : "无")
-                : ""));
         return null;
+    }
+
+    private void logNoMatch(int scannedNodes, CharSequence copied, View recorded) {
+        long now = SystemClock.uptimeMillis();
+        if (now - lastNoMatchLogAt < NO_MATCH_LOG_INTERVAL_MS) {
+            return;
+        }
+        lastNoMatchLogAt = now;
+        module.logv(module.TAG, "[评论自由复制] 文本未匹配到评论 复制文本=" + summarize(copied.toString())
+                + " / 长按记录=" + (recorded instanceof TextView
+                ? summarize(String.valueOf(((TextView) recorded).getText())) : "无"));
     }
 
     private static boolean textMatches(String viewText, String copied) {

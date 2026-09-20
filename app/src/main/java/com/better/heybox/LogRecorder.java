@@ -16,10 +16,6 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
 
-/**
- * 模块文件日志（受「记录日志」开关控制）：写入 <filesDir>/betterheybox/log.txt，超限滚动为 log.1.txt（最多 2 个）。
- * 上下文：优先 setContext，兜底 ActivityThread.currentApplication()，拿不到则跳过文件写入
- */
 public final class LogRecorder {
 
     private static final String TAG = "BetterHeybox";
@@ -60,10 +56,7 @@ public final class LogRecorder {
         if (!sEnabled || msg == null) {
             return;
         }
-        if (!sVerbose && level != Log.ERROR) {
-            return;
-        }
-        if (!Logs.shouldLog(level)) {
+        if (!sVerbose && level < Log.WARN) {
             return;
         }
         recordLocked(level, tag, msg, null);
@@ -73,10 +66,7 @@ public final class LogRecorder {
         if (!sEnabled) {
             return;
         }
-        if (!sVerbose && level != Log.ERROR) {
-            return;
-        }
-        if (!Logs.shouldLog(level)) {
+        if (!sVerbose && level < Log.WARN) {
             return;
         }
         recordLocked(level, tag, msg, tr);
@@ -179,7 +169,6 @@ public final class LogRecorder {
         }
     }
 
-    /** log.1.txt 备份路径 */
     public static String getLogBackupFilePath() {
         Context ctx = sContext != null ? sContext : App.resolveAppContext();
         if (ctx == null) {

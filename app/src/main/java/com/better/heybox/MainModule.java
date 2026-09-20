@@ -48,6 +48,17 @@ public class MainModule extends XposedModule {
 
     private com.better.heybox.hooks.DailyTaskHook dailyTaskHook;
 
+    /** host classloader: needed to install hooks that were skipped at startup */
+    private volatile ClassLoader targetClassLoader;
+    /** per-feature install gates (#37: features that are off install nothing at startup) */
+    private final java.util.List<HookSpec> hookSpecs =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
+    /** hooks skipped so far; 0 makes every install path a no-op */
+    private final java.util.concurrent.atomic.AtomicInteger pendingHookCount =
+            new java.util.concurrent.atomic.AtomicInteger();
+    /** must be strongly referenced or SharedPreferences drops the listener */
+    private SharedPreferences.OnSharedPreferenceChangeListener settingsListener;
+
     public static final String TARGET_PKG = "com.max.xiaoheihe";
 
     public static final Set<String> SUPPORTED_HEYBOX_VERSIONS =
@@ -182,6 +193,8 @@ public class MainModule extends XposedModule {
     }
     private void installHooks(PackageReadyParam param) {
         ClassLoader cl = param.getClassLoader();
+        // crash evidence first: later install/runtime crashes still leave a trace (#37)
+        CrashGuard.install();
         LiquidGlassHookBridge.setModule(this);
         Checkpoint.mark(">>> 开始安装 Hook");
         long t0 = SystemClock.elapsedRealtime();
@@ -190,40 +203,205 @@ public class MainModule extends XposedModule {
         Checkpoint.mark("目标解析: %s", HeyboxTargets.report().replace('\n', ' '));
 
         PostFilterHook postFilter = new PostFilterHook(this);
-        installHook("通用", new GeneralHook(this)::install, cl);
-        installHook("广告过滤", new AdFilterHook(this)::install, cl);
-        installHook("设置入口", new SettingsEntryHook(this)::install, cl);
-        installHook("底部导航", new BottomTabHook(this)::install, cl);
-        installHook("液态玻璃底栏", new LiquidGlassBottomBarHook(this)::install, cl);
-        installHook("推广贴", new PromotePostHook(this)::install, cl);
-        installHook("首页广告横幅", new FeedBannerHook(this)::install, cl);
-        installHook("发帖过滤", postFilter::install, cl);
-        installHook("失效收藏清理", new FavourAutoCleanHook(this)::install, cl);
-        installHook("单列信息流", new SingleColumnFeedHook(this)::install, cl);
-        installHook("搜索页精简", new SearchPageCleanHook(this)::install, cl);
-        installHook("游戏库精简", new GameLibraryCleanHook(this)::install, cl);
-        installHook("文本选择", new TextSelectHook(this)::install, cl);
-        installHook("评论自由复制", new CommentCopyHook(this)::install, cl);
-        installHook("评论过滤", new CommentFilterHook(this)::install, cl);
-        installHook("图片分享", new ImageShareHook(this)::install, cl);
-        installHook("分享链接净化", new ShareLinkPurifyHook(this)::install, cl);
-        installHook("浏览器重定向", new BrowserRedirectHook(this)::install, cl);
-        installHook("视频下载", new VideoDownloadHook(this)::install, cl);
-        installHook("网页 DevTools", new WebViewDevToolsHook(this)::install, cl);
-        installHook("目标提示", new TargetHintHook(this)::install, cl);
-        installHook("每日任务", ignored -> {
+        // gated hooks install only while their switch is on (#37): no hooks, no install logs, no traversal
+        // for disabled features. Keys-less hooks (general / settings entry / target hint) stay resident.
+        registerHook("通用", new GeneralHook(this)::install, cl);
+        registerHook("广告过滤", new AdFilterHook(this)::install, cl,
+                App.KEY_OPEN_SCREEN, App.KEY_FEED_AD, App.KEY_BUBBLE_AD, App.KEY_CORNER_AD);
+        registerHook("设置入口", new SettingsEntryHook(this)::install, cl);
+        registerHook("底部导航", new BottomTabHook(this)::install, cl,
+                App.KEY_HIDE_TAB_HOME, App.KEY_HIDE_TAB_HOT, App.KEY_HIDE_TAB_GAME, App.KEY_HIDE_ADD);
+        registerHook("液态玻璃底栏", new LiquidGlassBottomBarHook(this)::install, cl,
+                App.KEY_LIQUID_GLASS, App.KEY_GLASS_IMMERSIVE);
+        registerHook("推广贴", new PromotePostHook(this)::install, cl, App.KEY_PROMOTE_AD);
+        registerHook("首页广告横幅", new FeedBannerHook(this)::install, cl, App.KEY_PROMOTE_AD);
+        registerHook("发帖过滤", postFilter::install, cl,
+                App.KEY_PROMOTE_AD, App.KEY_BLOCK_VIDEO_POST, App.KEY_POST_NO_LEVEL,
+                App.KEY_POST_AI_ENABLED, App.KEY_FLOW_DIAGNOSE);
+        registerHook("失效收藏清理", new FavourAutoCleanHook(this)::install, cl,
+                App.KEY_FAVOUR_AUTO_CLEAN);
+        registerHook("单列信息流", new SingleColumnFeedHook(this)::install, cl,
+                App.KEY_SINGLE_COLUMN_FEED);
+        registerHook("搜索页精简", new SearchPageCleanHook(this)::install, cl,
+                App.KEY_SEARCH_HIDE_BANNER, App.KEY_SEARCH_HIDE_DISCOVER, App.KEY_SEARCH_HIDE_HOT_RANK);
+        registerHook("游戏库精简", new GameLibraryCleanHook(this)::install, cl,
+                App.KEY_GAME_LIB_HIDE_BANNER, App.KEY_GAME_LIB_HIDE_MENU, App.KEY_GAME_LIB_HIDE_SECTIONS);
+        registerHook("文本选择", new TextSelectHook(this)::install, cl,
+                App.KEY_COPY_POST, App.KEY_CUSTOM_TEXT_SELECT);
+        registerHook("评论自由复制", new CommentCopyHook(this)::install, cl,
+                App.KEY_COMMENT_FREE_COPY, App.KEY_CUSTOM_TEXT_SELECT);
+        registerHook("评论过滤", new CommentFilterHook(this)::install, cl,
+                App.KEY_BLOCK_CY_COMMENT, App.KEY_HOST_HIDE_CY);
+        registerHook("图片分享", new ImageShareHook(this)::install, cl, App.KEY_SYSTEM_SHARE);
+        registerHook("分享链接净化", new ShareLinkPurifyHook(this)::install, cl,
+                App.KEY_PURIFY_SHARE_LINK);
+        registerHook("浏览器重定向", new BrowserRedirectHook(this)::install, cl,
+                App.KEY_BROWSER_REDIRECT, App.KEY_BROWSER_REDIRECT_KNOWN, App.KEY_WEB_LOG);
+        registerHook("视频下载", new VideoDownloadHook(this)::install, cl, App.KEY_VIDEO_DOWNLOAD);
+        registerHook("网页 DevTools", new WebViewDevToolsHook(this)::install, cl,
+                App.KEY_WEBVIEW_DEVTOOLS);
+        registerHook("目标提示", new TargetHintHook(this)::install, cl);
+        registerHook("每日任务", ignored -> {
             dailyTaskHook = new DailyTaskHook(this);
             dailyTaskHook.install(ignored);
-        }, cl);
-        installHook("动态推送", new WatchHook(this)::install, cl);
+        }, cl, App.KEY_DAILY_TASK_ENABLED);
+        registerHook("动态推送", new WatchHook(this)::install, cl, App.KEY_WATCH_ENABLED);
 
+        watchSettingsChanges();
         Checkpoint.mark(">>> Hook 安装完成，总耗时 %d ms", SystemClock.elapsedRealtime() - t0);
-        logd(Log.INFO, TAG, "Hook 安装流程结束");
+        logd(Log.INFO, TAG, "Hook 安装流程结束（因开关关闭延迟安装 "
+                + pendingHookCount.get() + " 个）");
         stashRuntimeStatus();
     }
     private interface HookInstaller {
         void install(ClassLoader cl);
     }
+
+    /** one hook's gate: empty keys = always install; otherwise any switch on installs it */
+    private static final class HookSpec {
+        final String label;
+        final HookInstaller installer;
+        final String[] keys;
+        volatile boolean installed;
+
+        HookSpec(String label, HookInstaller installer, String[] keys) {
+            this.label = label;
+            this.installer = installer;
+            this.keys = keys;
+        }
+
+        boolean matches(String key) {
+            for (String k : keys) {
+                if (k.equals(key)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
+    private void registerHook(String label, HookInstaller installer, ClassLoader cl, String... keys) {
+        for (HookSpec existing : hookSpecs) {
+            if (existing.label.equals(label)) {
+                // duplicate registration (hot reload): ignore, never install a hook twice
+                return;
+            }
+        }
+        HookSpec spec = new HookSpec(label, installer, keys == null ? new String[0] : keys);
+        hookSpecs.add(spec);
+        if (installIfEnabled(spec, cl)) {
+            return;
+        }
+        if (!spec.installed) {
+            pendingHookCount.incrementAndGet();
+            logv(TAG, "跳过安装（开关关闭）: " + label);
+        }
+    }
+
+    /** @return true only when this call installed it (pendingHookCount must not double-count) */
+    private synchronized boolean installIfEnabled(HookSpec spec, ClassLoader cl) {
+        if (spec.installed || cl == null) {
+            return false;
+        }
+        if (!isAnySwitchOn(spec.keys)) {
+            return false;
+        }
+        spec.installed = true;
+        installHook(spec.label, spec.installer, cl);
+        return true;
+    }
+
+    /** true when any switch is on; defaults come from App.BOOLEAN_DEFAULTS (single source of truth) */
+    private boolean isAnySwitchOn(String[] keys) {
+        if (keys.length == 0) {
+            return true;
+        }
+        for (String key : keys) {
+            Boolean def = App.BOOLEAN_DEFAULTS.get(key);
+            if (isEnabled(key, def != null && def)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Called on a settings change: install hooks skipped at startup so a switch takes effect at once (#37). */
+    public void onSettingChanged(String key) {
+        if (key == null || pendingHookCount.get() == 0) {
+            return;
+        }
+        ClassLoader cl = targetClassLoader;
+        if (cl == null) {
+            return;
+        }
+        for (HookSpec spec : hookSpecs) {
+            if (spec.installed || !spec.matches(key)) {
+                continue;
+            }
+            if (installIfEnabled(spec, cl)) {
+                pendingHookCount.decrementAndGet();
+            }
+        }
+    }
+
+    /** Panel actions (check now / clear daily flag) need the hook present: install regardless of the switch. */
+    public void forceInstallHook(String key) {
+        ClassLoader cl = targetClassLoader;
+        if (cl == null || key == null) {
+            return;
+        }
+        for (HookSpec spec : hookSpecs) {
+            if (spec.installed || !spec.matches(key)) {
+                continue;
+            }
+            boolean installedNow = false;
+            synchronized (this) {
+                if (!spec.installed) {
+                    spec.installed = true;
+                    installHook(spec.label, spec.installer, cl);
+                    installedNow = true;
+                }
+            }
+            if (installedNow) {
+                pendingHookCount.decrementAndGet();
+            }
+        }
+    }
+
+    /** Watch remote pref changes when the framework supports it; callbacks return to the main thread. */
+    private void watchSettingsChanges() {
+        try {
+            SharedPreferences prefs = getRemotePreferences(App.PREFS_GROUP);
+            if (prefs == null) {
+                return;
+            }
+            settingsListener = (p, key) -> {
+                if (key == null || pendingHookCount.get() == 0) {
+                    return;
+                }
+                try {
+                    mainHandler().post(() -> onSettingChanged(key));
+                } catch (Throwable ignored) {
+                    onSettingChanged(key);
+                }
+            };
+            prefs.registerOnSharedPreferenceChangeListener(settingsListener);
+        } catch (Throwable t) {
+            logv(TAG, "设置变更监听注册失败（不影响面板内打开开关即时生效）: " + t);
+        }
+    }
+
+    private static volatile android.os.Handler sMainHandler;
+
+    private static android.os.Handler mainHandler() {
+        android.os.Handler handler = sMainHandler;
+        if (handler == null) {
+            handler = new android.os.Handler(android.os.Looper.getMainLooper());
+            sMainHandler = handler;
+        }
+        return handler;
+    }
+
     private void installHook(String label, HookInstaller installer, ClassLoader cl) {
         long t0 = SystemClock.elapsedRealtime();
         try {
@@ -299,15 +477,23 @@ public class MainModule extends XposedModule {
         return def;
     }
 
+    /** Log switches are read over RemotePreferences; cached for 1s and invalidated on panel writes (#37). */
+    private static final long LOG_SWITCH_TTL_MS = 1_000L;
+
+    private volatile boolean logSwitchEnabled;
+    private volatile boolean logSwitchVerbose;
+    private volatile long logSwitchAt;
+
     public void logd(int level, String tag, String msg) {
-        if (!Logs.shouldLog(level)) {
+        boolean verbose = logSwitchVerbose();
+        if (!Logs.shouldLog(level) && !verbose) {
             return;
         }
         try {
-            boolean logEnabled = isEnabled(App.KEY_LOG, false);
-            LogRecorder.setEnabled(logEnabled);
-            LogRecorder.setVerbose(isEnabled(App.KEY_VERBOSE_LOG, false));
-            if (logEnabled) {
+            boolean enabled = logSwitchEnabled();
+            LogRecorder.setEnabled(enabled);
+            LogRecorder.setVerbose(verbose);
+            if (enabled) {
                 LogRecorder.record(level, tag, msg);
             }
         } catch (Throwable ignored) {
@@ -315,14 +501,15 @@ public class MainModule extends XposedModule {
         log(level, tag, msg);
     }
     public void logd(int level, String tag, String msg, Throwable tr) {
-        if (!Logs.shouldLog(level)) {
+        boolean verbose = logSwitchVerbose();
+        if (!Logs.shouldLog(level) && !verbose) {
             return;
         }
         try {
-            boolean logEnabled = isEnabled(App.KEY_LOG, false);
-            LogRecorder.setEnabled(logEnabled);
-            LogRecorder.setVerbose(isEnabled(App.KEY_VERBOSE_LOG, false));
-            if (logEnabled) {
+            boolean enabled = logSwitchEnabled();
+            LogRecorder.setEnabled(enabled);
+            LogRecorder.setVerbose(verbose);
+            if (enabled) {
                 LogRecorder.record(level, tag, msg, tr);
             }
         } catch (Throwable ignored) {
@@ -330,11 +517,43 @@ public class MainModule extends XposedModule {
         log(level, tag, msg, tr);
     }
 
+    /** High-frequency diagnostics: file + logcat only when both log switches are on (#37). */
+    public void logv(String tag, String msg) {
+        logd(Log.DEBUG, tag, msg);
+    }
+
+    /** Called after a panel toggle so the next log call sees the new state. */
+    public void invalidateLogSwitches() {
+        logSwitchAt = 0L;
+    }
+
+    private boolean logSwitchEnabled() {
+        refreshLogSwitches();
+        return logSwitchEnabled;
+    }
+
+    private boolean logSwitchVerbose() {
+        refreshLogSwitches();
+        return logSwitchVerbose;
+    }
+
+    private void refreshLogSwitches() {
+        long now = SystemClock.uptimeMillis();
+        if (now - logSwitchAt < LOG_SWITCH_TTL_MS) {
+            return;
+        }
+        logSwitchEnabled = isEnabled(App.KEY_LOG, false);
+        logSwitchVerbose = isEnabled(App.KEY_VERBOSE_LOG, false);
+        logSwitchAt = now;
+    }
+
     public int dp(Context context, float value) {
         return ThemeUtils.dp(context, value);
     }
 
     public void clearDailyTaskAndRetry(android.app.Activity activity) {
+        // clear-today: install the daily-task hook first so the tap is never a no-op
+        forceInstallHook(App.KEY_DAILY_TASK_ENABLED);
         if (dailyTaskHook != null) {
             dailyTaskHook.clearTodayAndRetry(activity);
         }
