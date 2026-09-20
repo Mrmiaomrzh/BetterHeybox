@@ -21,6 +21,7 @@ captures/
 analysis/
 .tools/
 docs/
+hbcap/
 
 # Keystore
 keystore/
