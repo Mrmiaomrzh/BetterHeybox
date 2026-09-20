@@ -15,6 +15,8 @@ public final class ModuleStats {
     public static final AtomicInteger commentCopyNoRecord = new AtomicInteger();
     /** budgeted window DFS runs (one per record-less helper call, only on real copies) */
     public static final AtomicInteger commentDfsRuns = new AtomicInteger();
+    /** DFS runs stopped by the node budget (the target may sit further down) */
+    public static final AtomicInteger commentDfsBudgetHits = new AtomicInteger();
     /** total View nodes visited by the DFS */
     public static final AtomicLong commentDfsNodes = new AtomicLong();
     /** total DFS time (ms) */

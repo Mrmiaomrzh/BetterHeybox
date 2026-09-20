@@ -53,7 +53,10 @@ public final class CommentCopyHook {
     private static final long MENU_DISMISS_DELAY_MS = 200L;
     private static final long SHEET_WINDOW_MS = 1_500L;
     private static final long TOAST_SUPPRESS_MS = 2_500L;
-    private static final int MAX_SCAN_NODES = 4_000;
+    /** View-node budget for one lookup (#37). Only real copies reach it, so it stays generous on purpose:
+     *  a missed target costs a broken feature, an oversized scan only costs a few ms once per copy. */
+    private static final int MAX_SCAN_NODES = 20_000;
+    /** min interval between "no match" diagnostics (#37) */
     private static final long NO_MATCH_LOG_INTERVAL_MS = 2_000L;
 
     private final MainModule module;
@@ -631,7 +634,11 @@ public final class CommentCopyHook {
             return found;
         }
         ModuleStats.commentCopyNoMatch.incrementAndGet();
-        logNoMatch(scan.nodes, copied, recorded);
+        boolean exhausted = scan.nodes >= MAX_SCAN_NODES;
+        if (exhausted) {
+            ModuleStats.commentDfsBudgetHits.incrementAndGet();
+        }
+        logNoMatch(scan.nodes, copied, recorded, exhausted);
         return null;
     }
 
@@ -663,9 +670,11 @@ public final class CommentCopyHook {
         return null;
     }
 
-    private void logNoMatch(int scannedNodes, CharSequence copied, View recorded) {
+    private void logNoMatch(int scannedNodes, CharSequence copied, View recorded,
+                            boolean budgetExhausted) {
         long now = SystemClock.uptimeMillis();
-        if (now - lastNoMatchLogAt < NO_MATCH_LOG_INTERVAL_MS) {
+        // a budget hit means the target may sit further down: do not let the rate limit hide it
+        if (!budgetExhausted && now - lastNoMatchLogAt < NO_MATCH_LOG_INTERVAL_MS) {
             return;
         }
         lastNoMatchLogAt = now;
