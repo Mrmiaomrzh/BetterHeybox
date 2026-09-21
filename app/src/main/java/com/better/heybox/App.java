@@ -192,6 +192,18 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     /** 收藏：打开收藏列表发现失效内容时自动清理 */
     public static final String KEY_FAVOUR_AUTO_CLEAN = "favour_auto_clean";
 
+    /** 消息红点：隐藏各页面右上角 ✉️ 的未读红点 */
+    public static final String KEY_HIDE_MSG_DOT = "hide_msg_dot";
+
+    /** 消息红点：隐藏消息列表里指定入口的红色数字 */
+    public static final String KEY_HIDE_MSG_BADGE = "hide_msg_badge";
+
+    /** 消息红点：隐藏的入口标题 */
+    public static final String KEY_MSG_BADGE_ENTRIES = "msg_badge_entries";
+
+    /** 消息红点：完整隐藏入口标题 */
+    public static final String KEY_MSG_FULL_HIDE_ENTRIES = "msg_full_hide_entries";
+
     /** AI 提供商预设 */
     public static final String KEY_AI_PROVIDER = "ai_provider";
 
@@ -319,10 +331,11 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
         m.put(KEY_FLOW_DIAGNOSE, false);
         m.put(KEY_VERBOSE_LOG, false);
         m.put(KEY_FAVOUR_AUTO_CLEAN, false);
+        m.put(KEY_HIDE_MSG_DOT, false);
+        m.put(KEY_HIDE_MSG_BADGE, false);
         m.put(KEY_DISCLAIMER_ACCEPTED, false);
         m.put(KEY_TARGET_HINT_VISIBLE, true);
         m.put(KEY_DEBUG_NO_DOWNGRADE, false);
-        // 动态推送（默认关闭：涉及自动请求；开启后默认用横幅 + 通知提醒）
         m.put(KEY_WATCH_ENABLED, false);
         m.put(KEY_WATCH_BANNER, true);
         m.put(KEY_WATCH_NOTIFY, true);
@@ -332,12 +345,12 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
         return m;
     }
 
-    /** volatile 保证跨线程可见 */
+    /** volatile  */
     private static volatile XposedService sService;
 
     private static volatile App sApp;
 
-    /** 服务绑定监听（设置页等 UI 用于刷新开关状态） */
+    /** 服务绑定监听 */
     private static final List<OnServiceBoundListener> sBoundListeners = new ArrayList<>();
 
     /** 回调在主线程执行 */
@@ -378,7 +391,7 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
         sService = null;
     }
 
-    /** 获取跨进程开关存储；框架服务未连接时返回 null */
+    /** 跨进程开关存储 */
     public static SharedPreferences getPrefs() {
         XposedService service = sService;
         if (service == null) {
@@ -399,9 +412,6 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
         }
     }
 
-    /**
- * 读开关：待提交缓存 → RemotePreferences → 默认值（与最终生效值一致）
- */
     public static boolean readBoolean(String key, boolean defaultValue) {
         App app = sApp;
         if (app != null) {
@@ -414,9 +424,6 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
         return remote != null ? remote.getBoolean(key, defaultValue) : defaultValue;
     }
 
-    /**
-     * 读字符串：优先待提交缓存，其次 RemotePreferences，最后默认值。
-     */
     public static String readString(String key, String defaultValue) {
         App app = sApp;
         if (app != null) {
@@ -429,9 +436,6 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
         return remote != null ? remote.getString(key, defaultValue) : defaultValue;
     }
 
-    /**
- * 写字符串：服务可用直接写 RemotePreferences；否则写待提交缓存待补交
- */
     public static void writeString(String key, String value) {
         App app = sApp;
         SharedPreferences remote = getPrefs();
@@ -448,9 +452,6 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
         }
     }
 
-    /**
- * 写开关：同 writeString，任何情况下不丢设置
- */
     public static void writeBoolean(String key, boolean value) {
         App app = sApp;
         SharedPreferences remote = getPrefs();
@@ -463,12 +464,10 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
             SharedPreferences pending = app.getSharedPreferences(PENDING_PREFS, MODE_PRIVATE);
             pending.edit().putBoolean(key, value).commit();
             LogRecorder.recordEvent("服务未连接，开关写入待提交缓存: key=" + key + ", value=" + value);
-            // 服务可能正在连接中，主动尝试补交一次
             PreferenceReceiver.tryFlush(app, pending);
         }
     }
 
-    /** 回调在主线程执行 */
     public static void addOnServiceBoundListener(OnServiceBoundListener listener) {
         synchronized (sBoundListeners) {
             if (!sBoundListeners.contains(listener)) {
@@ -503,17 +502,16 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
                 : service.getClass().getName() + "@" + Integer.toHexString(System.identityHashCode(service));
     }
 
-    /** 获取框架服务实例（未连接时为 null） */
+    /** 获取框架服务实例 */
     public static XposedService getService() {
         return sService;
     }
 
-    /** 获取 App 实例（Application 创建后可用） */
+    /** 获取 App 实例 */
     public static Context getAppContext() {
         return sApp;
     }
 
-    /** 任意进程取 Application 上下文；模块进程用 {@link #getAppContext()} */
     public static Context resolveAppContext() {
         try {
             Class<?> activityThread = Class.forName("android.app.ActivityThread");
@@ -524,7 +522,7 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
         }
     }
 
-    /** 当前进程名（失败回退 pid） */
+    /** 当前进程名（pid） */
     public static String currentProcessName() {
         try {
             Class<?> activityThread = Class.forName("android.app.ActivityThread");

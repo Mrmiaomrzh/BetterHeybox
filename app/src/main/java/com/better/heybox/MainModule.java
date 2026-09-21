@@ -24,6 +24,7 @@ import com.better.heybox.hooks.FeedBannerHook;
 import com.better.heybox.hooks.GameLibraryCleanHook;
 import com.better.heybox.hooks.GeneralHook;
 import com.better.heybox.hooks.ImageShareHook;
+import com.better.heybox.hooks.MessageRedDotHook;
 import com.better.heybox.hooks.PromotePostHook;
 import com.better.heybox.hooks.PostFilterHook;
 import com.better.heybox.hooks.WatchHook;
@@ -233,6 +234,8 @@ public class MainModule extends XposedModule {
         registerHook("评论过滤", new CommentFilterHook(this)::install, cl,
                 App.KEY_BLOCK_CY_COMMENT, App.KEY_HOST_HIDE_CY);
         registerHook("图片分享", new ImageShareHook(this)::install, cl, App.KEY_SYSTEM_SHARE);
+        registerHook("消息红点", new MessageRedDotHook(this)::install, cl,
+                App.KEY_HIDE_MSG_DOT, App.KEY_HIDE_MSG_BADGE);
         registerHook("分享链接净化", new ShareLinkPurifyHook(this)::install, cl,
                 App.KEY_PURIFY_SHARE_LINK);
         registerHook("浏览器重定向", new BrowserRedirectHook(this)::install, cl,

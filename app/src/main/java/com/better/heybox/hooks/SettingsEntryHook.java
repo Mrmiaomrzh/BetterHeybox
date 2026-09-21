@@ -124,7 +124,8 @@ public final class SettingsEntryHook {
         WATCH_USERS, WATCH_KEYWORDS, WATCH_IMPORT_FOLLOW, WATCH_TEST_PUSH, WATCH_CHECK,
         WATCH_DEBUG_PUSH3,WATCH_V2,OPEN_PAGE,
         WATCH_TOPICS, WATCH_IMPORT_TOPICS, WATCH_WINDOW, WATCH_INTERVAL, WATCH_SUGGEST_KEYWORDS,
-        WATCH_TOPIC_SEARCH,GAME_LIB_TYPES, GAME_LIB_ENTRIES,GAME_LIB_SECTIONS,GAME_LIB_DIAG
+        WATCH_TOPIC_SEARCH,GAME_LIB_TYPES, GAME_LIB_ENTRIES,GAME_LIB_SECTIONS,GAME_LIB_DIAG,
+        MESSAGE_BADGE_ENTRIES, MESSAGE_FULL_HIDE_ENTRIES, MESSAGE_BADGE_DIAG
     }
 
     static class SwitchDef {
@@ -261,6 +262,25 @@ public final class SettingsEntryHook {
         });
     }
 
+    private static SettingsGroup buildMessageRedDotGroup() {
+        return new SettingsGroup("消息红点", new SwitchDef[]{
+                new SwitchDef("隐藏消息未读红点", "各页面右上角 ✉️ 的小红点（含底栏消息红点）",
+                        App.KEY_HIDE_MSG_DOT, false, false),
+                new SwitchDef("精简消息入口", "隐藏勾选入口的红色数字",
+                        App.KEY_HIDE_MSG_BADGE, false, false),
+                new SwitchDef("隐藏红数字的入口", picksDesc(
+                        MessageRedDotHook.selectedNames(MessageRedDotHook.PICK_NUMBER),
+                        "默认「活动消息」「官方消息」"),
+                        null, false, false, true, null, Action.MESSAGE_BADGE_ENTRIES),
+                new SwitchDef("隐藏相关入口", picksDesc(
+                        MessageRedDotHook.selectedNames(MessageRedDotHook.PICK_FULL),
+                        "整行移除；默认不隐藏任何入口"),
+                        null, false, false, true, null, Action.MESSAGE_FULL_HIDE_ENTRIES),
+                new SwitchDef("诊断：消息红点状态", "开关 / 勾选 / 已观察到的入口",
+                        null, false, false, true, null, Action.MESSAGE_BADGE_DIAG),
+        });
+    }
+
     private static String picksDesc(Set<String> picked, String emptyHint) {
         if (picked == null || picked.isEmpty()) {
             return emptyHint;
@@ -375,6 +395,7 @@ public final class SettingsEntryHook {
                 groups.add(glass);
             }
             groups.add(buildBottomTabGroup(activity));
+            groups.add(buildMessageRedDotGroup());
             if (VersionUtils.isHeyboxBuild(activity, EXPERIMENTAL_HEYBOX_VERSION,
                     EXPERIMENTAL_HEYBOX_CODE)) {
                 groups.add(new SettingsGroup("实验性功能", new SwitchDef[]{
@@ -2026,6 +2047,18 @@ public final class SettingsEntryHook {
                     case GAME_LIB_DIAG:
                         setRowClick(itemCls, item, v -> showGameLibDiagnostics(activity));
                         break;
+                    case MESSAGE_BADGE_ENTRIES:
+                        setRowClick(itemCls, item, v -> showMessageEntryPicker(activity,
+                                MessageRedDotHook.PICK_NUMBER, "隐藏红数字入口"));
+                        break;
+                    case MESSAGE_FULL_HIDE_ENTRIES:
+                        setRowClick(itemCls, item, v -> showMessageEntryPicker(activity,
+                                MessageRedDotHook.PICK_FULL, "隐藏入口"));
+                        break;
+                    case MESSAGE_BADGE_DIAG:
+                        setRowClick(itemCls, item, v -> showMultilineInfo(activity,
+                                "消息红点状态", MessageRedDotHook.diagnostics()));
+                        break;
                     case AI_PROVIDER:
                         setRowClick(itemCls, item, v -> showAiProviderDialog(activity));
                         break;
@@ -2161,6 +2194,10 @@ public final class SettingsEntryHook {
                                 || App.KEY_GAME_LIB_HIDE_MENU.equals(def.key)
                                 || App.KEY_GAME_LIB_HIDE_SECTIONS.equals(def.key)) {
                             GameLibraryCleanHook.refresh();
+                        }
+                        if (App.KEY_HIDE_MSG_DOT.equals(def.key)
+                                || App.KEY_HIDE_MSG_BADGE.equals(def.key)) {
+                            MessageRedDotHook.refresh();
                         }
                         if (App.KEY_LIQUID_GLASS.equals(def.key)) {
                             LiquidGlassInstaller.applyGlassEnabled(activity);
@@ -2565,31 +2602,65 @@ public final class SettingsEntryHook {
     }
 
     private void showGameLibPicker(final Activity activity, final int kind, final String title) {
-        withHeyboxDialog(activity,
-                spec -> showGameLibPickerNative(activity, kind, title, spec),
-                () -> showGameLibPickerFallback(activity, kind, title));
+        showEntryPicker(activity, title, GameLibraryCleanHook.pickerEntries(kind),
+                kind == GameLibraryCleanHook.PICK_TYPE
+                        ? GameLibraryCleanHook.selectedTypes()
+                        : GameLibraryCleanHook.selectedNames(kind),
+                null,
+                (a, t, picked) -> {
+                    if (kind == GameLibraryCleanHook.PICK_TYPE) {
+                        GameLibraryCleanHook.setSelectedTypes(picked);
+                    } else {
+                        GameLibraryCleanHook.setSelectedNames(kind, picked);
+                    }
+                });
     }
 
-    private void showGameLibPickerNative(final Activity activity, int kind, String title,
-                                         DexKitResolver.HeyboxDialogSpec spec) throws Exception {
+    private void showMessageEntryPicker(final Activity activity, final int kind, final String title) {
+        String hint = kind == MessageRedDotHook.PICK_FULL
+                ? "勾选的入口整行从消息列表移除；候选来自实际见过的入口行，打开一次消息列表后会列出更多"
+                : "勾选的入口只隐藏右侧红色数字；候选来自实际见过的入口行，打开一次消息列表后会列出更多";
+        showEntryPicker(activity, title, MessageRedDotHook.pickerEntries(kind),
+                MessageRedDotHook.selectedNames(kind), hint,
+                (a, t, picked) -> MessageRedDotHook.setSelectedNames(kind, picked));
+    }
+
+    private interface PickSaver {
+        void save(Activity activity, String title, Set<String> picked);
+    }
+
+    private void showEntryPicker(final Activity activity, final String title,
+                                 final List<String[]> entries, final Set<String> selected,
+                                 final String hint, final PickSaver saver) {
+        withHeyboxDialog(activity,
+                spec -> showEntryPickerNative(activity, title, entries, selected, hint, saver, spec),
+                () -> showEntryPickerFallback(activity, title, entries, selected, hint, saver));
+    }
+
+    private void showEntryPickerNative(final Activity activity, String title,
+                                       List<String[]> entries, Set<String> selected, String hint,
+                                       PickSaver saver, DexKitResolver.HeyboxDialogSpec spec)
+            throws Exception {
         List<CheckBox> boxes = new ArrayList<>();
-        ScrollView content = buildGameLibPickerView(activity, kind, boxes);
+        ScrollView content = buildCheckListPicker(activity, entries, selected, hint, boxes);
         spec.buildAndShow(activity, title, content, "保存",
                 (d, w) -> {
-                    saveGameLibPicks(activity, kind, title, boxes);
+                    savePickedEntries(activity, title, boxes, saver);
                     d.dismiss();
                 },
                 "取消", (d, w) -> d.dismiss());
     }
 
-    private void showGameLibPickerFallback(final Activity activity, int kind, String title) {
+    private void showEntryPickerFallback(final Activity activity, String title,
+                                         List<String[]> entries, Set<String> selected, String hint,
+                                         PickSaver saver) {
         try {
             List<CheckBox> boxes = new ArrayList<>();
-            ScrollView content = buildGameLibPickerView(activity, kind, boxes);
+            ScrollView content = buildCheckListPicker(activity, entries, selected, hint, boxes);
             new AlertDialog.Builder(activity)
                     .setTitle(title)
                     .setView(content)
-                    .setPositiveButton("保存", (d, w) -> saveGameLibPicks(activity, kind, title, boxes))
+                    .setPositiveButton("保存", (d, w) -> savePickedEntries(activity, title, boxes, saver))
                     .setNegativeButton("取消", null)
                     .show();
         } catch (Throwable t) {
@@ -2597,23 +2668,33 @@ public final class SettingsEntryHook {
         }
     }
 
-    private ScrollView buildGameLibPickerView(Activity activity, int kind, List<CheckBox> boxesOut) {
-        List<String[]> entries = GameLibraryCleanHook.pickerEntries(kind);
-        Set<String> selected = kind == GameLibraryCleanHook.PICK_TYPE
-                ? GameLibraryCleanHook.selectedTypes()
-                : GameLibraryCleanHook.selectedNames(kind);
+    private ScrollView buildCheckListPicker(Activity activity, List<String[]> entries,
+                                            Set<String> selected, String hint,
+                                            List<CheckBox> boxesOut) {
         LinearLayout column = new LinearLayout(activity);
         column.setOrientation(LinearLayout.VERTICAL);
         int pad = module.dp(activity, 8);
         column.setPadding(pad, pad, pad, pad);
         int textColor = hostColor(activity, "color_text_primary_day_night", 0);
+        if (hint != null && !hint.isEmpty()) {
+            TextView tip = new TextView(activity);
+            tip.setText(hint);
+            tip.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+            tip.setPadding(0, 0, 0, module.dp(activity, 6));
+            int tipColor = hostColor(activity, "color_text_tertiary_day_night", 0);
+            if (tipColor != 0) {
+                tip.setTextColor(tipColor);
+            }
+            column.addView(tip, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
         for (String[] entry : entries) {
             String value = entry[0];
             String label = entry.length > 1 ? entry[1] : null;
             CheckBox box = new CheckBox(activity);
             box.setText(label == null || label.isEmpty() ? value : value + "  " + label);
             box.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-            box.setChecked(selected.contains(value));
+            box.setChecked(selected != null && selected.contains(value));
             if (textColor != 0) {
                 box.setTextColor(textColor);
             }
@@ -2629,18 +2710,15 @@ public final class SettingsEntryHook {
         return scroller;
     }
 
-    private void saveGameLibPicks(Activity activity, int kind, String title, List<CheckBox> boxes) {
+    private void savePickedEntries(Activity activity, String title, List<CheckBox> boxes,
+                                   PickSaver saver) {
         Set<String> picked = new LinkedHashSet<>();
         for (CheckBox box : boxes) {
             if (box.isChecked() && box.getTag() != null) {
                 picked.add(String.valueOf(box.getTag()));
             }
         }
-        if (kind == GameLibraryCleanHook.PICK_TYPE) {
-            GameLibraryCleanHook.setSelectedTypes(picked);
-        } else {
-            GameLibraryCleanHook.setSelectedNames(kind, picked);
-        }
+        saver.save(activity, title, picked);
         LogRecorder.recordEvent(title + "已保存: " + picked.size() + " 项");
         Toast.makeText(activity, picked.isEmpty()
                         ? "已清空「" + title + "」" : "已保存 " + picked.size() + " 项，立即生效",
