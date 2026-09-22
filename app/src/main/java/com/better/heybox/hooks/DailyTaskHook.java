@@ -191,29 +191,326 @@ public final class DailyTaskHook {
         Context context = ctx instanceof Context ? (Context) ctx : null;
         mainHandler.post(() -> onStepCompleted(context));
     }
+
+    private static final String[] SHARE_PANEL_CLASSES = {
+            "com.max.hbcommon.component.m",   // 1.3.396+
+            "com.max.hbcommon.component.i",   // 1.3.393 ~ 1.3.395
+    };
+
+    private static final String SHARE_PANEL_SUPER =
+            "com.max.hbcustomview.swipebacklayout.a";
+
+    private final java.util.concurrent.atomic.AtomicReference<Class<?>>
+            sharePanelClassCache = new java.util.concurrent.atomic.AtomicReference<>();
+
     private void hookSharePanel(ClassLoader cl) {
-        try {
-            Class<?> panel = Class.forName("com.max.hbcommon.component.i", false, cl);
-            Method show = panel.getMethod("show");
-            module.hook(show).intercept(chain -> {
-                Object result = chain.proceed();
-                if (!autoActive) {
-                    return result;
-                }
-                try {
-                    Object self = chain.getThisObject();
-                    if (self instanceof Dialog) {
-                        autoClickChannel((Dialog) self);
+        for (Class<?> panel : collectSharePanelCandidates(cl)) {
+            Method show;
+            try {
+                show = panel.getMethod("show");
+            } catch (NoSuchMethodException e) {
+                module.logd(Log.WARN, module.TAG, "分享面板候选 " + panel.getName()
+                        + " 无 show() 方法：类名被占用");
+                continue;
+            } catch (Throwable t) {
+                module.logd(Log.WARN, module.TAG, "分享面板候选 " + panel.getName()
+                        + " 解析失败: " + t);
+                continue;
+            }
+            try {
+                module.hook(show).intercept(chain -> {
+                    Object result = chain.proceed();
+                    if (!autoActive) {
+                        return result;
                     }
-                } catch (Throwable t) {
-                    module.logd(Log.WARN, module.TAG, "分享面板自动点渠道异常: " + t);
-                }
-                return result;
-            });
-            module.logd(Log.INFO, module.TAG, "✔ 分享面板 Hook 已安装: component.i.show()");
-        } catch (Throwable t) {
-            module.logd(Log.WARN, module.TAG, "✘ 分享面板 Hook 失败", t);
+                    try {
+                        Object self = chain.getThisObject();
+                        if (self instanceof Dialog) {
+                            autoClickChannel((Dialog) self);
+                        }
+                    } catch (Throwable t) {
+                        module.logd(Log.WARN, module.TAG, "分享面板自动点渠道异常: " + t);
+                    }
+                    return result;
+                });
+                module.logd(Log.INFO, module.TAG, "✔ 分享面板 Hook 已安装: "
+                        + panel.getName() + ".show()");
+                return;
+            } catch (Throwable t) {
+                module.logd(Log.WARN, module.TAG, "分享面板候选 " + panel.getName()
+                        + " Hook 失败: " + t);
+            }
         }
+        module.logd(Log.ERROR, module.TAG,
+                "✘ 分享面板 Hook 失败：候选名与结构定位均未命中，每日任务自动分享将不可用"
+                        + "（请反馈日志，含 swipebacklayout.a 的子类清单）");
+    }
+
+    /**
+     * 汇总分享面板候选，按优先级：
+     * <ol>
+     *   <li>已解析成功的类（缓存）</li>
+     *   <li>{@link #SHARE_PANEL_CLASSES} 里的已知名字 —— **只要求有 show() 即可**，
+     *       不做结构指纹校验</li>
+     *   <li>{@link #SHARE_PANEL_SUPER} 的子类里符合结构指纹的</li>
+     * </ol>
+     *
+     * <p><b>为什么候选名不能过结构指纹</b>：指纹是给「不认识类名」时用的发现手段；
+     * 对已知类名再叠加指纹会成为**额外风险**——父类或构造器任何一处变化都会把
+     * 本可用的候选挡掉。v0.3.1 真机日志就出现过这种自伤：候选名全部被指纹拦住，
+     * 被迫走 DexKit，而 DexKit 又因路径问题不可用，最终整条链路失效。
+     * 现在候选名只做 {@code show()} 存在性校验（由 {@link #hookSharePanel} 负责）。
+     */
+    private java.util.List<Class<?>> collectSharePanelCandidates(ClassLoader cl) {
+        java.util.LinkedHashSet<Class<?>> out = new java.util.LinkedHashSet<>();
+
+        Class<?> cached = sharePanelClassCache.get();
+        if (cached != null) {
+            out.add(cached);
+        }
+
+        for (String name : SHARE_PANEL_CLASSES) {
+            try {
+                Class<?> c = Class.forName(name, false, cl);
+                out.add(c);   // show() 的存在性由 hookSharePanel 校验并逐个记录
+            } catch (Throwable ignored) {
+                // 候选不存在属正常（跨版本），静默跳过
+            }
+        }
+
+        if (out.isEmpty()) {
+            // 只有已知名字全落空时才动用结构定位（避免每次启动都跑 DexKit）
+            for (Class<?> c : findSharePanelByShape(cl)) {
+                out.add(c);
+            }
+        }
+
+        // show() 是 public 方法，getMethod 会向上找父类；排除父类自身，避免误挂。
+        try {
+            out.remove(Class.forName(SHARE_PANEL_SUPER, false, cl));
+        } catch (Throwable ignored) {
+        }
+        return new java.util.ArrayList<>(out);
+    }
+
+    /**
+     * 结构定位：枚举 {@link #SHARE_PANEL_SUPER} 的子类，挑出符合指纹的那个。
+     *
+     * <p>两步都失败时返回空表（由调用方回退到候选名）。父类找不到时**只记一次** WARN，
+     * 避免每次进设置页都刷日志。
+     */
+    private java.util.List<Class<?>> findSharePanelByShape(ClassLoader cl) {
+        java.util.List<Class<?>> out = new java.util.ArrayList<>();
+        Class<?> superClass;
+        try {
+            superClass = Class.forName(SHARE_PANEL_SUPER, false, cl);
+        } catch (Throwable t) {
+            if (sharedShapeWarned.compareAndSet(false, true)) {
+                module.logd(Log.WARN, module.TAG,
+                        "分享面板结构定位跳过：找不到父类 " + SHARE_PANEL_SUPER
+                                + "（已回退到候选类名）: " + t);
+            }
+            return out;
+        }
+
+        // ① 快路径：DexKit 按「声明的父类」直接查子类
+        for (String name : dexkitSubclassesOfPanel(cl, superClass)) {
+            try {
+                Class<?> c = Class.forName(name, false, cl);
+                if (matchesSharePanelShape(c)) {
+                    out.add(c);
+                    sharePanelClassCache.compareAndSet(null, c);
+                    return out;
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+
+        // ② 慢路径：用宿主自己声明的「面板类名清单」逐个试（DexKit 不可用时）
+        int probed = 0;
+        for (String name : probePanelNamesViaDexkit(cl)) {
+            probed++;
+            if (probed > 400) {
+                break;
+            }
+            try {
+                Class<?> c = Class.forName(name, false, cl);
+                if (matchesSharePanelShape(c)) {
+                    out.add(c);
+                    sharePanelClassCache.compareAndSet(null, c);
+                    return out;
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        if (out.isEmpty() && sharedShapeWarned.compareAndSet(false, true)) {
+            module.logd(Log.WARN, module.TAG,
+                    "分享面板结构定位未命中（已回退到候选类名）");
+        }
+        return out;
+    }
+
+    /** 结构指纹：父类正确 + 声明了 public show()V + 声明了 <init>(Context,int,View) */
+    private static boolean matchesSharePanelShape(Class<?> c) {
+        if (c == null || c.isInterface() || java.lang.reflect.Modifier.isAbstract(c.getModifiers())) {
+            return false;
+        }
+        try {
+            Class<?> sup = c.getSuperclass();
+            if (sup == null || !SHARE_PANEL_SUPER.equals(sup.getName())) {
+                return false;
+            }
+            boolean show = false;
+            for (Method m : c.getDeclaredMethods()) {
+                if ("show".equals(m.getName())
+                        && m.getParameterTypes().length == 0
+                        && m.getReturnType() == void.class
+                        && java.lang.reflect.Modifier.isPublic(m.getModifiers())) {
+                    show = true;
+                    break;
+                }
+            }
+            if (!show) {
+                return false;
+            }
+            for (java.lang.reflect.Constructor<?> ctor : c.getDeclaredConstructors()) {
+                Class<?>[] ps = ctor.getParameterTypes();
+                if (ps.length == 3 && ps[0] == Context.class
+                        && (ps[1] == int.class || ps[1] == Integer.class)
+                        && ps[2] == View.class) {
+                    return true;
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return false;
+    }
+
+    private final java.util.concurrent.atomic.AtomicBoolean sharedShapeWarned =
+            new java.util.concurrent.atomic.AtomicBoolean();
+
+    /**
+     * 推导宿主 APK 路径供 DexKit 使用。
+     *
+     * <p>这里**不依赖 Activity/Context**：DailyTaskHook.install 只拿到 ClassLoader，
+     * 且 Hook 安装发生在应用启动早期，此时可能还没有前台 Activity。
+     * 改为从「启动时必然已加载的宿主类」反查其 dex 来源文件。
+     */
+    private String apkPathForDexKit(ClassLoader cl) {
+        // ① 从已加载宿主类的 dex 来源反查
+        for (String probe : new String[]{
+                "com.max.xiaoheihe.app.HeyBoxApplication",
+                "com.max.hbcommon.base.BaseActivity",
+                "com.max.xiaoheihe.MainActivity",
+        }) {
+            try {
+                Class<?> c = Class.forName(probe, false, cl);
+                java.security.CodeSource cs = c.getProtectionDomain().getCodeSource();
+                if (cs != null && cs.getLocation() != null) {
+                    String p = cs.getLocation().getPath();
+                    if (p != null && p.endsWith(".apk") && new java.io.File(p).exists()) {
+                        return p;
+                    }
+                    if (p != null && p.endsWith(".dex")) {
+                        int i = p.lastIndexOf('/');
+                        if (i > 0) {
+                            String apk = p.substring(0, i) + "/base.apk";
+                            if (new java.io.File(apk).exists()) {
+                                return apk;
+                            }
+                        }
+                    }
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+
+        // ② 用 Application + PackageManager 反查
+        //    实测教训：上一版只做 ①，真机上 CodeSource 拿不到 → DexKit 报
+        //    "IllegalStateException: File not found"，结构定位整条失效。
+        try {
+            Context app = com.better.heybox.App.resolveAppContext();
+            if (app == null) {
+                app = com.better.heybox.App.getAppContext();
+            }
+            if (app != null) {
+                android.content.pm.ApplicationInfo ai =
+                        app.getPackageManager().getApplicationInfo(MainModule.TARGET_PKG, 0);
+                if (ai != null && ai.sourceDir != null && new java.io.File(ai.sourceDir).exists()) {
+                    return ai.sourceDir;
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+
+        // ③ 直接猜标准安装路径（兜底）
+        try {
+            String guess = "/data/app/" + MainModule.TARGET_PKG + "/base.apk";
+            if (new java.io.File(guess).exists()) {
+                return guess;
+            }
+        } catch (Throwable ignored) {
+        }
+
+        module.logd(Log.WARN, module.TAG,
+                "分享面板结构定位：APK 路径推导失败（三级兜底均未命中），DexKit 不可用");
+        return MainModule.TARGET_PKG;
+    }
+
+    /** DexKit：直查「父类 == swipebacklayout.a」的类 */
+    private java.util.List<String> dexkitSubclassesOfPanel(ClassLoader cl, Class<?> superClass) {
+        java.util.List<String> names = new java.util.ArrayList<>();
+        org.luckypray.dexkit.DexKitBridge bridge = null;
+        try {
+            System.loadLibrary("dexkit");
+            bridge = org.luckypray.dexkit.DexKitBridge.create(apkPathForDexKit(cl));
+            org.luckypray.dexkit.query.FindClass q = org.luckypray.dexkit.query.FindClass.create()
+                    .matcher(org.luckypray.dexkit.query.matchers.ClassMatcher.create()
+                            .superClass(superClass.getName()));
+            for (org.luckypray.dexkit.result.ClassData cd : bridge.findClass(q)) {
+                if (cd.getName() != null) {
+                    names.add(cd.getName());
+                }
+            }
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "分享面板 DexKit 父类查询不可用: " + t);
+        } finally {
+            if (bridge != null) {
+                try {
+                    bridge.close();
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+        return names;
+    }
+
+    /** 慢路径：借 DexKit 列出「com.max.hbcommon.component 包内的类名」，逐个做形状校验 */
+    private java.util.List<String> probePanelNamesViaDexkit(ClassLoader cl) {
+        java.util.List<String> names = new java.util.ArrayList<>();
+        org.luckypray.dexkit.DexKitBridge bridge = null;
+        try {
+            System.loadLibrary("dexkit");
+            bridge = org.luckypray.dexkit.DexKitBridge.create(apkPathForDexKit(cl));
+            // 用一条该包内必然存在的类名锚点缩小范围；DexKit 的 searchPackages 再限定包
+            org.luckypray.dexkit.query.FindClass q = org.luckypray.dexkit.query.FindClass.create()
+                    .searchPackages("com.max.hbcommon.component");
+            for (org.luckypray.dexkit.result.ClassData cd : bridge.findClass(q)) {
+                if (cd.getName() != null) {
+                    names.add(cd.getName());
+                }
+            }
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "分享面板 DexKit 包枚举不可用: " + t);
+        } finally {
+            if (bridge != null) {
+                try {
+                    bridge.close();
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+        return names;
     }
 
     private void autoClickChannel(final Dialog dialog) {

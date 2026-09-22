@@ -321,8 +321,8 @@ public final class SettingsEntryHook {
     }
 
     private static final String TITLE_GENERAL = "通用";
-    private static final String EXPERIMENTAL_HEYBOX_VERSION = "1.3.395";
-    private static final long EXPERIMENTAL_HEYBOX_CODE = 1131L;
+    private static final String EXPERIMENTAL_HEYBOX_VERSION = "1.3.396";
+    private static final long EXPERIMENTAL_HEYBOX_CODE = 1134L;
 
     private List<SettingsGroup> buildSettingsGroups(Activity activity) {
         List<SettingsGroup> groups = new ArrayList<>();
@@ -1175,7 +1175,7 @@ public final class SettingsEntryHook {
             module.logd(Log.ERROR, module.TAG, "✘ 设置页入口 Hook 失败", t);
         }
     }
-    private static final String[] SETUP_METHOD_CANDIDATES = {"N1", "L1", "G1"};
+    private static final String[] SETUP_METHOD_CANDIDATES = {"N1", "L1", "G1", "S1"};
 
     private Method findSetupMethod(Class<?> clazz) {
         for (String name : SETUP_METHOD_CANDIDATES) {
