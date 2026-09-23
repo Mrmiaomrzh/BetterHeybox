@@ -7,14 +7,14 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE) [![LSPosed Module](https://img.shields.io/badge/LSPosed-Module-blue.svg)](https://github.com/LSPosed/LSPosed)
 
 > [!CAUTION]
-> **免责声明与使用倡议**
+> **免责声明**
 > - 本应用与清枫(北京)科技有限公司**无任何关联**，亦未经其授权或认可，请注意甄别来源  
 > - 本项目仅供**学习与研究**小黑盒 APP 的部分技术原理，请勿用于任何非法用途  
 > - 本模块会修改宿主应用的运行时行为，可能存在账号封禁、数据异常等风险，**请自行评估并承担后果**  
-> - 作者**不建议**将本模块用于商业用途，也不为其在商业场景下的可用性、合规性提供担保或支持  
-> - 建议体验后删除本应用及相关文件，并**不要**在 **小黑盒 / HeyBox** 平台内发布、讨论或传播本模块  
+> - 由于项目特殊性，**禁止**将本模块用于商业用途，也不为其在商业场景下的可用性、合规性提供担保或支持  
+> - 建议删除本应用及相关文件，并**禁止**在 **小黑盒 / HeyBox** 平台内发布、讨论或传播本模块  
 >
-> 以上为作者的风险提示与项目立场；本项目授权条款以 [`LICENSE`](LICENSE)为准，
+> 本项目授权条款以 [`LICENSE`](LICENSE)为准，
 
 > [!Note]
 >本应用兼容 [小黑盒 1.3.393](https://github.com/Mrmiaomrzh/BetterHeybox/releases/download/v0.2.0/heybox_1.3.393.apk) 及以上版本，其他版本出现的问题不会进行处理
@@ -78,6 +78,9 @@
 
 | 过滤项 | 说明 |
 |------|------|
+| 屏蔽低赞帖子 | 点赞数 < 阈值即屏蔽；阈值关闭 / 1 / 5 / 10 / 20 / 50 / 100 / 200 / 500 / 1000 |
+| 屏蔽低评论帖子 | 评论数 < 阈值即屏蔽；候选同上 |
+| 屏蔽低收藏帖子 | 收藏数 < 阈值即屏蔽；候选同上。**部分列表（旧链社区帖、资讯流）服务端不下发收藏数，这些列表自动放行** |
 | 屏蔽低等级帖 | 阈值关闭 / Lv1-Lv10；无等级数据默认放行，可再开「屏蔽无等级用户」 |
 | 关键词屏蔽 | 命中标题或正文即屏蔽，一行一个，`regex:` 前缀为正则 |
 | AI 标题党识别 | 默认关闭；OpenAI 协议接口，内置 DeepSeek / Kimi / 通义 / 智谱 / OpenAI / OpenRouter / 本地模型预设，标题会发给你配置的服务商 |
@@ -227,7 +230,7 @@ app/src/main/
 │       ├── SettingsEntryHook.java # 设置页入口注入 + 内嵌设置面板
 │       ├── BottomTabHook.java   #   底部导航栏隐藏（tab 名版本自适应）
 │       ├── PromotePostHook.java #   推广贴屏蔽
-│       ├── PostFilterHook.java #   发帖过滤：等级 / 关键词 / AI 标题党 / 视频帖
+│       ├── PostFilterHook.java #   发帖过滤：等级 / 关键词 / AI 标题党 / 视频帖 / 点赞·评论·收藏阈值
 │       ├── CommentFilterHook.java # 评论过滤：插眼 / 无意义评论 + 关键词（#36）
 │       ├── FavourAutoCleanHook.java # 自动清理失效收藏（复用宿主清理请求）
 │       ├── AIClickbaitChecker.java # AI 标题党判定：OpenAI 兼容 / 批量 / 缓存 / 冷却

@@ -219,7 +219,9 @@ public class MainModule extends XposedModule {
         registerHook("首页广告横幅", new FeedBannerHook(this)::install, cl, App.KEY_PROMOTE_AD);
         registerHook("发帖过滤", postFilter::install, cl,
                 App.KEY_PROMOTE_AD, App.KEY_BLOCK_VIDEO_POST, App.KEY_POST_NO_LEVEL,
-                App.KEY_POST_AI_ENABLED, App.KEY_FLOW_DIAGNOSE);
+                App.KEY_POST_AI_ENABLED, App.KEY_FLOW_DIAGNOSE,
+                App.KEY_POST_MIN_LEVEL, App.KEY_POST_KEYWORDS,
+                App.KEY_POST_MIN_LIKE, App.KEY_POST_MIN_COMMENT, App.KEY_POST_MIN_FAVOUR);
         registerHook("失效收藏清理", new FavourAutoCleanHook(this)::install, cl,
                 App.KEY_FAVOUR_AUTO_CLEAN);
         registerHook("单列信息流", new SingleColumnFeedHook(this)::install, cl,
@@ -322,11 +324,24 @@ public class MainModule extends XposedModule {
         }
         for (String key : keys) {
             Boolean def = App.BOOLEAN_DEFAULTS.get(key);
-            if (isEnabled(key, def != null && def)) {
+            if (def != null) {
+                if (isEnabled(key, def)) {
+                    return true;
+                }
+            } else if (isConfiguredString(key)) {
                 return true;
             }
         }
         return false;
+    }
+
+    private boolean isConfiguredString(String key) {
+        String value = getString(key, "");
+        if (value == null) {
+            return false;
+        }
+        String trimmed = value.trim();
+        return !trimmed.isEmpty() && !"0".equals(trimmed);
     }
 
     /** Called on a settings change: install hooks skipped at startup so a switch takes effect at once (#37). */

@@ -163,6 +163,15 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     /** 发帖过滤：等级阈值，0 为关闭 */
     public static final String KEY_POST_MIN_LEVEL = "post_min_level";
 
+    /** 发帖过滤：点赞阈值，帖子点赞 < 该值即屏蔽，0 为关闭 */
+    public static final String KEY_POST_MIN_LIKE = "post_min_like";
+
+    /** 发帖过滤：评论阈值，帖子评论 < 该值即屏蔽，0 为关闭 */
+    public static final String KEY_POST_MIN_COMMENT = "post_min_comment";
+
+    /** 发帖过滤：收藏阈值，帖子收藏 < 该值即屏蔽，0 为关闭；无收藏数据的列表自动放行 */
+    public static final String KEY_POST_MIN_FAVOUR = "post_min_favour";
+
     /** 发帖过滤：无等级用户也屏蔽 */
     public static final String KEY_POST_NO_LEVEL = "post_filter_no_level";
 

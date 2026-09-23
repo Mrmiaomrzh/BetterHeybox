@@ -237,6 +237,7 @@ public final class PostFilterHook {
             return true;
         }
         return parseIntSafe(module.getString(App.KEY_POST_MIN_LEVEL, "0")) > 0
+                || hasEngagementRule()
                 || !keywordMatchers().isEmpty();
     }
 
@@ -837,6 +838,10 @@ public final class PostFilterHook {
         if (levelBlocked(item)) {
             return levelReason(item);
         }
+        String engagement = engagementReason(item);
+        if (engagement != null) {
+            return engagement;
+        }
         String keyword = keywordHit(item);
         return keyword == null ? null : "\u547d\u4e2d\u5173\u952e\u8bcd " + keyword;
     }
@@ -857,6 +862,12 @@ public final class PostFilterHook {
         if (level != null) {
             sb.append(", \u7b49\u7ea7=").append(level);
         }
+        Integer like = PromoteDetector.likeCount(item);
+        sb.append(", \u8d5e=").append(like == null ? "-" : like);
+        Integer comment = PromoteDetector.commentCount(item);
+        sb.append(", \u8bc4=").append(comment == null ? "-" : comment);
+        Integer favour = PromoteDetector.favourCount(item);
+        sb.append(", \u85cf=").append(favour == null ? "-" : favour);
         sb.append(", ct=").append(PromoteDetector.contentType(item));
         return sb.toString();
     }
@@ -892,6 +903,58 @@ public final class PostFilterHook {
             return "\u65e0\u7b49\u7ea7\u6570\u636e < \u9608\u503c Lv" + min;
         }
         return "\u7b49\u7ea7 Lv" + level + " < \u9608\u503c Lv" + min;
+    }
+
+    private volatile String thresholdsRaw;
+    private volatile int minLike;
+    private volatile int minComment;
+    private volatile int minFavour;
+
+    private void refreshThresholds() {
+        String raw = module.getString(App.KEY_POST_MIN_LIKE, "0") + "|"
+                + module.getString(App.KEY_POST_MIN_COMMENT, "0") + "|"
+                + module.getString(App.KEY_POST_MIN_FAVOUR, "0");
+        if (raw.equals(thresholdsRaw)) {
+            return;
+        }
+        String[] parts = raw.split("\\|", -1);
+        minLike = parseIntSafe(parts.length > 0 ? parts[0] : "0");
+        minComment = parseIntSafe(parts.length > 1 ? parts[1] : "0");
+        minFavour = parseIntSafe(parts.length > 2 ? parts[2] : "0");
+        thresholdsRaw = raw;
+    }
+
+    private boolean hasEngagementRule() {
+        refreshThresholds();
+        return minLike > 0 || minComment > 0 || minFavour > 0;
+    }
+
+    private String engagementReason(Object item) {
+        if (item == null || !hasEngagementRule()) {
+            return null;
+        }
+        if (!isPostFlowModel(item) && safeInvoke(item, "getUser") == null) {
+            return null;
+        }
+        if (minLike > 0) {
+            Integer value = PromoteDetector.likeCount(item);
+            if (value != null && value < minLike) {
+                return "\u70b9\u8d5e " + value + " < \u9608\u503c " + minLike;
+            }
+        }
+        if (minComment > 0) {
+            Integer value = PromoteDetector.commentCount(item);
+            if (value != null && value < minComment) {
+                return "\u8bc4\u8bba " + value + " < \u9608\u503c " + minComment;
+            }
+        }
+        if (minFavour > 0) {
+            Integer value = PromoteDetector.favourCount(item);
+            if (value != null && value < minFavour) {
+                return "\u6536\u85cf " + value + " < \u9608\u503c " + minFavour;
+            }
+        }
+        return null;
     }
 
     /** 条目为小写子串或预编译正则 */

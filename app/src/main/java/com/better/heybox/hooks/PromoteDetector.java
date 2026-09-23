@@ -149,6 +149,48 @@ public final class PromoteDetector {
         return value == null ? null : String.valueOf(value);
     }
 
+    public static Integer likeCount(Object item) {
+        Integer value = readInt(item, "getLinkAwardNum", "getLink_award_num");
+        return value != null ? value : readInt(preloadStats(item), "getLikeCnt");
+    }
+
+    public static Integer commentCount(Object item) {
+        Integer value = readInt(item, "getCommentNum", "getComment_num");
+        return value != null ? value : readInt(preloadStats(item), "getCommentCnt");
+    }
+
+    public static Integer favourCount(Object item) {
+        return readInt(preloadStats(item), "getSaveCnt");
+    }
+
+    private static Object preloadStats(Object item) {
+        Object preload = readGetter(item, "getCommunityPostPreload");
+        return preload == null ? null : readGetter(preload, "getInteractStats");
+    }
+
+    private static Integer readInt(Object target, String... getters) {
+        if (target == null) {
+            return null;
+        }
+        for (String name : getters) {
+            Object value = readGetter(target, name);
+            if (value instanceof Number) {
+                return ((Number) value).intValue();
+            }
+            if (value instanceof String) {
+                String text = ((String) value).trim();
+                if (text.isEmpty()) {
+                    continue;
+                }
+                try {
+                    return Integer.parseInt(text);
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+        return null;
+    }
+
     public static String title(Object item) {
         Object value = readGetter(item, "getTitle");
         if (value != null && !String.valueOf(value).isEmpty()) {
@@ -184,10 +226,19 @@ public final class PromoteDetector {
         if (level != null) {
             sb.append(", \u7b49\u7ea7=").append(level);
         }
+        appendCount(sb, "\u8d5e", likeCount(item));
+        appendCount(sb, "\u8bc4", commentCount(item));
+        appendCount(sb, "\u85cf", favourCount(item));
         sb.append(", \u6807\u9898=").append(abbreviate(title(item)));
         String reason = matchReason(item);
         sb.append(", \u547d\u4e2d=").append(reason == null ? "\u5426" : reason);
         return sb.toString();
+    }
+
+    private static void appendCount(StringBuilder sb, String label, Integer value) {
+        if (value != null) {
+            sb.append(", ").append(label).append('=').append(value);
+        }
     }
 
     public static String abbreviate(String text) {

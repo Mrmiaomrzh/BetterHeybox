@@ -120,6 +120,7 @@ public final class SettingsEntryHook {
         NONE, EDIT_LINK, CLEAR_DAILY, CHANNEL, EXPORT, IMPORT,
         EXPORT_LOG, CLEAR_LOG, VIEW_LOG, RUNTIME_STATUS, TARGET_STATUS, OPEN_WEB, PICK_DIR, RESET_GLASS, CHOOSE_GLASS,GLASS_SHEET,
         POST_LEVEL, POST_KEYWORDS, COMMENT_KEYWORDS, AI_PROVIDER, AI_PROMPT, AI_TEST, AI_MAX_TOKENS,
+        POST_MIN_LIKE, POST_MIN_COMMENT, POST_MIN_FAVOUR,
         REDIRECT_FORCE, REDIRECT_BLOCK, REDIRECT_TARGET, WEB_LOG, ABOUT,
         WATCH_USERS, WATCH_KEYWORDS, WATCH_IMPORT_FOLLOW, WATCH_TEST_PUSH, WATCH_CHECK,
         WATCH_DEBUG_PUSH3,WATCH_V2,OPEN_PAGE,
@@ -968,10 +969,23 @@ public final class SettingsEntryHook {
             }
         }
         String providerId = module.getString(App.KEY_AI_PROVIDER, "");
+        int minLike = currentThreshold(App.KEY_POST_MIN_LIKE);
+        int minComment = currentThreshold(App.KEY_POST_MIN_COMMENT);
+        int minFavour = currentThreshold(App.KEY_POST_MIN_FAVOUR);
         SettingsGroup group = new SettingsGroup("发帖过滤", new SwitchDef[]{
                 new SwitchDef("屏蔽视频帖",
                         "信息流中隐藏视频帖；",
                         App.KEY_BLOCK_VIDEO_POST, false, false),
+                new SwitchDef("屏蔽低赞帖子",
+                        minLike > 0 ? "当前：点赞 < " + minLike : "选择点赞数阈值",
+                        null, false, false, true, null, Action.POST_MIN_LIKE),
+                new SwitchDef("屏蔽低评论帖子",
+                        minComment > 0 ? "当前：评论 < " + minComment : "选择评论数阈值",
+                        null, false, false, true, null, Action.POST_MIN_COMMENT),
+                new SwitchDef("屏蔽低收藏帖子",
+                        minFavour > 0 ? "当前：收藏 < " + minFavour + "；无收藏数据的列表自动放行"
+                                : "选择收藏数阈值；无收藏数据的列表自动放行",
+                        null, false, false, true, null, Action.POST_MIN_FAVOUR),
                 new SwitchDef("屏蔽低等级发帖",
                         minLevel > 0 ? "当前：屏蔽 Lv" + minLevel + " 以下"
                                 : "选择等级阈值",
@@ -2026,6 +2040,18 @@ public final class SettingsEntryHook {
                     case POST_LEVEL:
                         setRowClick(itemCls, item, v -> showPostLevelDialog(activity));
                         break;
+                    case POST_MIN_LIKE:
+                        setRowClick(itemCls, item, v -> showPostCountDialog(activity,
+                                "屏蔽低赞帖子", App.KEY_POST_MIN_LIKE));
+                        break;
+                    case POST_MIN_COMMENT:
+                        setRowClick(itemCls, item, v -> showPostCountDialog(activity,
+                                "屏蔽低评论帖子", App.KEY_POST_MIN_COMMENT));
+                        break;
+                    case POST_MIN_FAVOUR:
+                        setRowClick(itemCls, item, v -> showPostCountDialog(activity,
+                                "屏蔽低收藏帖子", App.KEY_POST_MIN_FAVOUR));
+                        break;
                     case POST_KEYWORDS:
                         setRowClick(itemCls, item, v -> showPostKeywordsDialog(activity));
                         break;
@@ -2558,6 +2584,47 @@ public final class SettingsEntryHook {
         } catch (Throwable t) {
             return 0;
         }
+    }
+
+    private static final String[] POST_COUNT_VALUES = {
+            "0", "1", "5", "10", "20", "50", "100", "200", "500", "1000"};
+    private static final String[] POST_COUNT_LABELS = {
+            "关闭", "1", "5", "10", "20", "50", "100", "200", "500", "1000"};
+
+    private int currentThreshold(String key) {
+        try {
+            return Integer.parseInt(module.getString(key, "0").trim());
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
+    private static int thresholdIndex(String raw) {
+        String value = raw == null ? "" : raw.trim();
+        for (int i = 0; i < POST_COUNT_VALUES.length; i++) {
+            if (POST_COUNT_VALUES[i].equals(value)) {
+                return i;
+            }
+        }
+        return 0;
+    }
+
+    private void showPostCountDialog(final Activity activity, final String title, final String key) {
+        final int checked = thresholdIndex(module.getString(key, "0"));
+        withHeyboxDialog(activity, spec -> {
+            LinearLayout list = buildOptionRowList(activity, POST_COUNT_LABELS, checked);
+            Dialog dialog = spec.buildAndShow(activity, title, list, null, null,
+                    "取消", (d, w) -> d.dismiss());
+            bindOptionRows(dialog, list, index -> {
+                HeyboxPrefs.setString(key, POST_COUNT_VALUES[index]);
+                LogRecorder.recordEvent(title + "已设置: " + POST_COUNT_VALUES[index]);
+                refreshEmbeddedPanel(activity);
+            });
+        }, () -> showSingleChoiceFallback(activity, title, POST_COUNT_LABELS,
+                checked, index -> {
+                    HeyboxPrefs.setString(key, POST_COUNT_VALUES[index]);
+                    refreshEmbeddedPanel(activity);
+                }));
     }
 
     private void showPostKeywordsDialog(Activity activity) {
