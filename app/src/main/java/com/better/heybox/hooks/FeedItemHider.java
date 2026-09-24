@@ -23,9 +23,36 @@ public final class FeedItemHider {
         }
     }
 
+    public static View topLevel(View view) {
+        View current = view;
+        for (int depth = 0; depth < 16 && current != null; depth++) {
+            android.view.ViewParent parent = current.getParent();
+            if (!(parent instanceof ViewGroup)) {
+                return current;
+            }
+            if (isRecyclerView(parent)) {
+                return current;
+            }
+            current = (View) parent;
+        }
+        return current;
+    }
+
+    private static boolean isRecyclerView(android.view.ViewParent parent) {
+        for (Class<?> c = parent.getClass(); c != null; c = c.getSuperclass()) {
+            if ("androidx.recyclerview.widget.RecyclerView".equals(c.getName())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public static void hide(View itemView) {
         try {
             if (itemView == null) {
+                return;
+            }
+            if (itemView.getVisibility() == View.GONE && HIDDEN_HEIGHTS.containsKey(itemView)) {
                 return;
             }
             if (!HIDDEN_HEIGHTS.containsKey(itemView)) {

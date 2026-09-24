@@ -3,10 +3,6 @@ package com.better.heybox;
 import android.content.Context;
 import android.content.SharedPreferences;
 
-/**
- * 小黑盒进程内的设置存储（直接写本进程 SharedPreferences，不跨进程）。
- * 读写：setBoolean 直接写本文件；getBoolean 优先本文件，键不存在回退框架 RemotePreferences（模块设置页写入）
- */
 public final class HeyboxPrefs {
 
     public static final String PREFS_NAME = "betterheybox";
@@ -50,7 +46,11 @@ public final class HeyboxPrefs {
         if (prefs == null) {
             return false;
         }
-        return prefs.edit().putBoolean(key, value).commit();
+        boolean ok = prefs.edit().putBoolean(key, value).commit();
+        if (isWatchKey(key)) {
+            com.better.heybox.watch.WatchConfig.invalidate();
+        }
+        return ok;
     }
 
     public static String getString(String key, String defaultValue) {
@@ -63,6 +63,14 @@ public final class HeyboxPrefs {
         if (prefs == null) {
             return false;
         }
-        return prefs.edit().putString(key, value).commit();
+        boolean ok = prefs.edit().putString(key, value).commit();
+        if (isWatchKey(key)) {
+            com.better.heybox.watch.WatchConfig.invalidate();
+        }
+        return ok;
+    }
+    
+    private static boolean isWatchKey(String key) {
+        return key != null && key.startsWith("watch_");
     }
 }

@@ -88,6 +88,9 @@ public final class PostFilterHook {
 
     public void install(ClassLoader cl) {
         hookWaterfallCard(cl);
+        hookWaterfallRowContainer(cl);
+        hookNewsLinkCard(cl);
+        hookConfigStyleCard(cl);
         hookNewsListAdapter(cl);
         hookBbsLinkListAdapter(cl);
         hookBbsLinkListGetter(cl);
@@ -278,68 +281,127 @@ public final class PostFilterHook {
         }
     }
 
-    @SuppressWarnings({"rawtypes", "unchecked"})
     private List<?> filterFlowList(Object listObj) {
         if (!(listObj instanceof List)) {
             return null;
         }
-        List list = (List) listObj;
-        boolean aiEnabled = module.isEnabled(App.KEY_POST_AI_ENABLED, false)
-                && !module.getString(App.KEY_AI_BASE_URL, "").trim().isEmpty()
-                && !module.getString(App.KEY_AI_MODEL, "").trim().isEmpty();
-        java.util.Iterator<?> it = list.iterator();
-        while (it.hasNext()) {
-            Object item = it.next();
+        if (!hasSyncRule()) {
+            clearBlockedIndex();
+            return null;
+        }
+        for (Object item : (List<?>) listObj) {
             if (item == null) {
                 continue;
             }
-            String reason = blockReason(item, true);
-            if (reason != null) {
-                logBlocked("首页流列表", item, reason);
-                try {
-                    it.remove();
-                } catch (Throwable t) {
-                    return filteredCopy(list, aiEnabled);
+            try {
+                String reason = blockReason(item, true);
+                if (reason != null) {
+                    logBlocked("首页流列表", item, reason);
+                    probe("登记", "reason=" + reason + " 键=" + cut(PromoteDetector.title(item)));
+                    markBlocked(item);
                 }
-                continue;
-            }
-            if (!isPostFlowModel(item)) {
-                continue;
-            }
-            Object link = safeInvoke(item, "getLinkContent");
-            String title = link == null ? "" : safeGet(link, "getTitle");
-            if (aiEnabled && !title.isEmpty()
-                    && AIClickbaitChecker.getCached(title) == null) {
-                AIClickbaitChecker.requestVerdicts(module, title, title, listAiCallback);
+            } catch (Throwable t) {
+                module.logd(Log.WARN, module.TAG, "首页流列表判定异常，忽略该条: " + t);
             }
         }
         return null;
     }
 
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    private List<?> filteredCopy(List list, boolean aiEnabled) {
-        List<Object> keep = new ArrayList<>(list.size());
-        for (Object item : list) {
-            if (item == null) {
-                keep.add(item);
-                continue;
-            }
-            if (blockReason(item, true) != null) {
-                continue;
-            }
-            if (!isPostFlowModel(item)) {
-                keep.add(item);
-                continue;
+    private static final long BLOCK_TTL_MS = 10 * 60 * 1000L;
+    private static final int BLOCK_INDEX_MAX = 2048;
+
+    private final java.util.concurrent.ConcurrentHashMap<String, Long> blockedTitles =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    private void markBlocked(Object item) {
+        try {
+            if (putBlockedKey(PromoteDetector.title(item))) {
+                return;
             }
             Object link = safeInvoke(item, "getLinkContent");
-            String title = link == null ? "" : safeGet(link, "getTitle");
-            if (aiEnabled && !title.isEmpty()
-                    && AIClickbaitChecker.getCached(title) == null) {
-                AIClickbaitChecker.requestVerdicts(module, title, title, aiCallback);
+            if (link != null) {
+                putBlockedKey(safeGet(link, "getDescription"));
             }
-            keep.add(item);
+        } catch (Throwable ignored) {
         }
-        return keep;
+    }
+
+    private boolean putBlockedKey(String title) {
+        if (title == null) {
+            return false;
+        }
+        String key = title.trim();
+        if (key.length() < 4) {
+            return false;
+        }
+        if (blockedTitles.size() >= BLOCK_INDEX_MAX) {
+            purgeBlockedIndex();
+        }
+        blockedTitles.put(key, System.currentTimeMillis());
+        return true;
+    }
+
+    private boolean isBlockedTitle(String title) {
+        if (title == null) {
+            return false;
+        }
+        String key = title.trim();
+        if (key.length() < 4) {
+            return false;
+        }
+        Long at = blockedTitles.get(key);
+        if (at == null) {
+            return false;
+        }
+        if (System.currentTimeMillis() - at > BLOCK_TTL_MS) {
+            blockedTitles.remove(key);
+            return false;
+        }
+        return true;
+    }
+
+    private void purgeBlockedIndex() {
+        long now = System.currentTimeMillis();
+        for (java.util.Iterator<java.util.Map.Entry<String, Long>> it =
+             blockedTitles.entrySet().iterator(); it.hasNext(); ) {
+            if (now - it.next().getValue() > BLOCK_TTL_MS) {
+                it.remove();
+            }
+        }
+        if (blockedTitles.size() >= BLOCK_INDEX_MAX) {
+            blockedTitles.clear();
+        }
+    }
+
+    private void clearBlockedIndex() {
+        if (!blockedTitles.isEmpty()) {
+            blockedTitles.clear();
+        }
+    }
+
+    private static final int PROBE_LIMIT = 150;
+    private final java.util.concurrent.atomic.AtomicInteger probeCount =
+            new java.util.concurrent.atomic.AtomicInteger();
+
+    private void probe(String where, String detail) {
+        try {
+            if (probeCount.get() >= PROBE_LIMIT || !module.isEnabled(App.KEY_VERBOSE_LOG, false)) {
+                return;
+            }
+            int n = probeCount.incrementAndGet();
+            if (n <= PROBE_LIMIT) {
+                module.logd(Log.INFO, module.TAG,
+                        "[\u89c6\u56fe\u5c42\u63a2\u9488 " + n + "] " + where + " " + detail);
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private String cut(String s) {
+        if (s == null) {
+            return "null";
+        }
+        return s.length() <= 40 ? s : s.substring(0, 40);
     }
 
     public Object onDeserialized(Object result) {
@@ -353,7 +415,6 @@ public final class PostFilterHook {
         return null;
     }
 
-    /** 空条目占位 */
     private Object emptyFeedObj(Object sample) {
         try {
             ClassLoader cl = sample != null ? sample.getClass().getClassLoader()
@@ -372,9 +433,6 @@ public final class PostFilterHook {
         }
     }
 
-    // ---------- 首页流数据层 ----------
-
-    /** 首页流数据层过滤，丢弃条目返回 null */
     private void hookFeedsModelDeserializer(ClassLoader cl) {
         try {
             Class<?> d = Class.forName(
@@ -401,16 +459,21 @@ public final class PostFilterHook {
     private Object filterFlowModel(XposedInterface.Chain chain) throws Throwable {
         Object result = chain.proceed();
         try {
-            if (result != null && module.isEnabled(App.KEY_FLOW_DIAGNOSE, false)) {
+            if (result == null) {
+                return result;
+            }
+            if (module.isEnabled(App.KEY_FLOW_DIAGNOSE, false)) {
                 module.logd(Log.INFO, module.TAG, "首页流条目 " + PromoteDetector.describe(result));
             }
-            if (result == null) {
+            if (!hasSyncRule()) {
+                clearBlockedIndex();
                 return result;
             }
             String reason = blockReason(result, true);
             if (reason != null) {
                 logBlocked("首页流", result, reason);
-                return null;
+                markBlocked(result);
+                return result;
             }
             if (!isPostFlowModel(result)) {
                 return result;
@@ -421,9 +484,8 @@ public final class PostFilterHook {
                 Boolean verdict = AIClickbaitChecker.getCached(title);
                 if (verdict != null && verdict) {
                     module.logd(Log.INFO, module.TAG, "AI 判定标题党（缓存）: " + abbreviate(title));
-                    return null;
-                }
-                if (verdict == null) {
+                    markBlocked(result);
+                } else if (verdict == null) {
                     AIClickbaitChecker.requestVerdicts(module, title, title, listAiCallback);
                 }
             }
@@ -472,10 +534,6 @@ public final class PostFilterHook {
         return isPostFlowModel(item) ? isVideoModel(item) : isVideoLegacy(item);
     }
 
-    /**
-     * 首页流模型：宿主 LinkFeedsFlowItemModel.hasVideo() 即 getLinkStyle() == LinkStyle.VIDEO_LINK；
-     * 方法改名时回退比较 LinkStyle 名字。
-     */
     private boolean isVideoModel(Object model) {
         try {
             java.lang.reflect.Method m = hasVideoMethod(model.getClass());
@@ -489,7 +547,6 @@ public final class PostFilterHook {
         return style != null && "VIDEO_LINK".equals(String.valueOf(style));
     }
 
-    /** 旧链 BBSLinkObj：has_video 标志位 / video_url / video_info 任一命中即视为视频帖 */
     private boolean isVideoLegacy(Object item) {
         if (isTruthy(safeGet(item, "getHas_video"))) {
             return true;
@@ -532,7 +589,6 @@ public final class PostFilterHook {
         return found;
     }
 
-    /** "1" / "true" / "yes" 视为真（宿主 has_video 是布尔串） */
     private static boolean isTruthy(String s) {
         if (s == null) {
             return false;
@@ -541,11 +597,6 @@ public final class PostFilterHook {
         return "1".equals(v) || "true".equalsIgnoreCase(v) || "yes".equalsIgnoreCase(v);
     }
 
-    // ---------- 委托入口：PromotePostHook 渲染链 ----------
-
-    /**
-     * 旧渲染链（b.L/b.N）bind 时由 PromotePostHook 委托调用。
-     */
     public boolean onRenderBind(Object bbsLink, Object viewHolder) {
         try {
             if (applySyncFilters(bbsLink)) {
@@ -561,14 +612,11 @@ public final class PostFilterHook {
         return false;
     }
 
-    // ---------- 瀑布流卡片 ----------
-
     private void hookWaterfallCard(ClassLoader cl) {
         try {
             Class<?> model = Class.forName(
                     "com.max.data.model.feeds.WaterfallLinkFeedsFlowItemModel", false, cl);
             int installed = 0;
-            // 不同版本/登录态下瀑布流卡片在 V1/V2 间切换，两处都挂
             for (String name : new String[]{
                     "com.max.feature.feeds.view.itemview.WaterfallFeedsFlowItemViewV2",
                     "com.max.feature.feeds.view.itemview.WaterfallFeedsFlowItemView"}) {
@@ -606,8 +654,16 @@ public final class PostFilterHook {
             Object link = safeInvoke(model, "getLinkContent");
             String title = link == null ? "" : safeGet(link, "getTitle");
             String reason = blockReason(model, false);
+            probe("瀑布卡", "model=" + model.getClass().getSimpleName() + " 判定=" + reason
+                    + " 索引=" + blockedTitles.size() + " title=" + cut(title));
             if (reason != null) {
                 logBlocked("首页卡片", model, reason);
+                markBlocked(model);
+                FeedItemHider.hide(cardView);
+                return result;
+            }
+            if (isBlockedTitle(title)) {
+                module.logd(Log.INFO, module.TAG, "屏蔽内容[首页卡片] 标题命中屏蔽索引: " + abbreviate(title));
                 FeedItemHider.hide(cardView);
                 return result;
             }
@@ -630,7 +686,238 @@ public final class PostFilterHook {
         return result;
     }
 
-    // ---------- news.adapter.a 列表 ----------
+    private Class<?> pairCardInterface;
+
+    private void hookWaterfallRowContainer(ClassLoader cl) {
+        try {
+            Class<?> container = Class.forName(
+                    "com.max.feature.feeds.view.itemview.WaterfallPairGroupContainer", false, cl);
+            try {
+                pairCardInterface = Class.forName(
+                        "com.max.feature.feeds.view.itemview.t0", false, cl);
+            } catch (Throwable ignored) {
+                pairCardInterface = null;
+            }
+            Method onMeasure = container.getDeclaredMethod("onMeasure", int.class, int.class);
+            module.hook(onMeasure).intercept(chain -> {
+                try {
+                    fixWaterfallRow(chain.getThisObject());
+                } catch (Throwable t) {
+                    module.logd(Log.WARN, module.TAG, "首页成对行排版修正异常: " + t);
+                }
+                return chain.proceed();
+            });
+            com.better.heybox.Checkpoint.mark("发帖过滤首页成对行安装: ok");
+        } catch (Throwable t) {
+            com.better.heybox.Checkpoint.mark("发帖过滤首页成对行安装失败: %s", String.valueOf(t));
+            module.logd(Log.WARN, module.TAG, "✘ 发帖过滤首页成对行 Hook 失败: " + t);
+        }
+    }
+
+    private void fixWaterfallRow(Object obj) {
+        if (!(obj instanceof android.view.ViewGroup)) {
+            return;
+        }
+        if (module.isEnabled(App.KEY_SINGLE_COLUMN_FEED, false)) {
+            return;
+        }
+        android.view.ViewGroup row = (android.view.ViewGroup) obj;
+        int childCount = row.getChildCount();
+        if (childCount == 0) {
+            return;
+        }
+        View rowItem = FeedItemHider.topLevel(row);
+        int visibleCards = 0;
+        boolean anyHiddenCard = false;
+        for (int i = 0; i < childCount; i++) {
+            View child = row.getChildAt(i);
+            if (!isPairCard(child)) {
+                continue;
+            }
+            if (child.getVisibility() == View.GONE) {
+                anyHiddenCard = true;
+            } else {
+                visibleCards++;
+            }
+        }
+        if (!anyHiddenCard) {
+            FeedItemHider.restore(rowItem);
+            if (row instanceof android.widget.LinearLayout
+                    && ((android.widget.LinearLayout) row).getOrientation()
+                    != android.widget.LinearLayout.HORIZONTAL) {
+                ((android.widget.LinearLayout) row).setOrientation(
+                        android.widget.LinearLayout.HORIZONTAL);
+                for (int i = 0; i < childCount; i++) {
+                    resetPairChildLayout(row.getChildAt(i));
+                }
+            }
+            return;
+        }
+        if (visibleCards == 0) {
+            FeedItemHider.hide(rowItem);
+            return;
+        }
+        FeedItemHider.restore(rowItem);
+        if (row instanceof android.widget.LinearLayout) {
+            ((android.widget.LinearLayout) row).setOrientation(
+                    android.widget.LinearLayout.VERTICAL);
+        }
+        for (int i = 0; i < childCount; i++) {
+            View child = row.getChildAt(i);
+            if (isPairCard(child) && child.getVisibility() != View.GONE) {
+                expandPairChild(child);
+            }
+        }
+    }
+
+    private boolean isPairCard(View child) {
+        if (child.getClass().getName().endsWith("WaterfallPairEmptyItemView")) {
+            return false;
+        }
+        return pairCardInterface == null || pairCardInterface.isInstance(child);
+    }
+
+    private void expandPairChild(View child) {
+        if (child.getLayoutParams() instanceof android.widget.LinearLayout.LayoutParams) {
+            android.widget.LinearLayout.LayoutParams p =
+                    (android.widget.LinearLayout.LayoutParams) child.getLayoutParams();
+            if (p.width == android.widget.LinearLayout.LayoutParams.MATCH_PARENT && p.weight == 0f) {
+                return;
+            }
+        }
+        child.setLayoutParams(new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
+    }
+
+    private void resetPairChildLayout(View child) {
+        if (child.getLayoutParams() instanceof android.widget.LinearLayout.LayoutParams) {
+            android.widget.LinearLayout.LayoutParams p =
+                    (android.widget.LinearLayout.LayoutParams) child.getLayoutParams();
+            if (p.width == 0 && p.weight == 1f) {
+                return;
+            }
+        }
+        child.setLayoutParams(new android.widget.LinearLayout.LayoutParams(
+                0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+    }
+
+    private void hookNewsLinkCard(ClassLoader cl) {
+        try {
+            Class<?> card = Class.forName(
+                    "com.max.feature.feeds.view.itemview.NewsLinkFeedsFlowItemView", false, cl);
+            Method setTitle = card.getDeclaredMethod("setTitle", String.class);
+            module.hook(setTitle).intercept(this::onNewsLinkTitle);
+            com.better.heybox.Checkpoint.mark("发帖过滤首页全宽卡安装: ok");
+        } catch (Throwable t) {
+            com.better.heybox.Checkpoint.mark("发帖过滤首页全宽卡安装失败: %s", String.valueOf(t));
+            module.logd(Log.WARN, module.TAG, "✘ 发帖过滤首页全宽卡 Hook 失败: " + t);
+        }
+    }
+
+    private Object onNewsLinkTitle(XposedInterface.Chain chain) throws Throwable {
+        View itemView = chain.getThisObject() instanceof View
+                ? FeedItemHider.topLevel((View) chain.getThisObject()) : null;
+        if (itemView != null) {
+            FeedItemHider.restore(itemView);
+        }
+        Object result = chain.proceed();
+        try {
+            Object raw = chain.getArg(0);
+            String title = raw instanceof String ? (String) raw : null;
+            probe("全宽卡", "view=" + (itemView == null ? "null" : itemView.getClass().getSimpleName())
+                    + " 索引=" + blockedTitles.size() + " 命中=" + isBlockedTitle(title)
+                    + " title=" + cut(title));
+            if (itemView == null || title == null || title.trim().length() < 4) {
+                return result;
+            }
+            if (isBlockedTitle(title)) {
+                module.logd(Log.INFO, module.TAG,
+                        "屏蔽内容[首页全宽卡] 标题命中屏蔽索引: " + abbreviate(title));
+                FeedItemHider.hide(itemView);
+                return result;
+            }
+            if (module.isEnabled(App.KEY_POST_AI_ENABLED, false)
+                    && AIClickbaitChecker.getCached(title) == null) {
+                boundPostKeys.put(itemView, title);
+                AIClickbaitChecker.requestVerdicts(module, title, title, aiCallback);
+            }
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "全宽卡过滤异常，放行: " + t);
+        }
+        return result;
+    }
+
+    private static final String[] CONFIG_CARD_VIEWS = {
+            "com.max.feature.feeds.view.itemview.ModularPostBodyDefaultItemView",
+            "com.max.feature.feeds.view.itemview.ModularPostBody4ItemView",
+            "com.max.feature.feeds.view.itemview.ModularPostBody6ItemView",
+            "com.max.feature.feeds.view.itemview.ModularPostBody7ItemView",
+            "com.max.feature.feeds.view.itemview.ModularPostHeader4ItemView",
+            "com.max.feature.feeds.view.itemview.ModularPostHeader5ItemView",
+            "com.max.feature.feeds.view.itemview.ModularPostFooter6ItemView",
+            "com.max.feature.feeds.view.itemview.ConfigStyleLinkFeedsFlowItemView",
+    };
+
+    private void hookConfigStyleCard(ClassLoader cl) {
+        String modelName = "com.max.data.model.feeds.ConfigStyleLinkFeedsFlowItemModel";
+        int installed = 0;
+        int classes = 0;
+        for (String name : CONFIG_CARD_VIEWS) {
+            try {
+                Class<?> card = Class.forName(name, false, cl);
+                int before = installed;
+                for (Method m : card.getDeclaredMethods()) {
+                    if (!m.getName().startsWith("set") || m.getParameterCount() != 1) {
+                        continue;
+                    }
+                    if (!modelName.equals(m.getParameterTypes()[0].getName())) {
+                        continue;
+                    }
+                    module.hook(m).intercept(this::onConfigStyleBind);
+                    installed++;
+                }
+                if (installed > before) {
+                    classes++;
+                }
+            } catch (Throwable t) {
+                module.logd(Log.INFO, module.TAG, "配置样式卡类不可用: " + name);
+            }
+        }
+        com.better.heybox.Checkpoint.mark("发帖过滤首页配置样式卡安装: %d 处 / %d 类", installed, classes);
+    }
+
+    private Object onConfigStyleBind(XposedInterface.Chain chain) throws Throwable {
+        View itemView = chain.getThisObject() instanceof View
+                ? FeedItemHider.topLevel((View) chain.getThisObject()) : null;
+        if (itemView != null) {
+            FeedItemHider.restore(itemView);
+        }
+        Object result = chain.proceed();
+        try {
+            Object model = chain.getArg(0);
+            if (itemView == null || model == null) {
+                return result;
+            }
+            String reason = blockReason(model, true);
+            probe("配置卡", "model=" + model.getClass().getSimpleName() + " 判定=" + reason
+                    + " 行=" + itemView.getClass().getSimpleName()
+                    + " title=" + cut(PromoteDetector.title(model)));
+            if (reason != null) {
+                logBlocked("首页配置卡", model, reason);
+                markBlocked(model);
+                FeedItemHider.hide(itemView);
+                return result;
+            }
+            if (isBlockedTitle(PromoteDetector.title(model))) {
+                module.logd(Log.INFO, module.TAG, "屏蔽内容[首页配置卡] 标题命中屏蔽索引");
+                FeedItemHider.hide(itemView);
+            }
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "配置样式卡过滤异常，放行: " + t);
+        }
+        return result;
+    }
 
     private void hookNewsListAdapter(ClassLoader cl) {
         try {
@@ -675,7 +962,6 @@ public final class PostFilterHook {
         return true;
     }
 
-    /** AI 判定入口 */
     private void aiCheck(Object bbsLink, String cacheKey, View boundView) {
         if (!module.isEnabled(App.KEY_POST_AI_ENABLED, false) || cacheKey == null) {
             return;
@@ -701,7 +987,6 @@ public final class PostFilterHook {
         AIClickbaitChecker.requestVerdicts(module, cacheKey, title, aiCallback);
     }
 
-    /** itemView 当前绑定的帖子键，异步判定回补用 */
     private View findBoundView(String cacheKey) {
         for (java.util.Map.Entry<View, String> e : boundPostKeys.entrySet()) {
             if (cacheKey.equals(e.getValue())) {
@@ -710,8 +995,6 @@ public final class PostFilterHook {
         }
         return null;
     }
-
-    // ---------- 等级过滤 ----------
 
     private boolean levelBlocked(Object item) {
         int min = parseIntSafe(module.getString(App.KEY_POST_MIN_LEVEL, "0"));

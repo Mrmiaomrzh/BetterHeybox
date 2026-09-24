@@ -71,7 +71,31 @@ public final class WatchConfig {
         this.custom = custom;
     }
 
+    private static final long CACHE_TTL_MS = 1000L;
+    private static volatile WatchConfig sCached;
+    private static volatile long sCachedAt;
+    private static volatile MainModule sCachedModule;
+
+    public static void invalidate() {
+        sCached = null;
+        sCachedModule = null;
+        sCachedAt = 0L;
+    }
+
     public static WatchConfig load(MainModule module) {
+        WatchConfig cached = sCached;
+        long now = android.os.SystemClock.elapsedRealtime();
+        if (cached != null && sCachedModule == module && now - sCachedAt < CACHE_TTL_MS) {
+            return cached;
+        }
+        WatchConfig built = build(module);
+        sCached = built;
+        sCachedModule = module;
+        sCachedAt = now;
+        return built;
+    }
+
+    private static WatchConfig build(MainModule module) {
         int win = parseInt(module.getString(App.KEY_WATCH_WINDOW_DAYS, String.valueOf(DEFAULT_WINDOW_DAYS)), DEFAULT_WINDOW_DAYS);
         // 新的「获取时间窗」按分钟存，未设置时回落到旧的「天」
         int winMin = parseInt(module.getString(App.KEY_WATCH_WINDOW_MIN, ""), 0);
@@ -123,16 +147,12 @@ public final class WatchConfig {
         return windowMin + " 分钟";
     }
 
-    // ------------------------------------------------------------ 话题
-
-    /** 写入一行话题："topicId|话题名"，id 为空时只写名字 */
     public static String formatTopic(String id, String name) {
         String n = name == null ? "" : name.trim();
         String i = id == null ? "" : id.trim();
         return i.isEmpty() ? n : (i + "|" + n);
     }
 
-    /** 从一行话题配置里取话题 id（没有 id 返回 null） */
     public static String parseTopicId(String raw) {
         if (raw == null) {
             return null;
@@ -146,7 +166,6 @@ public final class WatchConfig {
         return s.matches("\\d{5,20}") ? s : null;
     }
 
-    /** 从一行话题配置里取显示名 */
     public static String topicName(String raw) {
         if (raw == null) {
             return "";
@@ -157,7 +176,6 @@ public final class WatchConfig {
         return name.isEmpty() ? s : name;
     }
 
-    /** 逐行切分并去掉空行/注释，最多保留 max 条 */
     public static List<String> splitLines(String raw, int max) {
         List<String> out = new ArrayList<>();
         if (raw == null) {

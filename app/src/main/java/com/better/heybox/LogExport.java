@@ -48,6 +48,7 @@ public final class LogExport {
         sb.append('\n').append("----- 模块统计（本进程） -----\n")
                 .append(ModuleStats.snapshot()).append('\n');
 
+        LogRecorder.flush();
         appendFile(sb, LogRecorder.getLogFilePath(), "日志 log.txt");
         appendFile(sb, LogRecorder.getLogBackupFilePath(), "上一份日志 log.1.txt");
         return sb.toString();

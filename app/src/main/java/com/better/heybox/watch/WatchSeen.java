@@ -20,6 +20,48 @@ public final class WatchSeen {
     private static final Object LOCK = new Object();
     private static Set<String> sSeen;
     private static MainModule sModule;
+    private static boolean sDirty;
+
+    private static final java.util.concurrent.ScheduledExecutorService sWriter =
+            java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "betterheybox-seen");
+                t.setDaemon(true);
+                return t;
+            });
+    private static final long PERSIST_DELAY_MS = 2000L;
+    private static final java.util.concurrent.atomic.AtomicBoolean sPersistScheduled =
+            new java.util.concurrent.atomic.AtomicBoolean();
+
+    private static void schedulePersist() {
+        if (sPersistScheduled.compareAndSet(false, true)) {
+            try {
+                sWriter.schedule(() -> {
+                    sPersistScheduled.set(false);
+                    flushNow();
+                }, PERSIST_DELAY_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+            } catch (Throwable t) {
+                sPersistScheduled.set(false);
+            }
+        }
+    }
+
+    public static void flushNow() {
+        String joined;
+        synchronized (LOCK) {
+            if (!sDirty || sSeen == null) {
+                return;
+            }
+            sDirty = false;
+            List<String> list = new ArrayList<>(sSeen);
+            if (list.size() > WatchConfig.SEEN_LIMIT) {
+                list = list.subList(list.size() - WatchConfig.SEEN_LIMIT, list.size());
+                sSeen.clear();
+                sSeen.addAll(list);
+            }
+            joined = String.join(",", list);
+        }
+        HeyboxPrefs.setString(App.KEY_WATCH_SEEN, joined);
+    }
 
     public static void init(MainModule module) {
         sModule = module;
@@ -40,7 +82,6 @@ public final class WatchSeen {
         return sSeen;
     }
 
-    /** @return true 表示这条是新看到的（尚未推送过） */
     public static boolean markNew(String linkId) {
         if (linkId == null || linkId.isEmpty()) {
             return false;
@@ -51,9 +92,10 @@ public final class WatchSeen {
                 return false;
             }
             set.add(linkId);
-            persist(set);
-            return true;
+            sDirty = true;
         }
+        schedulePersist();
+        return true;
     }
 
     public static boolean contains(String linkId) {
@@ -71,19 +113,9 @@ public final class WatchSeen {
     public static void clear() {
         synchronized (LOCK) {
             sSeen = new LinkedHashSet<>();
-            persist(sSeen);
+            sDirty = true;
         }
-    }
-
-    private static void persist(Set<String> set) {
-        // 有界：超出上限时丢最早的
-        List<String> list = new ArrayList<>(set);
-        if (list.size() > WatchConfig.SEEN_LIMIT) {
-            list = list.subList(list.size() - WatchConfig.SEEN_LIMIT, list.size());
-            set.clear();
-            set.addAll(list);
-        }
-        HeyboxPrefs.setString(App.KEY_WATCH_SEEN, String.join(",", list));
+        flushNow();
     }
 
     // ------------------------------------------------------------ 首轮基线
@@ -104,7 +136,6 @@ public final class WatchSeen {
         return sBaselined;
     }
 
-    /** 该关注对象是否已完成首轮基线（首轮只记录不推送，避免把历史帖全推一遍） */
     public static boolean isBaselined(String userId) {
         if (userId == null || userId.isEmpty()) {
             return true;
@@ -118,21 +149,22 @@ public final class WatchSeen {
         if (userId == null || userId.isEmpty()) {
             return;
         }
+        String joined;
         synchronized (LOCK) {
             Set<String> set = baselined();
             set.add(userId);
-            HeyboxPrefs.setString(App.KEY_WATCH_BASELINED, String.join(",", set));
+            joined = String.join(",", set);
         }
+        HeyboxPrefs.setString(App.KEY_WATCH_BASELINED, joined);   // 锁外写盘
     }
 
     public static void clearBaselines() {
         synchronized (LOCK) {
             sBaselined = new LinkedHashSet<>();
-            HeyboxPrefs.setString(App.KEY_WATCH_BASELINED, "");
         }
+        HeyboxPrefs.setString(App.KEY_WATCH_BASELINED, "");
     }
 
-    /** 记录一次检查时间；用于节流 */
     public static void touchCheck() {
         HeyboxPrefs.setString(App.KEY_WATCH_LAST_CHECK, String.valueOf(System.currentTimeMillis()));
     }
