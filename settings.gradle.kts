@@ -12,8 +12,13 @@ dependencyResolutionManagement {
         google()
         mavenCentral()
         maven { url = uri("https://jitpack.io") }
+        maven {
+            name = "yukiLocal"
+            url = uri("${rootDir}/.poc/m2-yuki")
+        }
     }
 }
 
 rootProject.name = "BetterHeybox"
 include(":app")
+include(":yuki-probe")

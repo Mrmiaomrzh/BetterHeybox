@@ -2,11 +2,21 @@
 agp = "9.2.1"
 libxposed = "102.0.0"
 dexkit = "2.2.0"
+kotlin = "2.4.10"
+ksp = "2.3.10"
+yuki = "1.5.0-beta.4"
+kavaref = "1.1.0"
 
 [libraries]
 libxposed-api = { module = "io.github.libxposed:api", version.ref = "libxposed" }
 libxposed-service = { module = "io.github.libxposed:service", version.ref = "libxposed" }
 dexkit = { module = "org.luckypray:dexkit", version.ref = "dexkit" }
+yuki-core = { module = "com.highcapable.yukihookapi:yukihook-core", version.ref = "yuki" }
+yuki-runtime-libxposed = { module = "com.highcapable.yukihookapi:yukihook-runtime-libxposed", version.ref = "yuki" }
+yuki-compiler = { module = "com.highcapable.yukihookapi:yukihook-compiler", version.ref = "yuki" }
+kavaref-core = { module = "com.highcapable.kavaref:kavaref-core", version.ref = "kavaref" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }

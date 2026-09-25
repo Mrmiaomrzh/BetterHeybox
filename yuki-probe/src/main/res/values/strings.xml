@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">BetterHeybox Yuki Probe</string>
+    <string name="module_description">YukiHookAPI 1.5.0-beta.4 骨架验证模块</string>
+</resources>

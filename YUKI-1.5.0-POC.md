@@ -428,5 +428,97 @@ repositories { maven { url = uri("<abs>/.poc/m2-yuki") } } // 标准 Maven 布�
 
 ---
 
+## 11. 骨架验证结果（:yuki-probe，已实测通过）
+
+独立模块 `:yuki-probe`，与 `:app` 隔离，复用同一 Gradle 9.7.1 / AGP 9.2.1 工具链。
+
+### 11.1 工具链：AGP 内置 Kotlin 版本不够，必须换外部插件
+
+AGP 9.2.1 内置 Kotlin 为 **2.2.0**，无法读取 Yuki AAR 的 metadata：
+
+```text
+Class 'com.highcapable.yukihookapi.hook.param.PackageParam' was compiled with an
+incompatible version of Kotlin. The actual metadata version is 2.4.0,
+but the compiler version 2.2.0 can read versions up to 2.3.0.
+```
+
+查证 AGP 9.2.1 的 `BooleanOption` / `StringOption`，**没有内置 Kotlin 版本覆写点**
+（`android.builtInKotlin` 是布尔开关，非版本）。可行解只有一条：
+
+```properties
+# gradle.properties
+android.builtInKotlin=false
+android.newDsl=false        # 外部 Kotlin 插件与 AGP 9 新 DSL 不兼容，必须同时退回
+```
+
+```kotlin
+plugins {
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)   // 2.4.10
+    alias(libs.plugins.ksp)               // 2.3.10
+}
+```
+
+> **KSP 版本可与 Kotlin 解耦**：KSP gradle 插件只依赖 `symbol-processing-api` 与
+> `symbol-processing-common-deps`，**不含 kotlin-compiler-embeddable**（已核实 2.3.10 / 2.3.12 的 POM），
+> 它是挂进现有 Kotlin 编译器的编译器插件。故 **KSP 2.3.10 + Kotlin 2.4.10 可行，无需自建 KSP**。
+
+注意：`android.newDsl=false` 是全局属性，会同时作用于 `:app`；两项均将于 AGP 10 移除。
+
+### 11.2 KSP 生成产物与手写文件对照
+
+`kspDebugKotlin` 正常执行，生成 4 个 Kotlin 源 + 3 个资源文件。
+
+| 字段 | `:app` 手写 | KSP 生成 | 差异 |
+|---|---|---|---|
+| minApiVersion | 101 | 101 | 一致 |
+| targetApiVersion | 102 | 102 | 一致 |
+| staticScope | true | true | 一致 |
+| **autoHotReload** | **true** | **false** | **唯一差异** |
+
+生成物：
+
+- `java_init.list` → `com.better.heybox.yukiprobe.ProbeEntry_YukiHookXposedInit`
+- `scope.list` → `com.max.xiaoheihe`
+- 源文件：`ProbeEntry_YukiHookXposedInit.kt`、`YukiHook_Impl.kt`、
+  `YukiHookCompiledTimestamp.kt`、`ModuleApplication_Impl.kt`
+
+### 11.3 生成入口类：热重载的补丁点已具体化
+
+```kotlin
+@Keep
+public class ProbeEntry_YukiHookXposedInit : LibXposedEntry() {
+    override fun createHookEntry(): YukiHookXposedModule = ProbeEntry
+}
+```
+
+**没有 `onHotReloading` 覆写**，且 `LibXposedEntry` 未声明该方法（非 final），
+故补丁是两行：
+
+```kotlin
+override fun onHotReloading(param: XposedModuleInterface.HotReloadingParam) = true
+```
+
+加上 `module.prop` 的 `autoHotReload=true`，共 **2 处**。两处产物都在
+`build/generated/ksp/` 下，可由 Gradle 任务后处理，**无需 fork**。
+
+### 11.4 依赖膨胀实测（以真实 APK 为准）
+
+| APK | classes | methods | dex 未压缩 | native | 条目数 |
+|---|---:|---:|---:|---:|---:|
+| yuki-probe | 7378 | 59174 | 11390 KB | 0 | 432 |
+| app | 5366 | 42283 | 7400 KB | 1445 KB | 95 |
+| **增量** | **+2012** | **+16891** | **+4.0 MB** | — | — |
+
+> 早前按依赖闭包估算的 +3956 class 偏高：两端共享 libxposed 类，
+> 且探针不含 dexkit / liquidglass。真实净增 **+2012 class / +16891 method**。
+
+APK 文件体积只差 +171 KB，是 ZIP 压缩造成的错觉；**dex 实际增长 4.0 MB（+54%）**。
+
+仍未验证、且离线无法验证的风险：**宿主自带 androidx 会被模块类加载器部分遮蔽**，
+可能触发 `NoSuchMethodError`。需装机实测。
+
+---
+
 本地依赖与解包产物位于 `.poc/`（已 gitignore）。
 所有结论均来自包内源码与字节码，**未使用官网文档**。
