@@ -266,10 +266,13 @@ autoHotReload=false        // 写死
 
 `@YukiHookLibXposedEntry` 参数仅 `entryClassName / minApiVersion / targetApiVersion /
 scope / staticScope / javaEntries / nativeEntries`——**无 `autoHotReload` 参数**。
-该字段是**模块级**的，故保留 `MainModule` 作 `javaEntries` 也不会让框架回调 `onHotReloading`。
+该字段是**模块级**的，故保留 `MainModule` 作 `javaEntries` 也不会让框架回调 `onHotReloading`
+（`javaEntries` 校验见 `YukiHookXposedGenerator.kt:203-234`：只取类名写入 `java_init.list`，
+要求直接继承 `io.github.libxposed.api.XposedModule` 且不继承 Yuki 入口基类——本项目
+`MainModule.java:46` 正好满足）。**`javaEntries` 保住的是类本身，不是热重载开关。**
 
-**唯一变通**：构建后打补丁改写生成的 `module.prop`。
-本项目现状 `autoHotReload=true` + `onHotReloading()` 返回 true，**迁移即失去**。
+本项目现状 `autoHotReload=true` + `onHotReloading()` 返回 true。
+走 KSP 即失去；详见 §8.1 的路线选择。
 
 ### 6.2 R8 规则需自备
 
@@ -319,6 +322,70 @@ Java 侧持有 `PackageParam` 引用即可直接调用。
 
 ---
 
+## 8.1 入口与构建：二选一，无中间态
+
+KSP 的 `checkSourceEntryFiles`（`YukiHookXposedGenerator.kt:499-530`）会扫描源码目录，
+发现已存在 `resources/META-INF/xposed/{java_init.list,module.prop,scope.list,native_init.list}`
+或 `assets/xposed_init` 即 `problem()` **终止构建**（`:525-529`）。
+
+本项目这三个文件**现在就在** `app/src/main/resources/META-INF/xposed/`。
+→ **KSP 生成与手写元数据互斥**，必须二选一：
+
+| 路线 | 入口方式 | `module.prop` | 热重载 | Kotlin 需求 |
+|------|---------|---------------|--------|-----------|
+| **A. 走 KSP** | Kotlin 入口类 + `@YukiHookLibXposedEntry`，KSP 自动生成元数据 | `autoHotReload=false` 写死 | ❌ 失去 | 入口必须 Kotlin |
+| **B. 不走 KSP** | Java 继承 `LibXposedEntry`，或保留现有 `MainModule` 手写元数据 | 继续手写，可留 `true` | ✅ 保留 | 仅入口胶水需 Kotlin |
+
+**路线 B 可行性已核实**：
+
+- `LibXposedEntry` 是 `public abstract class : XposedModule()`（`LibXposedEntry.kt:35-42`），
+  生命周期方法全为 `final override`（`:47/60/64/77`），唯一抽象成员
+  `protected abstract fun createHookEntry(): YukiHookXposedModule` —— **Java 可直接继承并 override**。
+- core 对 KSP 生成类是**软引用**，缺类不崩：
+  `YukiHook.kt:166` `runCatching { YukiHook_Impl.compiledTimestamp }`、
+  `ModuleApplication.kt:76` `runCatching { ModuleApplication_Impl.callHookEntryInit() }`。
+- 打包侧已就绪：`app/build.gradle.kts:59-62` 已有
+  `packaging.resources.merges += "META-INF/xposed/*"`；
+  `app/proguard-rules.pro:3` 已有 `-adaptresourcefilecontents META-INF/xposed/java_init.list`。
+- 注意 `checkSourceEntryFiles` 显式排除 `build` / `.gradle`（`:500-504`），
+  故自定义任务把元数据写进 `build/` 再并入 resources 不会被判违规。
+
+**Gradle 接入要素（走 KSP 时）**：
+
+```kotlin
+plugins { alias(libs.plugins.android.application); kotlin("android"); alias(libs.plugins.ksp) }
+dependencies {
+    ksp("com.highcapable.yukihookapi:yukihook-compiler:1.5.0-beta.4")
+    implementation("com.highcapable.yukihookapi:yukihook-core:1.5.0-beta.4")
+    implementation("com.highcapable.yukihookapi:yukihook-runtime-libxposed:1.5.0-beta.4") // 与 xposed82 互斥
+}
+repositories { maven { url = uri("<abs>/.poc/m2-yuki") } } // 标准 Maven 布局，可本地消费
+```
+
+- JVM 17（项目已是）；Kotlin 对齐版本 2.4.10；**KSP 插件版本需自行选定并验证**（包内未固定）
+- `yukihook-compiler` 无 Gradle plugin marker，仅 `META-INF/services` 注册 → 必须走 `ksp(...)` 配置
+- 可选 `yukihook-bom` 统一版本
+
+**KSP 生成的类**（勿与 `YukiHookProperties` 混淆——后者是 Yuki 自身 Gropify 生成的构建常量，与 KSP 无关）：
+
+| 类 | 职责 |
+|---|---|
+| `YukiHook_Impl` | 构建期桥接：`compiledTimestamp` / `legacyModuleStatusClassName`（`:377-397`） |
+| `YukiHookCompiledTimestamp` | `System.currentTimeMillis()`（`:399-408`） |
+| `ModuleApplication_Impl` | `callHookEntryInit()`（`:410-421`） |
+| `<包名>.<initClassName>` | 继承 `LibXposedEntry`，override `createHookEntry()`，标 `@Keep`（`:457-481`） |
+
+入口名规则：`<入口类包名>.<entryClassName 或 "<类名>_YukiHookXposedInit">`，
+永远是 `java_init.list` **第 1 行**，其后按声明顺序追加 `javaEntries` 类名（`:350,354`）。
+`targetApiVersion` 注解**无默认值、必填**；校验
+`minApiVersion >= 101 && targetApiVersion >= minApiVersion`（`:247-252`）。
+
+`yukihook-runtime-libxposed.aar` manifest 仅声明 `minSdkVersion=26`（与项目一致），
+**不含** `xposedmodule` / `xposedminversion` meta-data —— 与项目现有的
+「模块声明全部由 `META-INF/xposed/` 提供」做法一致。
+
+---
+
 ## 9. 修订后的可行性判断
 
 | 维度 | 初版判断 | 修订后（源码核实） |
@@ -330,7 +397,8 @@ Java 侧持有 `PackageParam` 引用即可直接调用。
 | 跨线程 DexKit 补挂 | 存疑 | **成立**（词法作用域 + 实例捕获） |
 | 语言成本 | 未识别 | **仅入口需 Kotlin**（javap 实证） |
 | xposed82 兼容 | 未识别 | **必须排除**，多项能力抛异常 |
-| 热重载 | 用 javaEntries 缓解 | **无法补救**，需构建后打补丁 |
+| 热重载 | 用 javaEntries 缓解 | **无法补救**，KSP 写死 false；须在 §8.1 两条路线间选择 |
+| KSP 与手写元数据 | 未识别 | **互斥**，共存直接终止构建 |
 | Activity 生命周期 | 未识别 | **框架不提供**，维持显式 hook |
 | 内嵌 UI 注入 | 未识别 | **框架不提供**，维持自研 |
 | 综合难度 | 中高 | **中**（难点在规约与验证，不在能力重建） |
@@ -345,15 +413,18 @@ Java 侧持有 `PackageParam` 引用即可直接调用。
 
 ## 10. POC 验证清单（按优先级）
 
-1. **依赖膨胀实测**：最小 APK 装入宿主，量类加载、启动耗时、方法数、类冲突
-2. 引入 Kotlin + KSP，仅接 `yukihook-core` + `yukihook-runtime-libxposed`（**排除 xposed82**）
-3. 校验 KSP 生成的 `java_init.list` / `module.prop` / `scope.list` 与现有手写文件等价
-4. Java 侧持 `PackageParam` 直接调 `intercept` 的最小样例（验证 §8 结论）
-5. 六类样例：普通方法、构造方法、Activity 生命周期、异步回调、跨进程配置、DexKit 延迟补挂
-6. **同优先级多 Hook 顺序**实测（§3.6 未决项）
-7. 验证 `PreferenceReceiver` 的 service 等待机制在 Yuki 下是否仍必要（§4.2）
-8. `autoHotReload` 打补丁方案验证（§6.1）
-9. 全程不升级 DexKit / AGP / targetSdk
+1. **依赖膨胀实测**：最小 APK 装入宿主，量类加载、启动耗时、方法数、类冲突。
+   这条若不通过，后面全部无意义，故排第一。
+2. **先定入口路线**（§8.1）：走 KSP（弃热重载）还是手写元数据（保热重载）。
+   该决策影响后续所有构建配置。
+3. 引入 Kotlin + KSP，仅接 `yukihook-core` + `yukihook-runtime-libxposed`（**排除 xposed82**）
+4. 校验 KSP 生成的 `java_init.list` / `module.prop` / `scope.list` 与现有手写文件等价
+5. Java 侧持 `PackageParam` 直接调 `intercept` 的最小样例（验证 §8 结论）
+6. 六类样例：普通方法、构造方法、Activity 生命周期、异步回调、跨进程配置、DexKit 延迟补挂
+7. **同优先级多 Hook 顺序**实测（§3.6 未决项）
+8. 验证 `PreferenceReceiver` 的 service 等待机制在 Yuki 下是否仍必要（§4.2）
+9. 自备 R8 规则（`proguard.txt` 为空，§6.2）
+10. 全程不升级 DexKit / AGP / targetSdk
 
 ---
 
