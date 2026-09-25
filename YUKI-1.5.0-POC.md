@@ -2,55 +2,65 @@
 
 > 分支：`Poc探索`
 > 勘察对象：本地 `1.5.0-beta.4.zip`（Maven 仓库布局，Apache-2.0）
-> 目的：核实「迁移到 YukiHookAPI + DexKit」的可行性与真实成本，取代基于 1.2.x/1.3.x 文档的推测。
+> 依据：包内 **AAR 字节码 + sources jar 源码**，`javap` 反编译校验。
+> **明确不以官网文档为准** —— 官网仍描述 1.2.x 的 `findClass().hook { injectMember{} }`，
+> 与 1.5.0 实际 API（`PackageParam` / `Member.intercept` / `HookChain`）已经不一致。
+
+---
 
 ## 0. 依赖包构成
 
-zip 内为本地 Maven 仓库，5 个模块，全部 `1.5.0-beta.4`：
+| 模块 | packaging | 类数 | 体积 | 作用 |
+|------|-----------|-----:|-----:|------|
+| `yukihook-bom` | pom | — | — | 版本对齐 |
+| `yukihook-core` | aar | 142 | 336 KB | Hook DSL、生命周期、存储、寄生、DataChannel |
+| `yukihook-compiler` | jar | — | 44 KB | KSP 处理器（`SymbolProcessorProvider` → `YukiHookProcessor`） |
+| `yukihook-runtime-libxposed` | aar | 29 | 53 KB | **Modern API / libxposed 后端** |
+| `yukihook-runtime-xposed82` | aar | 24 | 49 KB | 传统 Xposed 82 后端 |
 
-| 模块 | packaging | 作用 |
-|------|-----------|------|
-| `yukihook-bom` | pom | 版本对齐 |
-| `yukihook-core` | aar | Hook DSL、生命周期、存储、寄生、Channel |
-| `yukihook-compiler` | jar | **KSP** 处理器（`SymbolProcessorProvider` → `YukiHookProcessor`） |
-| `yukihook-runtime-libxposed` | aar | **Modern API / libxposed 后端** |
-| `yukihook-runtime-xposed82` | aar | 传统 Xposed 82 后端 |
+Yuki 自身仅 171 个类 / ~390 KB。**体积风险全部来自传递依赖**（见 §7）。
 
-> 1.5.0 已把后端拆成独立 runtime artifact，并同时提供 libxposed 与 xposed82 两套实现。
-> 这是本次勘察中影响结论最大的事实。
+`yukihook-runtime-libxposed` 的 AAR manifest 声明 `minSdkVersion=26`，与本项目一致，无冲突。
 
-## 1. 结论修正：不需要放弃 LibXposed Modern API
+---
 
-`yukihook-runtime-libxposed-1.5.0-beta.4.pom` 明确依赖：
+## 1. 核心结论：1.5.0 保留 libxposed 后端，不必放弃 Modern API 102
 
-```xml
-<groupId>io.github.libxposed</groupId>
-<artifactId>service</artifactId>
-<version>102.0.0</version>
-```
+`yukihook-runtime-libxposed-1.5.0-beta.4.pom` 依赖 `io.github.libxposed:service:102.0.0`。
+入口 `LibXposedEntry : XposedModule()` 保留同名生命周期回调：
 
-入口 `LibXposedEntry` 直接继承 `XposedModule`，并保留同名生命周期回调：
-
-| 框架原生 | Yuki 1.5.0 libxposed 后端 |
-|---------|--------------------------|
+| 框架原生 | Yuki libxposed 后端 |
+|---------|-------------------|
 | `onModuleLoaded(ModuleLoadedParam)` | `onModuleLoaded` |
 | `onPackageReady(PackageReadyParam)` | `onPackageReady` |
 | `onPackageLoaded(PackageLoadedParam)` | `onPackageLoaded` |
 | `onSystemServerStarting(...)` | `onSystemServerStarting` |
 
-`getClassLoader()` / `applicationInfo` 经 `YukiHookModuleCaller.callOnPackageLoaded(...)` 透传为 `PackageParam`。
+`XposedService` / `RemotePreferences` 亦已封装（`LibXposedService` / `LibXposedPreferences` /
+`LibXposedSharedFiles` / `YukiHookServiceBridge`），**无需自建 IPC 通道**。
 
-**含义**：先前「必须放弃 LibXposed 服务层」的判断作废。本项目可继续跑在 API 102 上，
-`XposedService` / `RemotePreferences` 由 Yuki 接管：
+### 1.1 必须锁定 libxposed runtime，排除 xposed82
 
-- `LibXposedPreferences` — 宿主侧走 `api.getRemotePreferences(name)`（并校验 `PROP_CAP_REMOTE`），
-  模块侧走 `LibXposedService.preferencesOrNull(name)`，失败回退模块私有 `SharedPreferences`
-- `LibXposedService` / `YukiHookServiceBridge` — 封装 `XposedServiceHelper`
-- `LibXposedSharedFiles` — 封装 `getRemoteFile`
+`yukihook-runtime-xposed82/.../YukiHookBridge.kt` 明确抛异常：
 
-## 2. Hook 调用点：与现状高度同构
+| 行号 | 能力 | xposed82 行为 |
+|-----:|------|--------------|
+| `:64` | `moduleScope` | `UnsupportedOperationException` |
+| `:74-75` | `observeService` | `UnsupportedOperationException` |
+| `:77-78` | `preferences` | 走**另一条** `Xposed82Preferences` 路径，非 libxposed remote prefs |
+| `:80-81` | `sharedFiles` | `UnsupportedOperationException` |
+| `:83-84` | `deoptimize` | `UnsupportedOperationException` |
+| `:96-98` | 静态初始化器 Hook | `UnsupportedOperationException` |
+| `:102-103` | `replace`（原子替换） | `UnsupportedOperationException` |
 
-项目当前写法（`MainModule` / 20 个 Hook 类 / 约 150 处）：
+→ 构建期**只能引入 `yukihook-runtime-libxposed`**，并使用 `@YukiHookLibXposedEntry`。
+本项目现状即 API 102，天然吻合。
+
+---
+
+## 2. Hook 调用点：chain 风格与现状同构
+
+现状（约 150 处）：
 
 ```java
 module.hook(method).intercept(chain -> {
@@ -59,21 +69,22 @@ module.hook(method).intercept(chain -> {
 });
 ```
 
-Yuki 1.5.0 在 `PackageParam` 上提供对应扩展：
+Yuki 侧对应（`javap` 实测，`PackageParam` 上的 **public final 实例方法**）：
 
-```kotlin
-fun Member.intercept(priority: YukiHookPriority = DEFAULT, invocation: HookChain.() -> Any? = { null })
-fun Member.hook(priority: ..., hooker: YukiHookCreator.ClassicMemberHooker.() -> Unit)
-fun Collection<Member>.hookAll(priority: ..., hooker: ...)
-fun MemberResolver<*, *>.intercept(...)
+```java
+public final MemberHooker$Result intercept(
+    java.lang.reflect.Member, YukiHookPriority,
+    kotlin.jvm.functions.Function1<? super HookChain, ? extends Object>);
+
+public final MemberHooker$Result hookAllByMember(
+    Collection<? extends Member>, YukiHookPriority,
+    Function1<? super ClassicMemberHooker, Unit>);
 ```
 
-**关键点**：`Member` 就是 `java.lang.reflect.Member`，`Method` / `Constructor` 均实现它。
-本项目 `HeyboxTargets` 由 DexKit / 反射产出的正是 `Method`，
-候选列表场景对应 `Collection<Member>.hookAll {}`。
-→ **动态目标解析层可以原样保留，只换挂载调用点。**
+`Member` 即 `java.lang.reflect.Member`，**DexKit / 反射产出的 `Method` 可直接挂载**，
+候选列表场景对应 `hookAllByMember`。
 
-`HookChain` 语义与现状对齐：
+`HookChain` 与现状语义对齐：
 
 | 现状（libxposed Chain） | Yuki `HookChain` |
 |------------------------|------------------|
@@ -81,91 +92,270 @@ fun MemberResolver<*, *>.intercept(...)
 | `proceed(args)` | `proceed(args)` |
 | `proceedWith(instance)` | `proceedWith(instance)` |
 | `getArgs()` | `args: List<Any?>` |
-| `getThisObject()` | `instance` |
+| `getThisObject()` | `instance`（继承自 `HookInvocation`，`HookInvocation.kt:92`） |
 
 底层 `LibXposedHookApi.createNativeHooker` 对 `ChainHookerBridge` 直接桥接原生
-`XposedInterface.Hooker`，即 chain 仍是 libxposed 原生链，不是本地模拟链。
+`XposedInterface.Hooker`，chain 即 libxposed 原生链，非本地模拟。
 
-另有 classic 风格可用：`HookParam` 提供 `result` / `hasThrowable` / `throwable` /
-`callOriginal()` / `invokeOriginal(vararg)` / `Member.deoptimize()`（API 102 起）。
+---
 
-## 3. 真实成本：Kotlin 强制引入（此前未识别的最大项）
+## 3. 迁移规约（必须写死的约束）
 
-- `@YukiHookLibXposedEntry` 的 `@Target(AnnotationTarget.CLASS)`，入口类必须实现
-  `YukiHookXposedModule`（Kotlin 接口）→ 入口只能是 Kotlin
-- 入口文件由 **KSP** 生成，而 KSP 只处理 Kotlin 源集 → 纯 Java 工程无法使用入口生成
-- `yukihook-core` 依赖 `kotlin-stdlib:2.4.10`（compile scope）
+### 3.1 一律使用 chain 风格，禁止 classic
 
-本项目是 **100% Java**，20+ Hook 类、约 150 处 intercept。
-因此主导成本不是 Hook 语义改写，而是 **语言与构建体系引入**。
+```kotlin
+// YukiHookCreator.kt:400-408  ChainMemberHooker
+runCatching { callback(invocation) }.getOrElse {
+    notifyCallbackFailure(invocation, it)
+    // The remaining chain may already have executed, never retry it as failure recovery.
+    throw it
+}
+```
 
-可选路径：
+- **chain**：回调异常 → 必然重抛给宿主，与 `ExceptionMode.PASSTHROUGH`（`LibXposedHookApi.kt:74`）一致
+- **classic**：`intercept` 异常 → **回退调用未 hook 的原方法**（`YukiHookCreator.kt:567`），故障被静默吞掉
+
+→ 本项目必须用 `Member.intercept {}`，**不要用 `Member.hook {}`**。选错不报错，只静默改变行为。
+
+### 3.2 `Member.intercept` 默认值会废掉原方法
+
+```kotlin
+fun Member.intercept(priority: YukiHookPriority = DEFAULT,
+                      invocation: HookChain.() -> Any? = { null })   // PackageParam.kt:948-951
+```
+
+默认 `{ null }` 在 chain 语义下是「**直接短路返回 null，不调用原方法**」。
+`member.intercept { }` 空实现体 = 把宿主方法打成 stub。禁止省略 invocation。
+
+### 3.3 运行时未就绪时注册是静默 no-op
+
+```kotlin
+internal fun hook() {
+    if (!YukiHookBridge.isAvailable) return   // YukiHookCreator.kt:113
+```
+
+DexKit 异步补挂若抢在 runtime attach 前完成，hook **无声消失**，不进 `YukiHookResult`。
+必须显式校验 `YukiHookBridge.isAvailable`，不能以"未抛异常"判定成功。
+
+### 3.4 跨线程补挂必须用带 block 的形式
+
+- `Member.hook(priority)`（无 block）→ `HookMode.IMMEDIATE`，**调用即注册**（`PackageParam.kt:1240`）
+- `Member.hook(priority) { }`（有 block）→ `HookMode.LAZY`，`.apply(hooker).build()`（`PackageParam.kt:1249`）
+
+延迟/跨线程场景一律用 LAZY 形式。
+
+### 3.5 `PackageParam` 是成员扩展，作用域受限
+
+`Member.intercept` / `Member.hook` / `Collection<Member>.hookAll` 全部声明在
+`PackageParam` 类体内（`PackageParam.kt:67-1547`），全仓无其它重载点。
+
+| 场景 | 可用性 | 处置 |
+|------|--------|------|
+| 独立工具类直接写 | ❌ 编译不过 | 持 `PackageParam` 字段 + `with(param){}`，或继承 `PackageParam`（`YukiBaseHooker` 即如此，`YukiBaseHooker.kt:40`） |
+| `loadApp{}` 内定义的嵌套 lambda（含 `onCreate{}`、`Thread{}`、DexKit 回调） | ✅ | 隐式 receiver 是**词法栈**，实例被闭包捕获 |
+| `loadApp{}` 之外定义再传入的 lambda | ❌ | 无 receiver |
+
+**DexKit 延迟补挂成立**：`loadApp(name){ block(this) }` 传的是同一个 `this`；
+`PackageParam` 每入口新建且框架不再改写（`XposedModuleRuntime.kt:152`）。
+
+注意 `PackageParam.currentClassLoader` 与 `wrapper` 的读写**无同步**（`PackageParam.kt:70,118-122`），
+跨线程改这些属性需自行加锁。
+
+### 3.6 `priority` 只有 3 档，同级顺序不可控
+
+`YukiHookPriority` = `DEFAULT(50)` / `LOWEST(-10000)` / `HIGHEST(10000)`
+（`YukiHookHelper.kt:40-42`）。core 层只保证**相对顺序**，
+同优先级仲裁逻辑**不在本包源码内**（`FrameworkHookBridge.kt:123` 仅透传 Int）。
+
+本项目存在同一方法被多处挂载（`HeyboxTargets.PENDING` + `installGroup`），
+**多 Hook 相对顺序是不可控变量**，必须进 POC 验证。
+
+### 3.7 其他
+
+- `loadApp(excludeSelf = false, ...)` **默认不排除模块自身**（`PackageParam.kt:308,320,332`）；
+  空包名匹配所有宿主。写 `loadApp("com.max.xiaoheihe")` 是精确相等匹配，安全。
+- `AppLifecycle` **只有 Application 回调，无任何 Activity 生命周期 API**。
+  `onCreate` 经 `Instrumentation.callApplicationOnCreate` 的 after 分发（`AppParasitism.kt:345-365`）；
+  **无 `onResume`** → 本项目 6 处 `onResume` hook 必须维持显式方法挂载。
+- `registerAppLifecycle` **仅在 `isFirstApplication == true` 时注册**（`PackageParam.kt:246-252`），
+  即只在主进程首入口生效，子进程走这条路无效。
+- **无 `unhook`**，但有公开的 `MemberHooker.removeSelf()`(`:103`)、`Result.remove()`(`:270`)、
+  回调内 `HookInvocation.removeSelf()`(`HookInvocation.kt:126`)。
+- `IYukiHookXposedInit.encase` 是**空实现**（`YukiHookFactory.kt:196,204`），不要用。
+- 包内 **零 DexKit 引用**（全树 grep `dexkit|luckypray|DexKitBridge` 无匹配）。
+  唯一成员查找能力是 KavaRef 反射封装，**DexKit 继续由模块侧自持**。
+
+---
+
+## 4. 配置与跨进程
+
+### 4.1 `PackageParam.preferences(name)` = remote preferences（只读）
+
+宿主进程链路：
+`PackageParam.kt:194-203`（`from()` 不传 Context）→ `YukiHookPreferences.kt:97-102`
+→ `YukiHookBridge.kt:85`（`context.takeUnless { hostEnvironment }` → null）
+→ `LibXposedPreferences.kt:34` → `Host.open` → `api.getRemotePreferences(name)`（`:58-64`，校验 `PROP_CAP_REMOTE`）
+
+**时序有利**：`XposedInterface` 在 `onModuleLoaded` 即 attach
+（`LibXposedEntry.kt:47-48` → `LibXposedHookApi.kt:55`），早于 `onPackageReady`。
+→ **宿主侧 remote preferences 在 `loadApp{}` 内即可用，不依赖 service 绑定。冷启动读配置无问题。**
+
+### 4.2 ⚠️ 模块侧写入存在静默降级
+
+```kotlin
+// LibXposedPreferences.kt:42-43
+LibXposedService.preferencesOrNull(name)
+    ?: context.getSharedPreferences(name, Context.MODE_PRIVATE)
+```
+
+`preferencesOrNull` 在 service 未 bind 时返回 `null`（`LibXposedService.kt:104-106`），
+降级**不抛错不告警**。因两侧存储名一致（`${modulePackageName}_preferences`），
+通常"碰巧"落到同一文件——但这是**隐式约定的降级路径，不是显式保证**。
+
+本项目当前的 `PreferenceReceiver` 已有「等待 service 绑定 6 秒 + 待提交缓存 + commit 兜底」
+（`PreferenceReceiver.java:51-83`），**这套机制必须保留**，不能换成 Yuki 的默认路径。
+
+就绪观测：`YukiHook.Status.observeFrameworkService { available -> }`（`YukiHook.kt:158-160`），
+回调注册时立即触发一次当前可用性，之后 bind/died 再触发；**回调可能运行在 binder 线程**。
+
+### 4.3 宿主进程内只读
+
+`isWritable = !isHostEnvironment || isUsingNativeStorage`（`YukiHookPreferences.kt:128`）；
+宿主侧 `commit()` 返回 false、`apply()` 空实现（`:316-317`）。宿主要写自己的私有 SP 需先 `native()`。
+
+### 4.4 DataChannel 能力有限
+
+`YukiHookDataChannel` 是**系统广播**通道（`YukiHookDataChannel.kt:58-66`），非 Binder、非订阅模型：
+
+- 回调常驻，能感知变更；但**变更必须显式 `put`**，无值监听
+- ⚠️ **宿主 receiver 在 `Application.onCreate` 之后才注册**（`AppParasitism.kt:393-396`），
+  冷启动早期 `put` **静默丢失**，源码中**无排队/重发/重试**（`:706-715` fire-and-forget）
+- 要求模块与宿主进程都活着；单包上限默认 500KB（`:99`）
+
+→ 正确用法是 **preferences 存值 + dataChannel 推脏标记**；**不能**用 dataChannel 承担配置存储。
+
+---
+
+## 5. UI 寄生能力
+
+| 需求 | 支持度 | 依据 |
+|------|--------|------|
+| 宿主内拉起模块 Activity | ✅ 现成 | `YukiHookFactory.kt:161` + `AppParasitism.kt:463-632` + `ModuleActivity.kt:73-123` |
+| 资源注入 | ✅ 显式调用 | `ModuleResources.kt:77-87`；**逐 Context 调用**，API 30+ **必须主线程**（`YukiHookFactory.kt:121-125`） |
+| 主题包装 | ✅ | `ModuleContextThemeWrapper.kt:44-96`，宿主环境自动注入资源（`:73`） |
+| **内嵌到宿主既有页面**（菜单/Fragment/Toolbar 注入） | ❌ **需自研** | 全库 `onCreateOptionsMenu` / `onCreateView` / `onActivityResult` **零匹配** |
+
+本项目 `SettingsEntryHook` 是**内嵌**注入小黑盒页面，
+→ Yuki 只提供 lifecycle / Context / 资源 / ClassLoader 四项基础设施，**注入逻辑必须自研**（即维持现状）。
+
+---
+
+## 6. 已识别回归项
+
+### 6.1 热重载：净损失，且 `javaEntries` 无法补救
+
+KSP 生成 `module.prop` 时 `autoHotReload=false` 是**硬编码**：
+
+```kotlin
+// YukiHookXposedGenerator.kt:371-374
+minApiVersion=$minApiVersion
+targetApiVersion=$targetApiVersion
+staticScope=$staticScope
+autoHotReload=false        // 写死
+```
+
+`@YukiHookLibXposedEntry` 参数仅 `entryClassName / minApiVersion / targetApiVersion /
+scope / staticScope / javaEntries / nativeEntries`——**无 `autoHotReload` 参数**。
+该字段是**模块级**的，故保留 `MainModule` 作 `javaEntries` 也不会让框架回调 `onHotReloading`。
+
+**唯一变通**：构建后打补丁改写生成的 `module.prop`。
+本项目现状 `autoHotReload=true` + `onHotReloading()` 返回 true，**迁移即失去**。
+
+### 6.2 R8 规则需自备
+
+`yukihook-core.aar/proguard.txt` **为空**，AAR 不携带 consumer 规则。
+本项目 release 已开 `isMinifyEnabled` + `isShrinkResources` → 必须自行补 keep 规则。
+
+### 6.3 日志可替代，检查点不可
+
+- `YLog` 双通道（logd + Xposed hooker log）、内存快照、落文件、跨进程汇聚（`obtainLoggerInMemoryData`）
+- ❌ `inMemoryData` **无容量上限**（`YLog.kt:389` 仅 `add`），长时间运行无限增长
+- ❌ 宿主/模块进程**日志隔离**（`YLog.kt:180-181`），需显式拉取
+- ❌ `Config.recording` **默认 false**（`YLog.kt:128`）
+- ❌ **无任何结构化检查点 API** → 本项目 `Checkpoint.java` 必须自建
+
+---
+
+## 7. 依赖膨胀（最高优先风险）
+
+`yukihook-core` 以 **`runtime` scope** 带入：
+`androidx.appcompat:1.7.1`、`androidx.preference:preference-ktx:1.2.1`、
+`androidx.core:core-ktx:1.17.0`、`androidx.lifecycle:lifecycle-common:2.9.0`、
+`org.lsposed.hiddenapibypass:hiddenapibypass:6.1`、
+`kavaref-core` / `kavaref-android` / `kavaref-extension`、
+`betterandroid:ui-extension` / `betterandroid:system-extension`、
+`io.github.libxposed:service:102.0.0`、`androidx.annotation:1.10.0`
+
+这些会**打进模块 APK 并在宿主进程加载**。Yuki 自身仅 171 类，膨胀全部来自此列表，
+与小黑盒自带 androidx 存在类冲突面。**这是迁移前必须最先验证的一条。**
+
+---
+
+## 8. 语言策略：Kotlin 只需入口，业务可留 Java
+
+KSP 仅处理 Kotlin 源集（`META-INF/services/com.google.devtools.ksp.processing.SymbolProcessorProvider`
+→ `YukiHookProcessor`），故**入口类必须是 Kotlin**。
+但 `javap` 实测 `PackageParam.intercept(...)` / `hookAllByMember(...)` 是 **public final 实例方法**，
+Java 侧持有 `PackageParam` 引用即可直接调用。
 
 | 方案 | 说明 | 代价 |
 |------|------|------|
-| A. Kotlin 薄适配层 | 入口 + 少量 Kotlin shim，业务 Hook 保持 Java，由 shim 暴露 `intercept` 包装 | 最低侵入；Java 侧需把 `chain` 当 `Function1` 调用，可读性差 |
-| B. Hook 点逐步 Kotlin 化 | 入口 Kotlin，新迁移模块用 Kotlin，旧模块保留 Java 分支 | 渐进；长期双语言 |
-| C. 全量 Kotlin 化 | 整体重写 | 不建议，收益不足 |
+| **A. 单 Kotlin 入口 + Java 业务（推荐）** | 入口 1 个 .kt；Java 侧持 `PackageParam` 句柄，必要时套一层还原 `Chain` 形态的适配器 | 侵入最小，150 处调用点近乎零改动 |
+| B. Hook 点逐步 Kotlin 化 | 新模块 Kotlin，旧模块 Java | 渐进，长期双语言 |
+| C. 全量 Kotlin 化 | 整体重写 | 不建议 |
 
-> 无论哪种，都需要锁定 Kotlin 2.4.10 与 KSP 版本，并确认与 AGP 9.2.1 / Gradle 9.7.1 兼容。
+> 相比初版评估「Kotlin 强制引入成为主成本」，经 `javap` 校验后修正为：
+> **Kotlin 成本仅限入口与构建对齐，不扩散到业务代码。**
 
-## 4. 已识别回归项
+---
 
-**热重载丢失**。`YukiHookLibXposedEntry` 文档明示：
+## 9. 修订后的可行性判断
 
-> Hot reload is not supported in 1.x. Support is deferred to 2.x.
-
-而本项目当前：
-
-- `module.prop` 设 `autoHotReload=true`
-- `MainModule.onHotReloading()` 返回 `true`
-
-**缓解**：注解提供 `javaEntries: Array<KClass<*>>`（额外原生 libxposed Java 入口，继承 `XposedModule`）。
-可保留现有 `MainModule` 作为并行 javaEntry + 新增 Yuki 入口，
-既保住热重载，也形成新旧双轨验证路径。这是当前最值得利用的能力。
-
-## 5. 待验证风险
-
-1. **依赖膨胀**：`yukihook-core` 以 `runtime` scope 带入
-   `androidx.appcompat:1.7.1`、`preference-ktx:1.2.1`、`core-ktx:1.17.0`、
-   `lifecycle-common:2.9.0`、`hiddenapibypass:6.1`、`kavaref-*`、`betterandroid ui/system-extension`。
-   这些会打进模块 APK 并在宿主进程加载，与小黑盒自带 androidx 存在类冲突面。
-2. **多 Hook 同方法的链序**：`priority` 仅排序本地 chain，不保证框架级顺序；
-   本项目存在同一方法被多处挂载（`HeyboxTargets.PENDING`），需验证 Yuki + 非 Yuki 混挂表现。
-3. **DexKit 协同**：`DexKitBridge` 与 Yuki 无耦合，可原样保留；
-   但补挂时机（扫描异步完成后）需验证在 Yuki 生命周期内是否仍可安全挂载。
-4. **缓存键**：应扩为 `包名 + versionCode + versionName + dex 校验 + 规则版本 + schema 版本`；
-   扫描失败拒绝使用不匹配的陈旧结果。
-5. **R8**：Yuki 的 R8 规则需并入 `proguard-rules.pro`；当前 release 已开 `minify + shrinkResources`。
-
-## 6. 修订后的可行性判断
-
-| 维度 | 先前判断 | 修订后 |
-|------|---------|--------|
-| 是否必须放弃 Modern API 102 | 是 | **否**，1.5.0 原生支持 libxposed 后端 |
-| `XposedService` / RemotePreferences | 需自建通道 | **已封装**，可保留 |
-| DexKit 目标解析 | 需重做 | **可原样保留** |
+| 维度 | 初版判断 | 修订后（源码核实） |
+|------|---------|------------------|
+| 放弃 Modern API 102 | 是 | **否**，1.5.0 原生 libxposed 后端 |
+| `XposedService` / RemotePreferences | 需自建 | **已封装**，宿主侧冷启动即可用 |
+| DexKit 目标解析 | 需重做 | **完全正交，零引用** |
 | 150 处 hook 语义 | 高风险重写 | **同构改写**，chain 语义一致 |
-| 语言与构建 | 未识别 | **Kotlin 强制引入，成为主成本** |
-| 热重载 | 未识别 | **1.x 丢失**，需用 `javaEntries` 缓解 |
-| 综合难度 | 中高 | **中**（难点从「能力重建」转为「语言引入 + 构建对齐」） |
+| 跨线程 DexKit 补挂 | 存疑 | **成立**（词法作用域 + 实例捕获） |
+| 语言成本 | 未识别 | **仅入口需 Kotlin**（javap 实证） |
+| xposed82 兼容 | 未识别 | **必须排除**，多项能力抛异常 |
+| 热重载 | 用 javaEntries 缓解 | **无法补救**，需构建后打补丁 |
+| Activity 生命周期 | 未识别 | **框架不提供**，维持显式 hook |
+| 内嵌 UI 注入 | 未识别 | **框架不提供**，维持自研 |
+| 综合难度 | 中高 | **中**（难点在规约与验证，不在能力重建） |
 
-工作量重估（含 Kotlin 引入与构建对齐）：
+工作量重估：
 
-- 仅做可行性 POC（入口 + 普通/UI/异步/DexKit 各一）：**约 1～2 人周**
-- 迁移到全部 Hook 点可编译可运行：**约 3～5 人周**
-- 叠加多宿主版本与多进程回归：**约 5～8 人周**
+- 可行性 POC（入口 + 普通/UI/异步/DexKit 各一）：**1～2 人周**
+- 全部 Hook 点可编译可运行：**3～5 人周**
+- 叠加多宿主版本与多进程回归：**5～8 人周**
 
-## 7. 建议的下一步（POC 验证清单）
+---
 
-1. 引入 Kotlin + KSP，仅接入 `yukihook-core` + `yukihook-runtime-libxposed`，产出可安装 APK
-2. 校验 KSP 生成的 `java_init.list` / `module.prop` / `scope.list` 与现有手写文件等价
-3. 验证 6 类样例：普通方法、构造方法、Activity 生命周期、异步回调、跨进程配置、DexKit 延迟补挂
-4. 记录依赖膨胀对宿主进程的影响（类加载、启动耗时、方法数）
-5. 验证 `javaEntries` 双轨方案能否保住 `autoHotReload`
-6. 全程不升级 DexKit / AGP / targetSdk，避免混淆问题来源
+## 10. POC 验证清单（按优先级）
+
+1. **依赖膨胀实测**：最小 APK 装入宿主，量类加载、启动耗时、方法数、类冲突
+2. 引入 Kotlin + KSP，仅接 `yukihook-core` + `yukihook-runtime-libxposed`（**排除 xposed82**）
+3. 校验 KSP 生成的 `java_init.list` / `module.prop` / `scope.list` 与现有手写文件等价
+4. Java 侧持 `PackageParam` 直接调 `intercept` 的最小样例（验证 §8 结论）
+5. 六类样例：普通方法、构造方法、Activity 生命周期、异步回调、跨进程配置、DexKit 延迟补挂
+6. **同优先级多 Hook 顺序**实测（§3.6 未决项）
+7. 验证 `PreferenceReceiver` 的 service 等待机制在 Yuki 下是否仍必要（§4.2）
+8. `autoHotReload` 打补丁方案验证（§6.1）
+9. 全程不升级 DexKit / AGP / targetSdk
 
 ---
 
 本地依赖与解包产物位于 `.poc/`（已 gitignore）。
-勘察依据为包内 AAR / sources jar 源码，非文档推测。
+所有结论均来自包内源码与字节码，**未使用官网文档**。
