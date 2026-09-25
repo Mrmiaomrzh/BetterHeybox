@@ -195,6 +195,9 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     /** 评论过滤：屏蔽「游戏接龙」——正文只剩一个游戏名链接的短评论 */
     public static final String KEY_BLOCK_GAME_RELAY = "block_game_relay_comment";
 
+    /** 评论过滤：接龙判定时把 [cube_xxx] 表情占位符不计入残留字数 */
+    public static final String KEY_RELAY_IGNORE_EMOJI = "relay_ignore_emoji";
+
     /** 诊断：记录首页流条目判定信息 */
     public static final String KEY_FLOW_DIAGNOSE = "flow_diagnose";
 
@@ -341,6 +344,7 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
         m.put(KEY_HOST_HIDE_CY, true);
         m.put(KEY_BLOCK_CY_COMMENT, false);
         m.put(KEY_BLOCK_GAME_RELAY, false);
+        m.put(KEY_RELAY_IGNORE_EMOJI, false);
         m.put(KEY_FLOW_DIAGNOSE, false);
         m.put(KEY_VERBOSE_LOG, false);
         m.put(KEY_FAVOUR_AUTO_CLEAN, false);

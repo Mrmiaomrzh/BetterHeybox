@@ -70,6 +70,8 @@ public final class CommentFilterHook {
 
     private static final Pattern ANY_TAG = Pattern.compile("<[^>]*>");
 
+    private static final Pattern EMOJI_TOKEN = Pattern.compile("\\[cube_[^\\[\\]]*\\]");
+
     private static final int MAX_RELAY_VISIBLE_CHARS = 6;
 
     private static final int MAX_GAME_SCAN_LENGTH = 60000;
@@ -93,9 +95,24 @@ public final class CommentFilterHook {
     private final java.util.Map<Object, Integer> autoLoadCounts =
             java.util.Collections.synchronizedMap(new WeakHashMap<>());
 
+    private final java.util.Map<Object, SubScan> subScans =
+            java.util.Collections.synchronizedMap(new WeakHashMap<>());
+
+    private static final class SubScan {
+        final int size;
+        final String lastId;
+        final int hidden;
+
+        SubScan(int size, String lastId, int hidden) {
+            this.size = size;
+            this.lastId = lastId;
+            this.hidden = hidden;
+        }
+    }
+
     private static final int VISIBLE_TARGET = 6;
-    private static final int MAX_AUTO_LOADS = 12;
-    private static final long AUTO_LOAD_GAP_MS = 700L;
+    private static final int MAX_AUTO_LOADS = 4;
+    private static final long AUTO_LOAD_GAP_MS = 2500L;
 
     private volatile long lastAutoLoadAt;
 
@@ -660,7 +677,9 @@ public final class CommentFilterHook {
                 List<?> list = (List<?>) arg;
                 if (list.size() > 1) {
                     floorKey = list.get(0);
-                    hidden = countFilteredSubComments(list);
+                    if (autoLoadDone(floorKey) < MAX_AUTO_LOADS) {
+                        hidden = countFilteredSubComments(floorKey, list);
+                    }
                 }
             }
         } catch (Throwable t) {
@@ -688,15 +707,31 @@ public final class CommentFilterHook {
         return result;
     }
 
-    private int countFilteredSubComments(List<?> list) {
+    private int countFilteredSubComments(Object floor, List<?> list) {
+        String lastId = String.valueOf(safeGet(list.get(list.size() - 1), "getCommentid"));
+        synchronized (subScans) {
+            SubScan prev = subScans.get(floor);
+            if (prev != null && prev.size == list.size() && lastId.equals(prev.lastId)) {
+                return prev.hidden;
+            }
+        }
         int hidden = 0;
         for (int i = 1; i < list.size(); i++) {
-            Object comment = list.get(i);
-            if (commentReason(comment) != null) {
+            if (commentReason(list.get(i)) != null) {
                 hidden++;
             }
         }
+        synchronized (subScans) {
+            subScans.put(floor, new SubScan(list.size(), lastId, hidden));
+        }
         return hidden;
+    }
+
+    private int autoLoadDone(Object floorKey) {
+        synchronized (autoLoadCounts) {
+            Integer done = autoLoadCounts.get(floorKey);
+            return done == null ? 0 : done;
+        }
     }
 
     private static int parseInt(String text, int def) {
@@ -712,36 +747,93 @@ public final class CommentFilterHook {
             return;
         }
         final ViewGroup group = (ViewGroup) sub;
+        watchTouch(group);
         main.post(() -> tryAutoLoad(group, floorKey, 0));
+    }
+
+    private final java.util.Set<Object> touchWatched =
+            java.util.Collections.newSetFromMap(new WeakHashMap<>());
+
+    private volatile long lastTouchAt;
+
+    private static final long TOUCH_SETTLE_MS = 1200L;
+
+    private void watchTouch(View view) {
+        try {
+            View target = listAncestor(view);
+            if (target == null) {
+                return;
+            }
+            synchronized (touchWatched) {
+                if (!touchWatched.add(target)) {
+                    return;
+                }
+            }
+            target.setOnTouchListener((v, event) -> {
+                lastTouchAt = SystemClock.elapsedRealtime();
+                return false;
+            });
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "评论列表触摸监听失败: " + t);
+        }
+    }
+
+    private static View listAncestor(View view) {
+        try {
+            for (View p = view; p != null; p = p.getParent() instanceof View ? (View) p.getParent() : null) {
+                String name = p.getClass().getName();
+                if (name.endsWith("RecyclerView") || name.endsWith("NestedScrollView")
+                        || name.endsWith("ScrollView")) {
+                    return p;
+                }
+            }
+        } catch (Throwable ignored) {
+            return null;
+        }
+        return null;
     }
 
     private void tryAutoLoad(ViewGroup group, Object floorKey, int retry) {
         try {
             if (SystemClock.elapsedRealtime() - lastAutoLoadAt < AUTO_LOAD_GAP_MS) {
-                if (retry < 3) {
+                if (retry < 2) {
                     main.postDelayed(() -> tryAutoLoad(group, floorKey, retry + 1), AUTO_LOAD_GAP_MS);
                 }
                 return;
             }
-            synchronized (autoLoadCounts) {
-                Integer done = autoLoadCounts.get(floorKey);
-                if (done != null && done >= MAX_AUTO_LOADS) {
-                    return;
-                }
-            }
-            View footer = findLoadMoreFooter(group);
-            if (footer == null) {
+            if (autoLoadDone(floorKey) >= MAX_AUTO_LOADS) {
                 return;
             }
-                synchronized (autoLoadCounts) {
-                    Integer done = autoLoadCounts.get(floorKey);
-                    autoLoadCounts.put(floorKey, done == null ? 1 : done + 1);
+            long quiet = SystemClock.elapsedRealtime() - lastTouchAt;
+            if (lastTouchAt > 0L && quiet < TOUCH_SETTLE_MS) {
+                if (retry < 3) {
+                    main.postDelayed(() -> tryAutoLoad(group, floorKey, retry + 1), TOUCH_SETTLE_MS);
+                } else {
+                    module.logd(Log.INFO, module.TAG, "楼中楼自动补数据：手指仍在操作，本轮放弃");
                 }
-                lastAutoLoadAt = SystemClock.elapsedRealtime();
-                footer.performClick();
-                module.logd(Log.INFO, module.TAG, "楼中楼可显示评论不足，已自动加载下一页");
+                return;
+            }
+            View footer = findLoadMoreFooter(group);
+            if (footer == null || !isOnScreen(footer)) {
+                return;
+            }
+            synchronized (autoLoadCounts) {
+                Integer done = autoLoadCounts.get(floorKey);
+                autoLoadCounts.put(floorKey, done == null ? 1 : done + 1);
+            }
+            lastAutoLoadAt = SystemClock.elapsedRealtime();
+            footer.performClick();
+            module.logd(Log.INFO, module.TAG, "楼中楼可显示评论不足，已自动加载下一页");
         } catch (Throwable t) {
             module.logd(Log.WARN, module.TAG, "自动加载更多回复失败: " + t);
+        }
+    }
+
+    private static boolean isOnScreen(View view) {
+        try {
+            return view.getGlobalVisibleRect(new android.graphics.Rect());
+        } catch (Throwable t) {
+            return false;
         }
     }
 
@@ -902,38 +994,36 @@ public final class CommentFilterHook {
                 }
                 names.append(abbreviate(INVISIBLE.matcher(anchor.group(1)).replaceAll(""), 20));
             }
-            visible += visibleCount(text, cursor, anchor.start());
+            visible += relayVisibleCount(text, cursor, anchor.start());
             if (visible > MAX_RELAY_VISIBLE_CHARS) {
                 probeSkip(comment, text, "锚点外可见字已超 " + MAX_RELAY_VISIBLE_CHARS);
                 return null;
             }
             cursor = anchor.end();
         }
-        visible += visibleCount(text, cursor, text.length());
+        visible += relayVisibleCount(text, cursor, text.length());
         probeGameLink(comment, text, visible, links, names.toString());
         if (visible > MAX_RELAY_VISIBLE_CHARS) {
             probeSkip(comment, text, "残留 " + visible + " 字: "
-                    + abbreviate(visibleText(text, cursor, text.length()), 40));
+                    + abbreviate(relayVisibleText(text, cursor, text.length()), 40));
             return null;
         }
         return "游戏名接龙（正文仅游戏链接）";
     }
 
-    private static int visibleCount(String text, int from, int to) {
-        if (from >= to) {
-            return 0;
-        }
-        String segment = text.substring(from, to);
-        segment = ANY_TAG.matcher(segment).replaceAll("");
-        return INVISIBLE.matcher(segment).replaceAll("").length();
+    private int relayVisibleCount(String text, int from, int to) {
+        return relayVisibleText(text, from, to).length();
     }
 
-    private static String visibleText(String text, int from, int to) {
+    private String relayVisibleText(String text, int from, int to) {
         if (from >= to) {
             return "";
         }
         String segment = text.substring(from, to);
         segment = ANY_TAG.matcher(segment).replaceAll("");
+        if (module.isEnabled(App.KEY_RELAY_IGNORE_EMOJI, false)) {
+            segment = EMOJI_TOKEN.matcher(segment).replaceAll("");
+        }
         return INVISIBLE.matcher(segment).replaceAll("");
     }
 
