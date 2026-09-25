@@ -235,7 +235,7 @@ public class MainModule extends XposedModule {
         registerHook("评论自由复制", new CommentCopyHook(this)::install, cl,
                 App.KEY_COMMENT_FREE_COPY, App.KEY_CUSTOM_TEXT_SELECT);
         registerHook("评论过滤", new CommentFilterHook(this)::install, cl,
-                App.KEY_BLOCK_CY_COMMENT, App.KEY_HOST_HIDE_CY);
+                App.KEY_BLOCK_CY_COMMENT, App.KEY_HOST_HIDE_CY, App.KEY_BLOCK_GAME_RELAY);
         registerHook("图片分享", new ImageShareHook(this)::install, cl, App.KEY_SYSTEM_SHARE);
         registerHook("消息红点", new MessageRedDotHook(this)::install, cl,
                 App.KEY_HIDE_MSG_DOT, App.KEY_HIDE_MSG_BADGE);

@@ -22,14 +22,38 @@ public final class VersionUtils {
         return "unknown";
     }
 
-    /** 检测小黑盒是否为目标构建（versionName 与 versionCode 精确匹配）。 */
+    public static long getHeyboxVersionCode(Context context) {
+        try {
+            PackageInfo info = context.getPackageManager()
+                    .getPackageInfo(MainModule.TARGET_PKG, 0);
+            return android.os.Build.VERSION.SDK_INT >= 28
+                    ? info.getLongVersionCode() : info.versionCode;
+        } catch (Throwable ignored) {
+            return -1L;
+        }
+    }
+    
     public static boolean isHeyboxBuild(Context context, String versionName, long versionCode) {
         try {
             PackageInfo info = context.getPackageManager()
                     .getPackageInfo(MainModule.TARGET_PKG, 0);
-            long code = android.os.Build.VERSION.SDK_INT >= 28
-                    ? info.getLongVersionCode() : info.versionCode;
-            return versionName.equals(info.versionName) && versionCode == code;
+            return versionName.equals(info.versionName)
+                    && versionCode == getHeyboxVersionCode(context);
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    public static boolean isHeyboxBuildAtLeast(Context context, String versionName,
+                                               long minVersionCode) {
+        try {
+            PackageInfo info = context.getPackageManager()
+                    .getPackageInfo(MainModule.TARGET_PKG, 0);
+            if (!versionName.equals(info.versionName)) {
+                return false;
+            }
+            long code = getHeyboxVersionCode(context);
+            return code >= 0 && code >= minVersionCode;
         } catch (Throwable ignored) {
             return false;
         }

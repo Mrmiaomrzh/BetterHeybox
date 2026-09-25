@@ -119,7 +119,7 @@ public final class SettingsEntryHook {
     enum Action {
         NONE, EDIT_LINK, CLEAR_DAILY, CHANNEL, EXPORT, IMPORT,
         EXPORT_LOG, CLEAR_LOG, VIEW_LOG, RUNTIME_STATUS, TARGET_STATUS, OPEN_WEB, PICK_DIR, RESET_GLASS, CHOOSE_GLASS,GLASS_SHEET,
-        POST_LEVEL, POST_KEYWORDS, COMMENT_KEYWORDS, AI_PROVIDER, AI_PROMPT, AI_TEST, AI_MAX_TOKENS,
+        POST_LEVEL, POST_KEYWORDS, COMMENT_KEYWORDS, COMMENT_FILTER_DIAG, AI_PROVIDER, AI_PROMPT, AI_TEST, AI_MAX_TOKENS,
         POST_MIN_LIKE, POST_MIN_COMMENT, POST_MIN_FAVOUR,
         REDIRECT_FORCE, REDIRECT_BLOCK, REDIRECT_TARGET, WEB_LOG, ABOUT,
         WATCH_USERS, WATCH_KEYWORDS, WATCH_IMPORT_FOLLOW, WATCH_TEST_PUSH, WATCH_CHECK,
@@ -323,7 +323,7 @@ public final class SettingsEntryHook {
 
     private static final String TITLE_GENERAL = "通用";
     private static final String EXPERIMENTAL_HEYBOX_VERSION = "1.3.396";
-    private static final long EXPERIMENTAL_HEYBOX_CODE = 1134L;
+    private static final long EXPERIMENTAL_HEYBOX_MIN_CODE = 1134L;
 
     private List<SettingsGroup> buildSettingsGroups(Activity activity) {
         List<SettingsGroup> groups = new ArrayList<>();
@@ -397,8 +397,8 @@ public final class SettingsEntryHook {
             }
             groups.add(buildBottomTabGroup(activity));
             groups.add(buildMessageRedDotGroup());
-            if (VersionUtils.isHeyboxBuild(activity, EXPERIMENTAL_HEYBOX_VERSION,
-                    EXPERIMENTAL_HEYBOX_CODE)) {
+            if (VersionUtils.isHeyboxBuildAtLeast(activity, EXPERIMENTAL_HEYBOX_VERSION,
+                    EXPERIMENTAL_HEYBOX_MIN_CODE)) {
                 groups.add(new SettingsGroup("实验性功能", new SwitchDef[]{
                         new SwitchDef("屏蔽双列信息流",
                                 "信息流恢复为单列",
@@ -421,6 +421,7 @@ public final class SettingsEntryHook {
             return groups;
         }
         addBase(groups, TITLE_GENERAL);
+        appendExtraRows(groups, TITLE_GENERAL, DebugSettings.generalRows());
         if (BuildFlags.DEBUG) {
             addRuntimeStatusRow(groups);
         }
@@ -431,7 +432,20 @@ public final class SettingsEntryHook {
     private static void addBase(List<SettingsGroup> out, String title) {
         for (SettingsGroup g : BASE_GROUPS) {
             if (g.title.equals(title)) {
-                out.add(withExtraRows(g, DebugSettings.generalRows()));
+                out.add(g);
+                return;
+            }
+        }
+    }
+
+    private static void appendExtraRows(List<SettingsGroup> out, String title, SwitchDef[] extra) {
+        if (extra == null || extra.length == 0) {
+            return;
+        }
+        for (int i = 0; i < out.size(); i++) {
+            SettingsGroup g = out.get(i);
+            if (g.title.equals(title)) {
+                out.set(i, withExtraRows(g, extra));
                 return;
             }
         }
@@ -1041,6 +1055,12 @@ public final class SettingsEntryHook {
                         kwCount > 0 ? "已配置 " + kwCount + " 个"
                                 : "命中评论正文即屏蔽",
                         null, false, false, true, null, Action.COMMENT_KEYWORDS),
+                new SwitchDef("屏蔽游戏名接龙",
+                        "屏蔽正文仅为游戏链接的评论",
+                        App.KEY_BLOCK_GAME_RELAY, false, false),
+                new SwitchDef("评论过滤状态",
+                        "查看安装结果与各层命中计数",
+                        null, false, false, true, null, Action.COMMENT_FILTER_DIAG),
         });
         int insertAt = groups.size();
         for (int i = 0; i < groups.size(); i++) {
@@ -2057,6 +2077,10 @@ public final class SettingsEntryHook {
                         break;
                     case COMMENT_KEYWORDS:
                         setRowClick(itemCls, item, v -> showCommentKeywordsDialog(activity));
+                        break;
+                    case COMMENT_FILTER_DIAG:
+                        setRowClick(itemCls, item, v -> showMultilineInfo(activity,
+                                "评论过滤状态", CommentFilterHook.diagnostics()));
                         break;
                     case GAME_LIB_TYPES:
                         setRowClick(itemCls, item, v -> showGameLibPicker(activity,
@@ -3891,7 +3915,8 @@ public final class SettingsEntryHook {
         if (App.KEY_CUSTOM_TEXT_SELECT.equals(key) || App.KEY_COPY_POST.equals(key)) {
             TextSelectHook.refresh();
         }
-        if (App.KEY_BLOCK_CY_COMMENT.equals(key) || App.KEY_HOST_HIDE_CY.equals(key)) {
+        if (App.KEY_BLOCK_CY_COMMENT.equals(key) || App.KEY_HOST_HIDE_CY.equals(key)
+                || App.KEY_BLOCK_GAME_RELAY.equals(key)) {
             CommentFilterHook.refresh();
         }
         return localOk;

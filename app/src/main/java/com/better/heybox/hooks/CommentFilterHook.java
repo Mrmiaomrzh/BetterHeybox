@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import com.better.heybox.App;
@@ -22,7 +23,6 @@ import com.better.heybox.Checkpoint;
 import com.better.heybox.MainModule;
 import io.github.libxposed.api.XposedInterface;
 
-/** Comment filter (issue #36). Data: floors. List: sub-comments. Row: fallback. */
 public final class CommentFilterHook {
 
     private static final String POST_COMMENT_SECTION_CLASS =
@@ -39,6 +39,11 @@ public final class CommentFilterHook {
             "com.max.hbcommon.base.adapter.s$e";
     private static final String SUB_COMMENT_VIEW_CLASS = "com.max.xiaoheihe.view.SubCommentView";
 
+    private static final String[] EPOXY_ITEM_CLASSES = new String[]{
+            "com.max.feature.community.view.itemview.MainCommentItemView",
+            "com.max.feature.community.view.itemview.SubCommentItemView",
+    };
+
     private static final String HOLDER_PREFIX = "com.max.hbcommon.base.adapter.s$";
     private static final String VIEW_HOLDER_CLASS =
             "androidx.recyclerview.widget.RecyclerView$ViewHolder";
@@ -51,6 +56,31 @@ public final class CommentFilterHook {
     /** Pure cy text (invisible chars stripped). */
     private static final Pattern INVISIBLE =
             Pattern.compile("[\\s\\u200b-\\u200f\\u202a-\\u202e\\ufeff]+");
+
+    private static final Pattern GAME_LINK = Pattern.compile(
+            "<a\\b(?=[^>]*(?:"
+                    + "\\bdata-link-type\\s*=\\s*[\"']?game"
+                    + "|\\bdata-game-id\\s*="
+                    + "|openGameDetail"
+                    + "))[^>]*>",
+            Pattern.CASE_INSENSITIVE);
+            
+    private static final Pattern ANCHOR_BLOCK =
+            Pattern.compile("<a\\b[^>]*>(.*?)</a>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+
+    private static final Pattern ANY_TAG = Pattern.compile("<[^>]*>");
+
+    private static final int MAX_RELAY_VISIBLE_CHARS = 6;
+
+    private static final int MAX_GAME_SCAN_LENGTH = 60000;
+
+    private static final long PASS_BUDGET_MS = 120L;
+
+    private static final int GAME_PROBE_LIMIT = 40;
+
+    private static final int SUB_PROBE_LIMIT = 12;
+
+    private static final int ROW_PROBE_LIMIT = 30;
 
     private static volatile CommentFilterHook sInstance;
 
@@ -79,13 +109,32 @@ public final class CommentFilterHook {
     private final ConcurrentHashMap<Class<?>, ConcurrentHashMap<String, Object>> getterCache =
             new ConcurrentHashMap<>();
     private static final Object NO_METHOD = new Object();
+    private final java.util.concurrent.atomic.AtomicInteger dataHits =
+            new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicInteger listHits =
+            new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicInteger subListHits =
+            new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicInteger subRowHits =
+            new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicInteger gameHits =
+            new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicInteger gameProbes =
+            new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicInteger gameMissProbes =
+            new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicInteger gameSkipProbes =
+            new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicInteger rowProbes =
+            new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicInteger budgetHits =
+            new java.util.concurrent.atomic.AtomicInteger();
 
     public CommentFilterHook(MainModule module) {
         this.module = module;
         sInstance = this;
     }
 
-    /** Rebind comment list after settings change. */
     public static void refresh() {
         CommentFilterHook instance = sInstance;
         if (instance != null) {
@@ -102,16 +151,44 @@ public final class CommentFilterHook {
         boolean subList = hookSubCommentListFilter(cl);
         // sub-comment rows: data-based hide (container kept)
         int subRows = hookSubCommentRowBinds(cl);
+        // sub-comment rows as actually rendered by SubCommentView
+        boolean subRowViews = hookSubCommentRowViews(cl);
+        // newer Compose/Epoxy comment section rows
+        int epoxy = hookEpoxyItemRows(cl);
         module.logd(Log.WARN, module.TAG, "[评论过滤] Hook 安装结果：数据层="
                 + (data ? "✔" : "✘") + " / 通用列表=" + (broad ? "✔" : "✘")
                 + " / 指定适配器=" + legacy + " 处"
                 + " / 楼中楼列表=" + (subList ? "✔" : "✘")
                 + " / 楼中楼行=" + subRows + " 处"
+                + " / 楼中楼视图行=" + (subRowViews ? "✔" : "✘")
+                + " / 新评论行=" + epoxy + " 处"
                 + " / 兜底过滤=" + (isEnabled() ? "开启" : "关闭")
-                + " / 屏蔽插眼=" + (isHostHideCyEnabled() ? "开启" : "关闭"));
+                + " / 屏蔽插眼=" + (isHostHideCyEnabled() ? "开启" : "关闭")
+                + " / 游戏名接龙=" + (gameRelayEnabled() ? "开启" : "关闭"));
     }
 
-    // ---------- data layer ----------
+    public static String diagnostics() {
+        CommentFilterHook instance = sInstance;
+        if (instance == null) {
+            return "评论过滤未安装";
+        }
+        return "评论过滤\n"
+                + "屏蔽插眼：" + (instance.isHostHideCyEnabled() ? "开启" : "关闭") + "\n"
+                + "关键词 / 无意义评论：" + (instance.isEnabled() ? "开启" : "关闭")
+                + "（已配置 " + instance.keywordMatchers().size() + " 条）\n"
+                + "屏蔽游戏名接龙：" + (instance.gameRelayEnabled() ? "开启" : "关闭")
+                + "（残留可见字 ≤ " + MAX_RELAY_VISIBLE_CHARS + "）\n"
+                + "命中计数：数据层 " + instance.dataHits.get()
+                + " / 列表 " + instance.listHits.get()
+                + " / 楼中楼列表 " + instance.subListHits.get()
+                + " / 楼中楼行 " + instance.subRowHits.get() + "\n"
+                + "其中游戏名接龙 " + instance.gameHits.get() + " 条"
+                + "（主动探测 " + instance.gameProbes.get() + "/" + GAME_PROBE_LIMIT + " 次"
+                + " / 未匹配锚点 " + instance.gameMissProbes.get() + " 次"
+                + " / 放行 " + instance.gameSkipProbes.get() + " 次"
+                + " / 新评论行 " + instance.rowProbes.get() + "/" + ROW_PROBE_LIMIT + " 次"
+                + " / 超预算 " + instance.budgetHits.get() + " 次）";
+    }
 
     private boolean hookPostCommentsGetter(ClassLoader cl) {
         try {
@@ -120,7 +197,7 @@ public final class CommentFilterHook {
             module.hook(getter).intercept(chain -> {
                 Object raw = chain.proceed();
                 try {
-                    if (!cyMarkFilterActive() || !(raw instanceof List)) {
+                    if (!commentFilterActive() || !(raw instanceof List)) {
                         return raw;
                     }
                     List<?> filtered = filterFloors((List<?>) raw);
@@ -139,24 +216,89 @@ public final class CommentFilterHook {
         }
     }
 
-    /** Drop on hit; null = pass through. */
     private List<?> filterFloors(List<?> raw) {
         List<Object> keep = new ArrayList<>(raw.size());
         int blocked = 0;
+        long started = SystemClock.elapsedRealtime();
+        boolean budgetLogged = false;
         for (Object item : raw) {
-            String reason = isEnabled() ? spamReason(item) : cyOnlyReason(item);
+            if (SystemClock.elapsedRealtime() - started > PASS_BUDGET_MS) {
+                budgetHits.incrementAndGet();
+                if (!budgetLogged) {
+                    budgetLogged = true;
+                    module.logd(Log.INFO, module.TAG, "[评论过滤] 单次过滤超过 "
+                            + PASS_BUDGET_MS + "ms，剩余评论放行（防卡死）");
+                }
+                keep.add(item);
+                continue;
+            }
+            String reason = floorReason(item);
             if (reason == null) {
                 keep.add(item);
                 continue;
             }
             blocked++;
+            countHit("数据层", reason);
             logBlocked("数据层", item, reason);
         }
         if (blocked == 0) {
             return null;
         }
-        module.logd(Log.INFO, module.TAG, "屏蔽评论[数据层] 本页共屏蔽 " + blocked + " 条");
+        module.logd(Log.INFO, module.TAG, "屏蔽评论[数据层] 本页共屏蔽 " + blocked + " 层");
         return keep;
+    }
+
+    private boolean hookSubCommentRowViews(ClassLoader cl) {
+        try {
+            Class<?> cls = Class.forName(SUB_COMMENT_VIEW_CLASS, false, cl);
+            Method bind = cls.getDeclaredMethod("l", int.class);
+            module.hook(bind).intercept(this::onSubCommentRowView);
+            Checkpoint.mark("评论过滤楼中楼视图行安装: ok");
+            module.logd(Log.INFO, module.TAG, "✔ 楼中楼视图行 Hook: "
+                    + SUB_COMMENT_VIEW_CLASS + "#l(int)");
+            return true;
+        } catch (Throwable t) {
+            Checkpoint.mark("评论过滤楼中楼视图行安装失败: %s", String.valueOf(t));
+            module.logd(Log.WARN, module.TAG, "✘ 楼中楼视图行 Hook 失败: " + t);
+            return false;
+        }
+    }
+
+    private Object onSubCommentRowView(XposedInterface.Chain chain) throws Throwable {
+        Object result = chain.proceed();
+        try {
+            if (!commentFilterActive() || !(result instanceof View)) {
+                return result;
+            }
+            View row = (View) result;
+            Object self = chain.getThisObject();
+            int index = ((Number) chain.getArg(0)).intValue();
+            Object comment = rowItem(self, index);
+            if (comment == null) {
+                return result;
+            }
+            probeRow(comment, safeGet(comment, "getText"));
+            String reason = commentReason(comment);
+            if (reason == null) {
+                restoreCyView(row);
+                return result;
+            }
+            countHit("楼中楼行", reason);
+            hideCyView(row);
+            logBlocked("楼中楼行", comment, reason);
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "楼中楼视图行过滤异常，放行: " + t);
+        }
+        return result;
+    }
+
+    private Object rowItem(Object rowView, int index) {
+        try {
+            Method getter = findGetter(rowView.getClass(), "g", int.class);
+            return getter == null ? null : getter.invoke(rowView, index);
+        } catch (Throwable t) {
+            return null;
+        }
     }
 
     // ---------- adapter bind ----------
@@ -233,9 +375,13 @@ public final class CommentFilterHook {
             if (itemView == null) {
                 return result;
             }
-            if (isEnabled()) {
-                String reason = spamReason(chain.getArg(1));
+            if (commentFilterActive()) {
+                String reason = isEnabled() ? spamReason(chain.getArg(1)) : null;
+                if (reason == null) {
+                    reason = gameFloorReason(chain.getArg(1));
+                }
                 if (reason != null) {
+                    countHit("列表", reason);
                     logBlocked("列表", chain.getArg(1), reason);
                     hideCyView(itemView);
                     return result;
@@ -297,21 +443,19 @@ public final class CommentFilterHook {
             if (!isCommentFloor(data)) {
                 return result;
             }
-            if (isEnabled()) {
+            boolean fallback = isEnabled();
+            if (fallback) {
                 diagnose("列表", data);
-                String reason = spamReason(data);
-                if (reason != null) {
-                    logBlocked("列表", data, reason);
-                    hideCyView(itemView);
-                    return result;
+            }
+            String reason = floorReason(data);
+            if (reason != null) {
+                if (!fallback) {
+                    diagnose("列表", data);
                 }
-            } else if (cyMarkFilterActive()) {
-                String reason = cyOnlyReason(data);
-                if (reason != null) {
-                    logBlocked("列表", data, reason);
-                    hideCyView(itemView);
-                    return result;
-                }
+                countHit("列表", reason);
+                logBlocked("列表", data, reason);
+                hideCyView(itemView);
+                return result;
             }
         } catch (Throwable t) {
             module.logd(Log.WARN, module.TAG, "评论列表过滤异常，放行: " + t);
@@ -374,7 +518,7 @@ public final class CommentFilterHook {
     private Object onSubCommentRowBind(XposedInterface.Chain chain) throws Throwable {
         Object result = chain.proceed();
         try {
-            if (!cyMarkFilterActive()) {
+            if (!commentFilterActive()) {
                 return result;
             }
             View row = holderRowView(chain.getArg(1));
@@ -382,8 +526,15 @@ public final class CommentFilterHook {
                 return result;
             }
             Object comment = chain.getArg(2);
-            String reason = isEnabled() ? singleReason(comment) : cyMarkReason(comment);
+            if (safeGet(comment, "getText").isEmpty()) {
+                Object alt = chain.getArg(3);
+                if (!safeGet(alt, "getText").isEmpty()) {
+                    comment = alt;
+                }
+            }
+            String reason = commentReason(comment);
             if (reason != null) {
+                countHit("楼中楼行", reason);
                 hideCyView(row);
                 module.logd(Log.INFO, module.TAG, "屏蔽评论[楼中楼行] 原因=" + reason
                         + ", commentid=" + safeGet(comment, "getCommentid"));
@@ -410,28 +561,129 @@ public final class CommentFilterHook {
         }
     }
 
-    private Object onSetTotalList(XposedInterface.Chain chain) throws Throwable {
+    private int hookEpoxyItemRows(ClassLoader cl) {
+        int installed = 0;
+        for (String name : EPOXY_ITEM_CLASSES) {
+            try {
+                Class<?> cls = Class.forName(name, false, cl);
+                for (Method method : cls.getDeclaredMethods()) {
+                    if (!"setItem".equals(method.getName()) || method.getParameterCount() != 1) {
+                        continue;
+                    }
+                    module.hook(method).intercept(this::onEpoxyItemBind);
+                    installed++;
+                    module.logd(Log.INFO, module.TAG, "✔ 新评论行 Hook: " + name + "#setItem");
+                }
+            } catch (Throwable t) {
+                module.logd(Log.INFO, module.TAG, "新评论行挂点跳过 " + name);
+            }
+        }
+        Checkpoint.mark("评论过滤新评论行安装: %d 处", installed);
+        return installed;
+    }
+
+    private Object onEpoxyItemBind(XposedInterface.Chain chain) throws Throwable {
         Object result = chain.proceed();
         try {
-            Object arg = chain.getArg(0);
-            if (cyMarkFilterActive() && arg instanceof List) {
+            if (!gameRelayEnabled()) {
+                return result;
+            }
+            Object view = chain.getThisObject();
+            if (!(view instanceof View)) {
+                return result;
+            }
+            Object item = chain.getArg(0);
+            String text = itemRichText(item);
+            probeRow(item, text);
+            if (text.isEmpty() || gameLinkReasonForText(text) == null) {
+                restoreCyView((View) view);
+                return result;
+            }
+            countHit("列表", "游戏名接龙（正文仅游戏链接）");
+            module.logd(Log.INFO, module.TAG, "屏蔽评论[新评论行] 原因=游戏名接龙, commentid="
+                    + safeGet(item, "Y") + ", 正文=" + abbreviate(text));
+            hideCyView((View) view);
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "新评论行过滤异常，放行: " + t);
+        }
+        return result;
+    }
+
+    private void probeRow(Object item, String text) {
+        if (!module.isEnabled(App.KEY_VERBOSE_LOG, false)) {
+            return;
+        }
+        if (rowProbes.incrementAndGet() > ROW_PROBE_LIMIT) {
+            return;
+        }
+        module.logd(Log.INFO, module.TAG, "[评论过滤] 诊断[新评论行] class="
+                + (item == null ? "null" : item.getClass().getSimpleName())
+                + ", 取到正文字节=" + text.length() + ", 正文=" + abbreviate(text, 80));
+    }
+
+    private String itemRichText(Object item) {
+        if (item == null) {
+            return "";
+        }
+        String direct = safeGet(item, "c0");
+        if (looksLikeMarkup(direct)) {
+            return direct;
+        }
+        for (Method method : item.getClass().getMethods()) {
+            if (method.getParameterCount() != 0 || method.getReturnType() != String.class) {
+                continue;
+            }
+            if ("toString".equals(method.getName()) || "getClass".equals(method.getName())) {
+                continue;
+            }
+            try {
+                Object value = method.invoke(item);
+                if (value instanceof String && looksLikeMarkup((String) value)) {
+                    return (String) value;
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        return direct;
+    }
+
+    private static boolean looksLikeMarkup(String text) {
+        return text != null && (text.contains("<a") || text.contains("heybox://"));
+    }
+
+    private Object onSetTotalList(XposedInterface.Chain chain) throws Throwable {
+        Object arg = chain.getArg(0);
+        int hidden = 0;
+        Object floorKey = null;
+        try {
+            if (commentFilterActive() && arg instanceof List) {
                 List<?> list = (List<?>) arg;
                 if (list.size() > 1) {
-                    Object floorKey = list.get(0);
-                    int hidden = countFilteredSubComments(list);
+                    floorKey = list.get(0);
+                    hidden = countFilteredSubComments(list);
+                }
+            }
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "楼中楼预览检查异常，放行: " + t);
+        }
+        Object result = chain.proceed();
+        try {
+            if (hidden > 0 && arg instanceof List) {
+                List<?> list = (List<?>) arg;
+                if (list.size() > 1 && floorKey != null) {
                     int loaded = list.size() - 1;
                     int total = parseInt(safeGet(floorKey, "getChildNum"), 0);
                     boolean needMore = total > 0 ? loaded < total : loaded - hidden < VISIBLE_TARGET;
-                    if (hidden > 0 && needMore) {
+                    if (needMore) {
                         module.logd(Log.INFO, module.TAG, "楼中楼自动补数据：已加载 " + loaded + "/"
-                                + (total > 0 ? String.valueOf(total) : "?") + " 条、屏蔽 " + hidden
+                                + (total > 0 ? String.valueOf(total) : "?") + " 条、隐藏 " + hidden
                                 + " 条，下一页游标=" + safeGet(list.get(list.size() - 1), "getCommentid"));
                         scheduleAutoLoadMore(chain.getThisObject(), floorKey);
                     }
                 }
             }
         } catch (Throwable t) {
-            module.logd(Log.WARN, module.TAG, "楼中楼预览检查异常，放行: " + t);
+            module.logd(Log.WARN, module.TAG, "楼中楼自动补数据异常，放行: " + t);
         }
         return result;
     }
@@ -440,7 +692,7 @@ public final class CommentFilterHook {
         int hidden = 0;
         for (int i = 1; i < list.size(); i++) {
             Object comment = list.get(i);
-            if (comment != null && (isEnabled() ? singleReason(comment) : cyMarkReason(comment)) != null) {
+            if (commentReason(comment) != null) {
                 hidden++;
             }
         }
@@ -559,6 +811,193 @@ public final class CommentFilterHook {
         return isEnabled() || isHostHideCyEnabled();
     }
 
+    private boolean gameRelayEnabled() {
+        return module.isEnabled(App.KEY_BLOCK_GAME_RELAY, false);
+    }
+
+    private boolean commentFilterActive() {
+        return cyMarkFilterActive() || gameRelayEnabled();
+    }
+
+    private String commentReason(Object comment) {
+        if (comment == null) {
+            return null;
+        }
+        if (isEnabled()) {
+            String reason = singleReason(comment);
+            if (reason != null) {
+                return reason;
+            }
+        } else if (isHostHideCyEnabled()) {
+            String reason = cyMarkReason(comment);
+            if (reason != null) {
+                return reason;
+            }
+        }
+        return gameLinkReason(comment);
+    }
+
+    private String floorReason(Object floor) {
+        if (floor == null) {
+            return null;
+        }
+        if (isEnabled() && isMeaninglessModel(floor)) {
+            return "无意义评论折叠行";
+        }
+        List<?> comments = commentList(floor);
+        if (comments == null || comments.isEmpty()) {
+            return null;
+        }
+        return commentReason(comments.get(0));
+    }
+
+    private String gameFloorReason(Object floor) {
+        if (floor == null || !gameRelayEnabled()) {
+            return null;
+        }
+        List<?> comments = commentList(floor);
+        if (comments == null || comments.isEmpty()) {
+            return null;
+        }
+        return gameLinkReason(comments.get(0));
+    }
+
+    private String gameLinkReason(Object comment) {
+        if (comment == null || !gameRelayEnabled()) {
+            return null;
+        }
+        try {
+            return relayReason(safeGet(comment, "getText"), comment);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private String gameLinkReasonForText(String text) {
+        return relayReason(text, null);
+    }
+
+    private String relayReason(String text, Object comment) {
+        if (text == null || text.length() == 0) {
+            return null;
+        }
+        if (text.length() > MAX_GAME_SCAN_LENGTH) {
+            probeSkip(comment, text, "超长");
+            return null;
+        }
+        if (!GAME_LINK.matcher(text).find()) {
+            probeMiss(comment, text);
+            return null;
+        }
+        int links = 0;
+        int visible = 0;
+        int cursor = 0;
+        StringBuilder names = new StringBuilder();
+        Matcher anchor = ANCHOR_BLOCK.matcher(text);
+        while (anchor.find()) {
+            links++;
+            if (links <= 3) {
+                if (names.length() > 0) {
+                    names.append('/');
+                }
+                names.append(abbreviate(INVISIBLE.matcher(anchor.group(1)).replaceAll(""), 20));
+            }
+            visible += visibleCount(text, cursor, anchor.start());
+            if (visible > MAX_RELAY_VISIBLE_CHARS) {
+                probeSkip(comment, text, "锚点外可见字已超 " + MAX_RELAY_VISIBLE_CHARS);
+                return null;
+            }
+            cursor = anchor.end();
+        }
+        visible += visibleCount(text, cursor, text.length());
+        probeGameLink(comment, text, visible, links, names.toString());
+        if (visible > MAX_RELAY_VISIBLE_CHARS) {
+            probeSkip(comment, text, "残留 " + visible + " 字: "
+                    + abbreviate(visibleText(text, cursor, text.length()), 40));
+            return null;
+        }
+        return "游戏名接龙（正文仅游戏链接）";
+    }
+
+    private static int visibleCount(String text, int from, int to) {
+        if (from >= to) {
+            return 0;
+        }
+        String segment = text.substring(from, to);
+        segment = ANY_TAG.matcher(segment).replaceAll("");
+        return INVISIBLE.matcher(segment).replaceAll("").length();
+    }
+
+    private static String visibleText(String text, int from, int to) {
+        if (from >= to) {
+            return "";
+        }
+        String segment = text.substring(from, to);
+        segment = ANY_TAG.matcher(segment).replaceAll("");
+        return INVISIBLE.matcher(segment).replaceAll("");
+    }
+
+    private void probeGameLink(Object comment, String text, int visible, int links, String names) {
+        if (!module.isEnabled(App.KEY_VERBOSE_LOG, false)) {
+            return;
+        }
+        if (gameProbes.incrementAndGet() > GAME_PROBE_LIMIT) {
+            return;
+        }
+        module.logd(Log.INFO, module.TAG, "[评论过滤] 诊断[游戏链接] commentid="
+                + safeGet(comment, "getCommentid") + ", 作者=" + commentAuthor(comment)
+                + ", 长度=" + text.length() + ", 链接数=" + links
+                + ", 残留可见字=" + visible + ", 链接文字=" + (names.isEmpty() ? "-" : names));
+    }
+
+    private void probeSkip(Object comment, String text, String why) {
+        if (!module.isEnabled(App.KEY_VERBOSE_LOG, false)) {
+            return;
+        }
+        if (gameSkipProbes.incrementAndGet() > GAME_PROBE_LIMIT) {
+            return;
+        }
+        module.logd(Log.INFO, module.TAG, "[评论过滤] 诊断[放行] commentid="
+                + safeGet(comment, "getCommentid") + ", 作者=" + commentAuthor(comment)
+                + ", 长度=" + text.length() + ", 原因=" + why);
+    }
+
+    private String commentAuthor(Object comment) {
+        Object user = safeInvoke(comment, "getUser");
+        String name = user == null ? "" : safeGet(user, "getUsername");
+        return name.isEmpty() ? "-" : name;
+    }
+
+    private void probeMiss(Object comment, String text) {
+        if (!module.isEnabled(App.KEY_VERBOSE_LOG, false)) {
+            return;
+        }
+        if (!text.contains("<a") && !text.contains("game")) {
+            return;
+        }
+        if (gameMissProbes.incrementAndGet() > GAME_PROBE_LIMIT) {
+            return;
+        }
+        module.logd(Log.INFO, module.TAG, "[评论过滤] 诊断[未匹配锚点] commentid="
+                + safeGet(comment, "getCommentid") + ", 作者=" + commentAuthor(comment)
+                + ", 长度=" + text.length() + ", 正文=" + abbreviate(text, 120));
+    }
+
+    private void countHit(String where, String reason) {
+        if (reason != null && reason.startsWith("游戏名接龙")) {
+            gameHits.incrementAndGet();
+        }
+        if ("数据层".equals(where)) {
+            dataHits.incrementAndGet();
+        } else if ("楼中楼列表".equals(where)) {
+            subListHits.incrementAndGet();
+        } else if ("楼中楼行".equals(where)) {
+            subRowHits.incrementAndGet();
+        } else {
+            listHits.incrementAndGet();
+        }
+    }
+
     private String spamReason(Object floor) {
         if (floor == null) {
             return null;
@@ -590,18 +1029,6 @@ public final class CommentFilterHook {
             return "cy 评论（纯插眼文本）";
         }
         return null;
-    }
-
-    /** Floor main comment has Cy mark. */
-    private String cyOnlyReason(Object floor) {
-        if (floor == null || isMeaninglessModel(floor)) {
-            return null;
-        }
-        List<?> comments = commentList(floor);
-        if (comments == null || comments.isEmpty()) {
-            return null;
-        }
-        return cyMarkReason(comments.get(0));
     }
 
     private String singleReason(Object comment) {
@@ -664,10 +1091,14 @@ public final class CommentFilterHook {
     }
 
     private static String abbreviate(String text) {
+        return abbreviate(text, 16);
+    }
+
+    private static String abbreviate(String text, int max) {
         if (text == null || text.isEmpty()) {
             return "-";
         }
-        return text.length() <= 16 ? text : text.substring(0, 16);
+        return text.length() <= max ? text : text.substring(0, max);
     }
 
     private List<?> commentList(Object floor) {
