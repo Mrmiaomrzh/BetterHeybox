@@ -17,24 +17,11 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/**
- * 取数：用宿主 OkHttp 拉「某用户的帖子列表」与「我的关注列表」。
- *
- * <p>端点在 1.3.393 dex 中确认：
- * <ul>
- *   <li>{@code bbs/app/profile/user/link/list} —— 某用户发布的帖子</li>
- *   <li>{@code bbs/app/profile/following/list} / {@code .../following/simple_list} /
- *       {@code .../inter_follow/list} —— 我的关注（用于一键导入）</li>
- * </ul>
- * 响应结构随版本可能变化，因此统一用<b>宽松解析</b>：递归遍历 JSON，按字段名候选收集。
- */
 public final class WatchFetcher {
 
     private static final String BASE = "https://api.xiaoheihe.cn/";
 
-    /** 每个关注对象每轮最多取多少条（新版在最前） */
     public static final int FETCH_LIMIT = 10;
-    /** 关注列表导入上限 */
     public static final int FOLLOW_IMPORT_LIMIT = 100;
 
     private static final String[] USER_POSTS_PATHS = {
@@ -47,36 +34,29 @@ public final class WatchFetcher {
             "bbs/app/profile/inter_follow/list",
             "bbs/app/profile/follower/list",
     };
-    /** 我关注的话题（1.3.393/1.3.395 dex 均确认存在） */
     private static final String[] TOPIC_LIST_PATHS = {
             "bbs/app/profile/preference_v5/topic_list",
             "bbs/app/profile/topic/settings",
     };
-    /** 话题信息（按 id 批量取名字） */
     private static final String TOPIC_INFO_PATH = "bbs/app/topic/list_infos";
-    /** 话题 / 标签搜索 */
     private static final String[] TOPIC_SEARCH_PATHS = {
             "bbs/app/api/search/topic",
             "bbs/app/topic/search",
             "bbs/app/hashtag/search",
     };
-    /** 话题下的帖子流 */
     private static final String[] TOPIC_FEED_PATHS = {
             "bbs/app/topic/feeds",
             "bbs/app/topic/max/feeds",
             "bbs/app/hashtag/concept/feeds",
     };
-    /** 关键词搜索 */
     private static final String[] SEARCH_PATHS = {
             "bbs/app/api/general/search/v1",
             "bbs/app/hashtag/search",
             "bbs/app/topic/search",
     };
-    /** 热搜词（推荐关键词用） */
     private static final String[] HOT_WORD_PATHS = {
             "bbs/app/api/search/hot_words",
     };
-    /** 搜索联想词（推荐关键词用） */
     private static final String[] SUGGEST_PATHS = {
             "bbs/app/api/search/suggestion/v2",
     };
@@ -90,13 +70,11 @@ public final class WatchFetcher {
         sModule = module;
     }
 
-    // ------------------------------------------------------------ 帖子
 
     public static String userPostsUrl(String userId, int limit) {
         return BASE + USER_POSTS_PATHS[0] + "?userid=" + userId + "&offset=0&limit=" + limit;
     }
 
-    /** 拉一个用户的最近帖子（失败返回空列表） */
     public static List<WatchItem> fetchUserPosts(String userId, int limit) {
         List<WatchItem> out = new ArrayList<>();
         if (userId == null || userId.isEmpty()) {
@@ -123,14 +101,7 @@ public final class WatchFetcher {
         return out;
     }
 
-    // ------------------------------------------------------------ 关注列表
 
-    /**
-     * 拉「我关注的用户」列表。
-     *
-     * @param limit 最多返回多少个
-     * @return 每个元素为 {userid, 昵称}
-     */
     public static List<String[]> fetchFollowing(int limit) {
         List<String[]> out = new ArrayList<>();
         Map<String, String> headers = baseHeaders();
@@ -174,13 +145,7 @@ public final class WatchFetcher {
         return out;
     }
 
-    // ------------------------------------------------------------ 话题
 
-    /**
-     * 拉「我关注的话题」，用于一键导入成监控关键词。
-     *
-     * @return 每个元素 {话题id, 话题名}，id 可能为 null
-     */
     public static List<String[]> fetchFollowedTopics(int limit) {
         Map<String, String> headers = baseHeaders();
         String body = HttpBridge.get(BASE + TOPIC_LIST_PATHS[0] + "?offset=0&limit=50", headers);
@@ -188,8 +153,6 @@ public final class WatchFetcher {
         if (body != null && body.length() > 20) {
             out.addAll(parseTopicPairs(body, limit));
             if (out.isEmpty()) {
-                // 实测该接口要求一个「平台」参数（返回 msg=请至少选择一个平台），
-                // 到底叫什么名字没有公开信息，所以拿不到就回落到「最近浏览过的话题」
                 logBody("关注话题 " + TOPIC_LIST_PATHS[0], body);
             }
         }
@@ -204,10 +167,6 @@ public final class WatchFetcher {
         return out;
     }
 
-    /**
-     * 回落到「最近浏览过的话题」：用户在小黑盒里打开过的话题页都会被记下 id，
-     * 再用 {@code bbs/app/topic/list_infos} 批量换回名字。
-     */
     public static List<String[]> fetchRecentTopics(int limit) {
         List<String> ids = HttpBridge.recentTopicIds();
         if (ids.isEmpty()) {
@@ -217,7 +176,6 @@ public final class WatchFetcher {
         return fetchTopicInfos(ids, limit);
     }
 
-    /** 按 id 批量取话题名：bbs/app/topic/list_infos?topic_ids=1,2,3 */
     public static List<String[]> fetchTopicInfos(List<String> ids, int limit) {
         List<String[]> out = new ArrayList<>();
         if (ids == null || ids.isEmpty()) {
@@ -263,7 +221,6 @@ public final class WatchFetcher {
         return out;
     }
 
-    /** 话题 / 标签搜索，返回 {id, 名字} */
     public static List<String[]> fetchTopicSearch(String keyword, int limit) {
         List<String[]> out = new ArrayList<>();
         if (keyword == null || keyword.trim().isEmpty()) {
@@ -286,7 +243,6 @@ public final class WatchFetcher {
         return out;
     }
 
-    /** 从任意 JSON 里收集 {话题id, 话题名} 对 */
     private static List<String[]> parseTopicPairs(String body, int limit) {
         List<String[]> out = new ArrayList<>();
         try {
@@ -319,7 +275,6 @@ public final class WatchFetcher {
         return out;
     }
 
-    /** 按话题取最新帖（id 优先，退化为话题名搜索） */
     public static List<WatchItem> fetchTopicPosts(String topicId, String topicName, int limit) {
         List<WatchItem> out = new ArrayList<>();
         Map<String, String> headers = baseHeaders();
@@ -358,7 +313,6 @@ public final class WatchFetcher {
         return out;
     }
 
-    /** 按关键词搜索最新帖 */
     public static List<WatchItem> fetchKeywordPosts(String keyword, int limit) {
         List<WatchItem> out = new ArrayList<>();
         if (keyword == null || keyword.trim().isEmpty()) {
@@ -367,7 +321,6 @@ public final class WatchFetcher {
         String q = java.net.URLEncoder.encode(keyword.trim());
         Map<String, String> headers = baseHeaders();
         for (String path : SEARCH_PATHS) {
-            // 实测：general/search/v1 必须带 search_type/type 才会返回帖子（不带就是空 items）
             String body = HttpBridge.get(BASE + path + "?q=" + q + "&query=" + q
                     + "&offset=0&limit=" + limit + "&search_type=link&type=link", headers);
             if (body == null || body.length() < 50) {
@@ -389,7 +342,6 @@ public final class WatchFetcher {
         return out;
     }
 
-    /** 推荐关键词候选：热搜词 + 联想词（seed 可为空） */
     public static List<String> fetchHotWords(String seed, int limit) {
         List<String> out = new ArrayList<>();
         Map<String, String> headers = baseHeaders();
@@ -418,7 +370,6 @@ public final class WatchFetcher {
         return out;
     }
 
-    /** 从任意 JSON 里收集"像话题"的对象（排除用户对象） */
     private static void collectTopicObjects(Object node, List<JSONObject> out, int depth) {
         if (node == null || depth > 6 || out.size() > 200) {
             return;
@@ -448,7 +399,6 @@ public final class WatchFetcher {
         }
     }
 
-    /** 从任意 JSON 里收集候选词（字符串数组 / word 字段） */
     private static void collectWords(String body, List<String> out, int limit) {
         try {
             Object root = body.trim().startsWith("[") ? new JSONArray(body) : new JSONObject(body);
@@ -500,7 +450,6 @@ public final class WatchFetcher {
         }
     }
 
-    /** 取数失败时把响应片段记进日志，便于定位参数问题 */
     private static void logBody(String tag, String body) {
         if (body == null) {
             log(Log.WARN, tag + " 响应为空");
@@ -519,17 +468,11 @@ public final class WatchFetcher {
         }
     }
 
-    // ------------------------------------------------------------ 宽松解析
 
     private static void collect(Object node, List<WatchItem> out, int depth) {
         collect(node, out, depth, null);
     }
 
-    /**
-     * 宽松收集帖子对象。{@code inheritedUser} 是上层节点里带的作者对象：
-     * 搜索结果常见 {@code {"info":{…帖子…},"user":{…作者…}}} 这种兄弟结构，
-     * 帖子对象自己身上没有作者字段，不往下继承就会显示成「未知作者」。
-     */
     private static void collect(Object node, List<WatchItem> out, int depth, JSONObject inheritedUser) {
         if (node == null || depth > 6 || out.size() > 300) {
             return;
@@ -559,7 +502,6 @@ public final class WatchFetcher {
         }
     }
 
-    /** 找当前节点里的作者对象：不同接口叫法不一，逐个候选试 */
     private static JSONObject authorObjectOf(JSONObject o) {
         JSONObject u = o.optJSONObject("user");
         if (u == null) {
@@ -586,7 +528,6 @@ public final class WatchFetcher {
         return u;
     }
 
-    /** 收集所有"像用户"的对象（用于关注列表） */
     private static void collectUserObjects(Object node, List<JSONObject> out, int depth) {
         if (node == null || depth > 6 || out.size() > 500) {
             return;
@@ -637,7 +578,7 @@ public final class WatchFetcher {
         }
         JSONObject user = authorObjectOf(o);
         if (user == null) {
-            user = ctxUser;   // 作者是上一层节点的兄弟对象（搜索结果就是这种结构）
+            user = ctxUser;
         }
         if (user != null) {
             if (authorId == null) {
@@ -656,14 +597,13 @@ public final class WatchFetcher {
             "post_time", "timestamp", "time", "ctime", "created_at",
     };
 
-    /** 依次在条目与嵌套 link 上找时间字段，支持数字/数字串/日期串 */
     private static long firstTime(JSONObject o, JSONObject link) {
         long v = firstTimeIn(o);
         if (v <= 0 && link != null) {
             v = firstTimeIn(link);
         }
         if (v > 100000000000L) {
-            v = v / 1000L;   // 毫秒 → 秒
+            v = v / 1000L;
         }
         return v;
     }
@@ -741,7 +681,6 @@ public final class WatchFetcher {
         return s == null ? "" : s;
     }
 
-    /** 合并多来源条目并按 linkId 去重 */
     public static List<WatchItem> dedupe(List<WatchItem> in) {
         Map<String, WatchItem> map = new LinkedHashMap<>();
         for (WatchItem it : in) {

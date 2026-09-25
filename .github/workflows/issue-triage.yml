@@ -54,35 +54,6 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
           script: |
-            /*
-             * ============================================================
-             * BetterHeybox Issue Triage
-             * ============================================================
-             *
-             * Automatic:
-             *   opened / edited / reopened
-             *
-             * Manual:
-             *   workflow_dispatch
-             *
-             * Features:
-             *   - Automatic classification
-             *   - Maximum 2 managed labels per issue
-             *   - Explicit label priority
-             *   - Bulk re-classification
-             *   - Dry-run mode
-             *   - Automatic label creation
-             *   - Sync labels on edit
-             *   - Manually added unmanaged labels are preserved
-             *   - Pull Requests are ignored
-             *
-             * Authentication:
-             *   GitHub built-in GITHUB_TOKEN
-             *
-             * Required permission:
-             *   issues: write
-             * ============================================================
-             */
 
             const owner = context.repo.owner;
             const repo = context.repo.repo;
@@ -93,16 +64,6 @@ jobs:
             const dryRun =
               process.env.TRIAGE_DRY_RUN === 'true';
 
-            /*
-             * ============================================================
-             * Label priority
-             *
-             * Lower number = higher priority.
-             *
-             * IMPORTANT:
-             * Only the first TWO matching labels are applied.
-             * ============================================================
-             */
 
             const priority = [
               'security',
@@ -125,11 +86,6 @@ jobs:
               'good-first-issue'
             ];
 
-            /*
-             * ============================================================
-             * Label rules
-             * ============================================================
-             */
 
             const rules = {
               security: {
@@ -410,11 +366,6 @@ jobs:
               }
             };
 
-            /*
-             * ============================================================
-             * Ensure managed labels exist
-             * ============================================================
-             */
 
             async function ensureLabels() {
               for (const name of priority) {
@@ -455,10 +406,6 @@ jobs:
                       description: rule.description
                     });
                   } catch (createError) {
-                    /*
-                     * Another run may have created the label
-                     * between getLabel and createLabel.
-                     */
                     if (createError.status !== 422) {
                       throw createError;
                     }
@@ -467,11 +414,6 @@ jobs:
               }
             }
 
-            /*
-             * ============================================================
-             * Classify issue
-             * ============================================================
-             */
 
             function classifyIssue(issue) {
               const title = issue.title || '';
@@ -481,11 +423,6 @@ jobs:
 
               const matched = [];
 
-              /*
-               * Iterate in priority order.
-               * This means the first two matches are automatically
-               * the highest-priority labels.
-               */
               for (const name of priority) {
                 const rule = rules[name];
 
@@ -505,9 +442,6 @@ jobs:
                     `Issue #${issue.number}: matched ${name}`
                   );
 
-                  /*
-                   * Maximum two labels.
-                   */
                   if (matched.length >= 2) {
                     break;
                   }
@@ -517,11 +451,6 @@ jobs:
               return matched;
             }
 
-            /*
-             * ============================================================
-             * Process one issue
-             * ============================================================
-             */
 
             async function processIssue(issue) {
               const wanted =
@@ -540,11 +469,6 @@ jobs:
               const managed =
                 Object.keys(rules);
 
-              /*
-               * Labels managed by this workflow which no longer match.
-               *
-               * Unmanaged/manual labels are NEVER touched.
-               */
               const remove =
                 currentNames.filter(
                   name =>
@@ -552,9 +476,6 @@ jobs:
                     !wanted.includes(name)
                 );
 
-              /*
-               * Only add labels that aren't already present.
-               */
               const add =
                 wanted.filter(
                   name => !currentNames.includes(name)
@@ -575,9 +496,6 @@ jobs:
                 };
               }
 
-              /*
-               * Remove obsolete managed labels.
-               */
               for (const name of remove) {
                 try {
                   await github.rest.issues.removeLabel({
@@ -593,9 +511,6 @@ jobs:
                 }
               }
 
-              /*
-               * Add selected labels.
-               */
               if (add.length > 0) {
                 await github.rest.issues.addLabels({
                   owner,
@@ -612,11 +527,6 @@ jobs:
               };
             }
 
-            /*
-             * ============================================================
-             * Automatic mode
-             * ============================================================
-             */
 
             if (!isManual) {
               await ensureLabels();
@@ -657,11 +567,6 @@ jobs:
               return;
             }
 
-            /*
-             * ============================================================
-             * Manual bulk mode
-             * ============================================================
-             */
 
             await ensureLabels();
 
@@ -709,10 +614,6 @@ jobs:
               }
 
               for (const issue of issues) {
-                /*
-                 * GitHub's Issue API also returns PRs.
-                 * Never auto-label Pull Requests.
-                 */
                 if (issue.pull_request) {
                   continue;
                 }
@@ -740,11 +641,6 @@ jobs:
               page++;
             }
 
-            /*
-             * ============================================================
-             * Bulk summary
-             * ============================================================
-             */
 
             core.summary
               .addHeading(

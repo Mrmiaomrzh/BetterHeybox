@@ -25,7 +25,6 @@ final class LiquidGlassHostLayout extends FrameLayout {
 
     static final Object GLASS_TAG = new Object();
 
-    /** Light frost fallback for devices without RuntimeShader. */
     private static final float SAMPLE_SCALE_LEGACY = 0.4f;
     private static final int BLUR_RADIUS_LEGACY = 3;
     private static final float SATURATION_BOOST = 1.08f;
@@ -66,7 +65,6 @@ final class LiquidGlassHostLayout extends FrameLayout {
                         + " dark=" + mDarkMode + " source=uiMode");
     }
 
-    /** QWEA0 渲染器接管后关闭 frost 采样与自绘（唯一实现场景：API 33+ 玻璃底栏） */
     void setExternalRendererActive(boolean active) {
         mExternalRenderer = active;
     }

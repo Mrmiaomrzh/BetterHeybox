@@ -39,25 +39,17 @@ import com.better.heybox.hooks.WebViewDevToolsHook;
 import com.better.heybox.liquidglass.LiquidGlassHookBridge;
 import com.better.heybox.liquidglass.LiquidGlassInstaller;
 
-/**
- * 模块入口（libxposed Modern API 102）：只负责模块生命周期与 Hook 安装编排。
- * 各 Hook 职责：通用、广告过滤、设置入口+内嵌面板、底部导航、推广贴、文本选择、图片分享
- */
 public class MainModule extends XposedModule {
 
     public static final String TAG = "BetterHeybox";
 
     private com.better.heybox.hooks.DailyTaskHook dailyTaskHook;
 
-    /** host classloader: needed to install hooks that were skipped at startup */
     private volatile ClassLoader targetClassLoader;
-    /** per-feature install gates (#37: features that are off install nothing at startup) */
     private final java.util.List<HookSpec> hookSpecs =
             new java.util.concurrent.CopyOnWriteArrayList<>();
-    /** hooks skipped so far; 0 makes every install path a no-op */
     private final java.util.concurrent.atomic.AtomicInteger pendingHookCount =
             new java.util.concurrent.atomic.AtomicInteger();
-    /** must be strongly referenced or SharedPreferences drops the listener */
     private SharedPreferences.OnSharedPreferenceChangeListener settingsListener;
 
     public static final String TARGET_PKG = "com.max.xiaoheihe";
@@ -195,7 +187,6 @@ public class MainModule extends XposedModule {
     }
     private void installHooks(PackageReadyParam param) {
         ClassLoader cl = param.getClassLoader();
-        // crash evidence first: later install/runtime crashes still leave a trace (#37)
         CrashGuard.install();
         LiquidGlassHookBridge.setModule(this);
         Checkpoint.mark(">>> 开始安装 Hook");
@@ -205,8 +196,6 @@ public class MainModule extends XposedModule {
         Checkpoint.mark("目标解析: %s", HeyboxTargets.report().replace('\n', ' '));
 
         PostFilterHook postFilter = new PostFilterHook(this);
-        // gated hooks install only while their switch is on (#37): no hooks, no install logs, no traversal
-        // for disabled features. Keys-less hooks (general / settings entry / target hint) stay resident.
         registerHook("通用", new GeneralHook(this)::install, cl);
         registerHook("广告过滤", new AdFilterHook(this)::install, cl,
                 App.KEY_OPEN_SCREEN, App.KEY_FEED_AD, App.KEY_BUBBLE_AD, App.KEY_CORNER_AD);
@@ -263,7 +252,6 @@ public class MainModule extends XposedModule {
         void install(ClassLoader cl);
     }
 
-    /** one hook's gate: empty keys = always install; otherwise any switch on installs it */
     private static final class HookSpec {
         final String label;
         final HookInstaller installer;
@@ -289,7 +277,6 @@ public class MainModule extends XposedModule {
     private void registerHook(String label, HookInstaller installer, ClassLoader cl, String... keys) {
         for (HookSpec existing : hookSpecs) {
             if (existing.label.equals(label)) {
-                // duplicate registration (hot reload): ignore, never install a hook twice
                 return;
             }
         }
@@ -304,7 +291,6 @@ public class MainModule extends XposedModule {
         }
     }
 
-    /** @return true only when this call installed it (pendingHookCount must not double-count) */
     private synchronized boolean installIfEnabled(HookSpec spec, ClassLoader cl) {
         if (spec.installed || cl == null) {
             return false;
@@ -317,7 +303,6 @@ public class MainModule extends XposedModule {
         return true;
     }
 
-    /** true when any switch is on; defaults come from App.BOOLEAN_DEFAULTS (single source of truth) */
     private boolean isAnySwitchOn(String[] keys) {
         if (keys.length == 0) {
             return true;
@@ -344,7 +329,6 @@ public class MainModule extends XposedModule {
         return !trimmed.isEmpty() && !"0".equals(trimmed);
     }
 
-    /** Called on a settings change: install hooks skipped at startup so a switch takes effect at once (#37). */
     public void onSettingChanged(String key) {
         if (key == null || pendingHookCount.get() == 0) {
             return;
@@ -363,7 +347,6 @@ public class MainModule extends XposedModule {
         }
     }
 
-    /** Panel actions (check now / clear daily flag) need the hook present: install regardless of the switch. */
     public void forceInstallHook(String key) {
         ClassLoader cl = targetClassLoader;
         if (cl == null || key == null) {
@@ -387,7 +370,6 @@ public class MainModule extends XposedModule {
         }
     }
 
-    /** Watch remote pref changes when the framework supports it; callbacks return to the main thread. */
     private void watchSettingsChanges() {
         try {
             SharedPreferences prefs = getRemotePreferences(App.PREFS_GROUP);
@@ -443,7 +425,6 @@ public class MainModule extends XposedModule {
                 logd(Log.INFO, TAG, "运行状态检查点已写入 RemotePreferences");
             }
         } catch (Throwable t) {
-            // RemotePreferences is read-only on some frameworks: stay quiet, no stack trace
             logv(TAG, "运行状态检查点写入失败（框架只读）");
         }
     }
@@ -497,7 +478,6 @@ public class MainModule extends XposedModule {
         return def;
     }
 
-    /** Log switches are read over RemotePreferences; cached for 1s and invalidated on panel writes (#37). */
     private static final long LOG_SWITCH_TTL_MS = 1_000L;
 
     private volatile boolean logSwitchEnabled;
@@ -537,12 +517,10 @@ public class MainModule extends XposedModule {
         log(level, tag, msg, tr);
     }
 
-    /** High-frequency diagnostics: file + logcat only when both log switches are on (#37). */
     public void logv(String tag, String msg) {
         logd(Log.DEBUG, tag, msg);
     }
 
-    /** Called after a panel toggle so the next log call sees the new state. */
     public void invalidateLogSwitches() {
         logSwitchAt = 0L;
     }
@@ -572,7 +550,6 @@ public class MainModule extends XposedModule {
     }
 
     public void clearDailyTaskAndRetry(android.app.Activity activity) {
-        // clear-today: install the daily-task hook first so the tap is never a no-op
         forceInstallHook(App.KEY_DAILY_TASK_ENABLED);
         if (dailyTaskHook != null) {
             dailyTaskHook.clearTodayAndRetry(activity);

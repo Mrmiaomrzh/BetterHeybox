@@ -30,14 +30,8 @@ import com.better.heybox.MainModule;
 import com.better.heybox.ModuleStats;
 import com.better.heybox.ViewUtils;
 
-/**
- * 每日任务自动化：自动完成小黑盒每日 3 种分享任务（帖子 / 游戏详情 / 游戏评价），
- * 链接在设置中分别配置。Hook 分享面板与各 SDK 分享入口，自动化进行中直接触发
- * 成功回调跳过真实 SDK；只触发任务自身回调，不影响用户手动分享。
- */
 public final class DailyTaskHook {
 
-    /** 3 种分享步骤 */
     private static final int STEP_PICTURE = 0;
     private static final int STEP_NORMAL = 1;
     private static final int STEP_CHANNEL = 2;
@@ -52,37 +46,22 @@ public final class DailyTaskHook {
     private static final java.util.Map<String, String[]> CHANNEL_VIEW_TEXTS =
             new java.util.HashMap<>();
     static {
-        // 候选顺序对齐设置项语义（「QQ / QQ空间」「微信 / 朋友圈」「微博」），同组内优先第一个
         CHANNEL_VIEW_TEXTS.put("WECHAT", new String[]{"微信", "朋友圈"});
         CHANNEL_VIEW_TEXTS.put("WEIBO", new String[]{"微博"});
         CHANNEL_VIEW_TEXTS.put("QQ", new String[]{"QQ", "QQ空间"});
     }
 
-    /** 配置渠道不在面板里时的兜底顺序（分享已被接管，不会真的发出去） */
     private static final String[] CHANNEL_FALLBACK_ORDER = {"QQ", "WECHAT", "WEIBO"};
 
-    /** 分享渠道列表容器 id（layout_share_v2 / layout_share_other_home_* 都用它） */
     private static final String SHARE_CONTAINER_ID = "rv_share_container";
 
-    /** 渠道按钮最多重试次数：分享面板 RecyclerView 子项可能晚于弹窗 show 才布局完成 */
     private static final int CHANNEL_CLICK_ATTEMPTS = 3;
     private static final long CHANNEL_CLICK_RETRY_MS = 400L;
 
-    /** 单步超时：正常一步约 2s，超时说明链接/页面有问题，跳过继续 */
     private static final long STEP_TIMEOUT_MS = 15000L;
 
-    /**
-     * Min interval for the "no share link configured" warning (#37): the check runs on every
-     * MainActivity.onResume, so the old code spammed one WARN per browse-time resume.
-     */
     private static final long NO_LINK_LOG_INTERVAL_MS = 10 * 60_000L;
 
-    /**
-     * UMeng 各渠道分享入口：{类名, 成功回调默认渠道, 日志名}。
-     * 必须在 handler.share() 入口拦截——QQ/微信 handler 内部先判断 isInstall()，
-     * 未安装就跳 QQ/微信的「下载页面」（log.umsns.com 的 link 落地页），
-     * 只 hook Tencent.shareToQQ 会漏掉这条分支，导致自动化有概率跳到下载页。
-     */
     private static final String[][] UMENG_SHARE_HANDLERS = {
             {"com.umeng.socialize.handler.UMQQSsoHandler", "QQ", "QQ好友"},
             {"com.umeng.socialize.handler.QZoneSsoHandler", "QZONE", "QQ空间"},
@@ -92,29 +71,20 @@ public final class DailyTaskHook {
 
     private final MainModule module;
 
-    /** 宿主进程 classloader（打开页面用） */
     private volatile ClassLoader targetCl;
 
     private volatile boolean autoActive;
     private volatile int currentStep = -1;
-    /** 本步是否已自动触发过（防重复触发） */
     private volatile boolean stepTriggered;
-    /** 已上报完成的步骤：分享 SDK 可能重复回调，避免一步把下一步也顶掉 */
     private volatile int completedStep = -1;
-    /** 每步一个看门狗令牌，过期令牌不再生效 */
     private volatile long stepToken;
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
-    /** 缓存的 applicationContext（微信/微博回调拿不到 Context 时兜底） */
     private volatile Context autoContext;
 
     private volatile long lastNoLinkLogAt;
 
-    /**
-     * TitleBar 当前 action 图标资源名：同一 setter 在不同页面语义不同
-     * （帖子页为分享按钮，游戏详情页为消息入口），点之前先看图标防误触。
-     */
     private final java.util.Map<Object, String> actionIcons =
             java.util.Collections.synchronizedMap(new java.util.WeakHashMap<Object, String>());
 
@@ -193,8 +163,8 @@ public final class DailyTaskHook {
     }
 
     private static final String[] SHARE_PANEL_CLASSES = {
-            "com.max.hbcommon.component.m",   // 1.3.396+
-            "com.max.hbcommon.component.i",   // 1.3.393 ~ 1.3.395
+            "com.max.hbcommon.component.m",
+            "com.max.hbcommon.component.i",
     };
 
     private static final String SHARE_PANEL_SUPER =
@@ -246,21 +216,6 @@ public final class DailyTaskHook {
                         + "（请反馈日志，含 swipebacklayout.a 的子类清单）");
     }
 
-    /**
-     * 汇总分享面板候选，按优先级：
-     * <ol>
-     *   <li>已解析成功的类（缓存）</li>
-     *   <li>{@link #SHARE_PANEL_CLASSES} 里的已知名字 —— **只要求有 show() 即可**，
-     *       不做结构指纹校验</li>
-     *   <li>{@link #SHARE_PANEL_SUPER} 的子类里符合结构指纹的</li>
-     * </ol>
-     *
-     * <p><b>为什么候选名不能过结构指纹</b>：指纹是给「不认识类名」时用的发现手段；
-     * 对已知类名再叠加指纹会成为**额外风险**——父类或构造器任何一处变化都会把
-     * 本可用的候选挡掉。v0.3.1 真机日志就出现过这种自伤：候选名全部被指纹拦住，
-     * 被迫走 DexKit，而 DexKit 又因路径问题不可用，最终整条链路失效。
-     * 现在候选名只做 {@code show()} 存在性校验（由 {@link #hookSharePanel} 负责）。
-     */
     private java.util.List<Class<?>> collectSharePanelCandidates(ClassLoader cl) {
         java.util.LinkedHashSet<Class<?>> out = new java.util.LinkedHashSet<>();
 
@@ -272,20 +227,17 @@ public final class DailyTaskHook {
         for (String name : SHARE_PANEL_CLASSES) {
             try {
                 Class<?> c = Class.forName(name, false, cl);
-                out.add(c);   // show() 的存在性由 hookSharePanel 校验并逐个记录
+                out.add(c);
             } catch (Throwable ignored) {
-                // 候选不存在属正常（跨版本），静默跳过
             }
         }
 
         if (out.isEmpty()) {
-            // 只有已知名字全落空时才动用结构定位（避免每次启动都跑 DexKit）
             for (Class<?> c : findSharePanelByShape(cl)) {
                 out.add(c);
             }
         }
 
-        // show() 是 public 方法，getMethod 会向上找父类；排除父类自身，避免误挂。
         try {
             out.remove(Class.forName(SHARE_PANEL_SUPER, false, cl));
         } catch (Throwable ignored) {
@@ -293,12 +245,6 @@ public final class DailyTaskHook {
         return new java.util.ArrayList<>(out);
     }
 
-    /**
-     * 结构定位：枚举 {@link #SHARE_PANEL_SUPER} 的子类，挑出符合指纹的那个。
-     *
-     * <p>两步都失败时返回空表（由调用方回退到候选名）。父类找不到时**只记一次** WARN，
-     * 避免每次进设置页都刷日志。
-     */
     private java.util.List<Class<?>> findSharePanelByShape(ClassLoader cl) {
         java.util.List<Class<?>> out = new java.util.ArrayList<>();
         Class<?> superClass;
@@ -313,7 +259,6 @@ public final class DailyTaskHook {
             return out;
         }
 
-        // ① 快路径：DexKit 按「声明的父类」直接查子类
         for (String name : dexkitSubclassesOfPanel(cl, superClass)) {
             try {
                 Class<?> c = Class.forName(name, false, cl);
@@ -326,7 +271,6 @@ public final class DailyTaskHook {
             }
         }
 
-        // ② 慢路径：用宿主自己声明的「面板类名清单」逐个试（DexKit 不可用时）
         int probed = 0;
         for (String name : probePanelNamesViaDexkit(cl)) {
             probed++;
@@ -350,7 +294,6 @@ public final class DailyTaskHook {
         return out;
     }
 
-    /** 结构指纹：父类正确 + 声明了 public show()V + 声明了 <init>(Context,int,View) */
     private static boolean matchesSharePanelShape(Class<?> c) {
         if (c == null || c.isInterface() || java.lang.reflect.Modifier.isAbstract(c.getModifiers())) {
             return false;
@@ -389,15 +332,7 @@ public final class DailyTaskHook {
     private final java.util.concurrent.atomic.AtomicBoolean sharedShapeWarned =
             new java.util.concurrent.atomic.AtomicBoolean();
 
-    /**
-     * 推导宿主 APK 路径供 DexKit 使用。
-     *
-     * <p>这里**不依赖 Activity/Context**：DailyTaskHook.install 只拿到 ClassLoader，
-     * 且 Hook 安装发生在应用启动早期，此时可能还没有前台 Activity。
-     * 改为从「启动时必然已加载的宿主类」反查其 dex 来源文件。
-     */
     private String apkPathForDexKit(ClassLoader cl) {
-        // ① 从已加载宿主类的 dex 来源反查
         for (String probe : new String[]{
                 "com.max.xiaoheihe.app.HeyBoxApplication",
                 "com.max.hbcommon.base.BaseActivity",
@@ -425,9 +360,6 @@ public final class DailyTaskHook {
             }
         }
 
-        // ② 用 Application + PackageManager 反查
-        //    实测教训：上一版只做 ①，真机上 CodeSource 拿不到 → DexKit 报
-        //    "IllegalStateException: File not found"，结构定位整条失效。
         try {
             Context app = com.better.heybox.App.resolveAppContext();
             if (app == null) {
@@ -443,7 +375,6 @@ public final class DailyTaskHook {
         } catch (Throwable ignored) {
         }
 
-        // ③ 直接猜标准安装路径（兜底）
         try {
             String guess = "/data/app/" + MainModule.TARGET_PKG + "/base.apk";
             if (new java.io.File(guess).exists()) {
@@ -457,7 +388,6 @@ public final class DailyTaskHook {
         return MainModule.TARGET_PKG;
     }
 
-    /** DexKit：直查「父类 == swipebacklayout.a」的类 */
     private java.util.List<String> dexkitSubclassesOfPanel(ClassLoader cl, Class<?> superClass) {
         java.util.List<String> names = new java.util.ArrayList<>();
         org.luckypray.dexkit.DexKitBridge bridge = null;
@@ -485,14 +415,12 @@ public final class DailyTaskHook {
         return names;
     }
 
-    /** 慢路径：借 DexKit 列出「com.max.hbcommon.component 包内的类名」，逐个做形状校验 */
     private java.util.List<String> probePanelNamesViaDexkit(ClassLoader cl) {
         java.util.List<String> names = new java.util.ArrayList<>();
         org.luckypray.dexkit.DexKitBridge bridge = null;
         try {
             System.loadLibrary("dexkit");
             bridge = org.luckypray.dexkit.DexKitBridge.create(apkPathForDexKit(cl));
-            // 用一条该包内必然存在的类名锚点缩小范围；DexKit 的 searchPackages 再限定包
             org.luckypray.dexkit.query.FindClass q = org.luckypray.dexkit.query.FindClass.create()
                     .searchPackages("com.max.hbcommon.component");
             for (org.luckypray.dexkit.result.ClassData cd : bridge.findClass(q)) {
@@ -531,8 +459,6 @@ public final class DailyTaskHook {
                             ? (ViewGroup) dialog.getWindow().getDecorView() : null;
                     ViewGroup container = findShareContainer(root, dialog.getContext());
                     if (container == null) {
-                        // 不是分享面板：绝不在别的弹窗里按文本点「微信 / QQ」，
-                        // 否则会点到登录 / 分享到电脑 / H5 引导等按钮，把页面带跑
                         boolean idResolved = shareContainerId(dialog.getContext()) != 0;
                         module.logd(idResolved ? Log.INFO : Log.WARN, module.TAG, idResolved
                                 ? "每日任务：该弹窗不是分享面板（无 " + SHARE_CONTAINER_ID + "），不点击"
@@ -574,10 +500,6 @@ public final class DailyTaskHook {
         }
     }
 
-    /**
-     * 只在分享面板的渠道列表容器里找按钮：配置渠道优先，缺失时按
-     * {@link #CHANNEL_FALLBACK_ORDER} 兜底（分享已被接管，不会真的发出去）。
-     */
     private ClickTarget findChannelTarget(ViewGroup container, String channel) {
         for (String text : channelCandidates(channel)) {
             View view = findChannelView(container, text);
@@ -588,7 +510,6 @@ public final class DailyTaskHook {
         return new ClickTarget(null, null);
     }
 
-    /** 候选文本：配置渠道的候选在前，其余渠道补齐 */
     private static java.util.List<String> channelCandidates(String channel) {
         java.util.List<String> out = new java.util.ArrayList<>();
         appendCandidates(out, channel);
@@ -618,7 +539,6 @@ public final class DailyTaskHook {
         return texts[0];
     }
 
-    /** 分享面板的渠道列表容器；找不到说明这个弹窗不是分享面板 */
     private static ViewGroup findShareContainer(View root, Context context) {
         if (root == null) {
             return null;
@@ -635,7 +555,6 @@ public final class DailyTaskHook {
         }
     }
 
-    /** 解析分享渠道容器 id（0 = 宿主里没有这个资源，属异常情况） */
     private static int shareContainerId(Context context) {
         if (context == null) {
             return 0;
@@ -648,13 +567,11 @@ public final class DailyTaskHook {
         }
     }
 
-    /** 当前配置的分享渠道（默认 QQ） */
     private String currentChannel() {
         String v = module.getString(App.KEY_SHARE_CHANNEL, "");
         return v == null || v.isEmpty() ? "QQ" : v;
     }
 
-    /** 递归查文本为目标渠道名的可点击 View */
     private static View findChannelView(ViewGroup root, String targetText) {
         if (root == null || targetText == null) {
             return null;
@@ -707,7 +624,6 @@ public final class DailyTaskHook {
         }
     }
 
-    /** QQ 空间走 Tencent.shareToQzone（不是 shareToQQ），单独兜一层 */
     private void hookTencentShareToQzone(ClassLoader cl) {
         try {
             Class<?> tencent = Class.forName("com.tencent.tauth.Tencent", false, cl);
@@ -729,11 +645,6 @@ public final class DailyTaskHook {
         }
     }
 
-    /**
-     * 全渠道分享拦截：自动化进行中，不论面板上点到哪个渠道，都在 UMeng handler 入口
-     * 直接触发成功回调并跳过真实分享。这样既不会把内容真的发到 QQ / 微信，
-     * 也不会落进 handler 的「未安装 → 跳 QQ/微信下载页」分支。
-     */
     private void hookUmengShareHandlers(ClassLoader cl) {
         Class<?> shareContent;
         Class<?> listener;
@@ -784,10 +695,6 @@ public final class DailyTaskHook {
         }
     }
 
-    /**
-     * 最外层兜底：ShareAction.share() 是 UMeng 所有渠道的统一出口，
-     * 在这里就按成功处理，可覆盖没有单独 hook 的渠道（更多 / 抖音 / 后续新增）。
-     */
     private void hookShareActionEntry(ClassLoader cl) {
         try {
             Class<?> shareAction = Class.forName("com.umeng.socialize.ShareAction", false, cl);
@@ -806,7 +713,6 @@ public final class DailyTaskHook {
                 Object listener = readFieldByType(self, listenerType);
                 Object media = readFieldByType(self, mediaType);
                 if (listener == null || media == null) {
-                    // 取不到回调 / 渠道就交给 handler 层拦截，别把这一步卡死
                     return chain.proceed();
                 }
                 try {
@@ -823,10 +729,6 @@ public final class DailyTaskHook {
         }
     }
 
-    /**
-     * 自动化期间的安全网：任何"隐式 http(s) 跳转"（浏览器、H5 调起的下载/引导页）一律拦下并记日志。
-     * 分享链路之外还有深链、H5 等入口，任何一个跳出去都可能落到小黑盒/QQ/微信的下载提示页。
-     */
     private void hookExternalJumps() {
         int installed = 0;
         try {
@@ -835,7 +737,6 @@ public final class DailyTaskHook {
                     continue;
                 }
                 Class<?>[] params = method.getParameterTypes();
-                // (who, contextThread, token, target, intent, requestCode, options[, userId])
                 if (params.length < 7 || params[4] != Intent.class) {
                     continue;
                 }
@@ -866,10 +767,6 @@ public final class DailyTaskHook {
         }
     }
 
-    /**
-     * 拦下一次跳转；如果这次跳转是"应用商店 / 下载页"，说明当前这步的链接已经不可用，
-     * 直接放弃该步继续下一步，别把整个每日任务卡住。
-     */
     private void onAuxNavigationBlocked(String kind, String url) {
         boolean dead = isAppStoreJump(url);
         module.logd(Log.WARN, module.TAG, "每日任务：拦下" + kind + " " + url
@@ -890,7 +787,6 @@ public final class DailyTaskHook {
         });
     }
 
-    /** 隐式 http(s) ACTION_VIEW：显式组件（模块自己开的页面）不受影响 */
     private static boolean isExternalWebJump(Intent intent) {
         if (intent == null || intent.getComponent() != null) {
             return false;
@@ -906,7 +802,6 @@ public final class DailyTaskHook {
         return "http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme);
     }
 
-    /** 被拦下的 execStartActivity 需要返回启动结果，按返回类型给"已处理"值 */
     private static Object blockedReturn(Method method) {
         Class<?> type = method.getReturnType();
         if (type == int.class) {
@@ -918,7 +813,6 @@ public final class DailyTaskHook {
         return null;
     }
 
-    /** 调用方提示：跳过 android/系统帧，只留最有信息量的一帧 */
     private static String callerHint() {
         try {
             for (StackTraceElement frame : Thread.currentThread().getStackTrace()) {
@@ -934,11 +828,6 @@ public final class DailyTaskHook {
         return "unknown";
     }
 
-    /**
-     * 自动化期间的网页看门狗：应用商店 / 下载落地页 / 唤起外部 App 的 scheme 一律不放行。
-     * 小黑盒 H5（分享页、游戏页）在"打开App"失败时会兜底跳应用宝下载页，
-     * 一旦跳出去当前这步就废了，这里直接在 WebView 层拦下。
-     */
     private void hookWebViewNavigations() {
         int loads = 0;
         try {
@@ -985,7 +874,6 @@ public final class DailyTaskHook {
     private final java.util.Set<Class<?>> hookedWebClients =
             java.util.Collections.synchronizedSet(new java.util.HashSet<>());
 
-    /** 代理宿主 WebViewClient 的 shouldOverrideUrlLoading，拦住 H5 自己发起的跳转 */
     private void hookWebClientClass(Class<?> clientClass) {
         if (clientClass == null || clientClass == WebViewClient.class) {
             return;
@@ -1054,25 +942,21 @@ public final class DailyTaskHook {
         return null;
     }
 
-    /** 应用商店 / 下载落地页特征（小黑盒 H5 打不开 App 时会兜底跳这里） */
     private static final String[] APP_STORE_HOST_MARKERS = {
             "a.app.qq.com", "app.qq.com", "sj.qq.com", "android.myapp.com",
             "myapp.com", "log.umsns.com",
     };
 
-    /** 唤起别的 App / 商店的 scheme：自动化期间不该发生 */
     private static final String[] BLOCKED_SCHEMES = {
             "weixin:", "mqqapi:", "mqqwpa:", "mqq:", "qqmusic:", "qzone:",
             "alipays:", "alipay:", "market:", "tmast:", "snssdk1128:", "snssdk2329:",
             "sinaweibo:", "sinawb:", "bilibili:", "taobao:", "pinduoduo:",
     };
 
-    /** 小黑盒自己的 scheme：H5 中转页正是靠它跳进 App，必须放行，否则分享步骤会卡住 */
     private static final String[] HEYBOX_SCHEMES = {
             "heybox:", "xiaoheihe:", "hbox:", "maxjia:",
     };
 
-    /** 是不是"跳到应用商店 / 下载页"——命中说明这一步的链接已经废了 */
     private static boolean isAppStoreJump(String url) {
         if (url == null || url.isEmpty()) {
             return false;
@@ -1089,10 +973,6 @@ public final class DailyTaskHook {
         return lower.contains("xiaoheihe") && lower.contains("download");
     }
 
-    /**
-     * 自动化期间要拦的导航：应用商店 / 下载落地页，或唤起外部 App 的 scheme。
-     * 小黑盒自身的 scheme 与未知 scheme 一律放行（H5→App 的正常中转不能被误杀）。
-     */
     private static boolean isBlockedAuxNavigation(String url) {
         if (url == null || url.isEmpty()) {
             return false;
@@ -1102,7 +982,6 @@ public final class DailyTaskHook {
             return isAppStoreJump(lower);
         }
         if (lower.startsWith("intent:")) {
-            // intent:// 唤起小黑盒自己放行，唤起别的 App 拦掉
             return !(lower.contains("com.max.xiaoheihe")
                     || lower.contains("scheme=heybox") || lower.contains("scheme=xiaoheihe"));
         }
@@ -1123,7 +1002,6 @@ public final class DailyTaskHook {
         return false;
     }
 
-    /** 触发 UMeng 成功回调：渠道优先取 handler 自身平台配置，取不到用默认值 */
     private void fakeUmengShareSuccess(Object handler, Object listener, Class<?> shareMedia,
                                        String defaultMedia, String label) throws Throwable {
         if (listener == null) {
@@ -1138,7 +1016,6 @@ public final class DailyTaskHook {
         invokeShareSuccess(listener, media, label);
     }
 
-    /** 调 listener.onResult(media)，并按实际渠道给出提示 */
     private void invokeShareSuccess(Object listener, Object media, String label) throws Throwable {
         Method onResult = findOnResult(listener.getClass(), media.getClass());
         if (onResult == null) {
@@ -1156,7 +1033,6 @@ public final class DailyTaskHook {
         return value instanceof Enum ? ((Enum<?>) value).name() : String.valueOf(value);
     }
 
-    /** 按字段类型取值：宿主混淆改字段名也不影响 */
     private static Object readFieldByType(Object target, Class<?> type) {
         if (target == null || type == null) {
             return null;
@@ -1180,7 +1056,6 @@ public final class DailyTaskHook {
         return null;
     }
 
-    /** handler 的平台渠道（UMWXHandler.mTarget 可区分微信 / 朋友圈），取不到时回落到默认枚举 */
     private static Object resolveShareMedia(Object handler, Class<?> shareMedia, String defaultMedia) {
         if (handler != null && shareMedia != null) {
             for (Class<?> type = handler.getClass(); type != null && type != Object.class;
@@ -1225,7 +1100,6 @@ public final class DailyTaskHook {
         return null;
     }
 
-    /** 实际触发的渠道与设置不一致时提示（自动化本来也不会真的发出分享） */
     private void warnChannelMismatch(String mediaName, String label) {
         String configured = currentChannel();
         String actual = channelKeyOf(mediaName);
@@ -1235,7 +1109,6 @@ public final class DailyTaskHook {
         }
     }
 
-    /** SHARE_MEDIA 名 → 设置里的渠道键 */
     private static String channelKeyOf(String mediaName) {
         if (mediaName == null) {
             return null;
@@ -1252,7 +1125,6 @@ public final class DailyTaskHook {
         return null;
     }
 
-    /** 返回语义按被 hook 方法：void→null、boolean→TRUE；自动化中一律不执行真实分享 */
     private void hookFakeShareSuccess(Method share, String channel, String logLabel,
                                       int listenerArg, FakeShareInvoker fake) {
         module.hook(share).intercept(chain -> {
@@ -1568,7 +1440,6 @@ public final class DailyTaskHook {
             }
         }
     }
-    /** 该步超时看门狗：链接不可用 / 页面没就绪时跳过，别把整个任务卡住 */
     private void scheduleStepTimeout(final int step) {
         final long token = ++stepToken;
         mainHandler.postDelayed(() -> {
@@ -1640,7 +1511,6 @@ public final class DailyTaskHook {
         reset();
         writeDoneDate(today());
         module.logd(Log.INFO, module.TAG, "每日任务：3 种分享类型全部完成，已记录今日状态");
-        // 微信/微博回调 context 为 null，用缓存兜底
         Context ctx = context != null ? context : autoContext;
         if (ctx == null) {
             return;
@@ -1651,12 +1521,10 @@ public final class DailyTaskHook {
         } catch (Throwable ignored) {
         }
         if (module.isEnabled(App.KEY_DAILY_TASK_BACK_HOME, true)) {
-            // 延迟等分享面板收起，避免页面切换压在弹窗动画上
             mainHandler.postDelayed(() -> backToHome(ctx), 800L);
         }
     }
 
-    /** 退回 MainActivity：CLEAR_TOP 清掉自动化途中打开的帖子页，首页停留在原 tab */
     private void backToHome(Context context) {
         try {
             ClassLoader cl = targetCl != null ? targetCl : context.getClassLoader();

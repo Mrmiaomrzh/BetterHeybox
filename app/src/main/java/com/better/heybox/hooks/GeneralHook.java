@@ -14,9 +14,6 @@ import com.better.heybox.ForegroundTracker;
 import com.better.heybox.MainModule;
 import com.better.heybox.LogRecorder;
 
-/**
- * 通用功能：Heybox 版本前置检测提示 + 屏蔽更新入口。
- */
 public final class GeneralHook {
 
     private final MainModule module;
@@ -31,10 +28,6 @@ public final class GeneralHook {
         hookFakeNotification(cl);
     }
 
-    /**
- * 伪装通知权限：Hook 框架 NotificationManager.areNotificationsEnabled() 恒返回 true（开关开启时）。
- * 小黑盒经 NotificationManagerCompat（混淆 m2）判断，compat 内部最终调用框架方法，故 hook 框架方法全局生效
- */
     private void hookFakeNotification(ClassLoader cl) {
         try {
             Class<?> nm = Class.forName("android.app.NotificationManager", false, cl);
@@ -63,7 +56,6 @@ public final class GeneralHook {
                 Object self = chain.getThisObject();
                 if (self instanceof Activity) {
                     Activity activity = (Activity) self;
-                    // Debug 构建：每次应用打开到前台记录检查点（划到后台不记录）
                     ForegroundTracker.onActivityResumed(activity);
                     View decor = activity.getWindow().getDecorView();
                     decor.postDelayed(() -> showVersionNotice(activity, cl), 600L);

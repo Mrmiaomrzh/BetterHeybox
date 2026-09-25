@@ -5,23 +5,17 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewParent;
 
-/**
- * 窗口内提示条（vg_update_tips：更新/推荐横幅）在玻璃栏正上方时向上抬让位。
- * 发现靠布局 pass + 慢扫描兜底，抬升靠 preDraw， tip 出现的首帧就已让位
- */
 final class InWindowTipWatcher {
 
     private static final String TIP_ID_NAME = "vg_update_tips";
     private static final long SCAN_INTERVAL_MS = 2000L;
     private static final java.lang.ref.WeakReference<View> EMPTY_DECOR_REF =
             new java.lang.ref.WeakReference<>(null);
-    /** 扫描循环当前绑定的 decor：Activity 重建后要起自己的循环，而不是继承死掉的 */
     private static volatile java.lang.ref.WeakReference<View> sWatchedDecor =
             EMPTY_DECOR_REF;
     private static volatile int sTipId;
     private static final java.lang.ref.WeakReference<View> EMPTY_TIP_REF =
             new java.lang.ref.WeakReference<>(null);
-    /** 最近交给 watch 的 tip：有存活 tip 时逐布局快速路径只花一次引用比较 */
     private static volatile java.lang.ref.WeakReference<View> sTipRef =
             EMPTY_TIP_REF;
     private static final java.util.Map<View, Boolean> sWatched =
@@ -36,8 +30,6 @@ final class InWindowTipWatcher {
         }
         try {
             final View decor = activity.getWindow().getDecorView();
-            // 绑定 decor 而非进程级 flag：循环在 activity 销毁后自停，
-            // 永不清除的 flag 会让后续 activity 一直无人盯
             if (decor == null || sWatchedDecor.get() == decor) {
                 return;
             }
@@ -74,8 +66,6 @@ final class InWindowTipWatcher {
                             }
                         }
                     });
-            // 慢扫描兜底：上面的快速路径一旦盯住一个 tip 就不再走树，
-            // 之后新增的第二个 tip 在这里被捡起
             decor.postDelayed(new Runnable() {
                 @Override
                 public void run() {

@@ -124,10 +124,6 @@ final class WindowImmersiveController {
         }
     }
 
-    /**
- * 仅清零导航栏 inset，保留状态栏 inset 供标题栏使用。
- * 不能用 setDecorFitsSystemWindows(false)：会连顶部一起丢，导致搜索/消息页标题栏塌陷
- */
     private static final View.OnApplyWindowInsetsListener DROP_NAV_INSET =
             new View.OnApplyWindowInsetsListener() {
                 @Override

@@ -56,7 +56,6 @@ public final class LiquidGlassInstaller {
         }
     }
 
-    /** 重新断言窗口级小白条沉浸（宿主 onResume 可能重设导航栏颜色，需覆盖回去） */
     static void applyImmersive(Activity activity) {
         try {
             GlassConfig.load(activity);
@@ -65,7 +64,6 @@ public final class LiquidGlassInstaller {
         }
     }
 
-    /** 底栏只存在于 MainActivity；设置入口运行在宿主设置页，操作必须落到这个引用上 */
     private static volatile java.lang.ref.WeakReference<Activity> sMainRef;
 
     private static Activity mainActivity() {
@@ -74,10 +72,6 @@ public final class LiquidGlassInstaller {
         return main != null && !main.isFinishing() && !main.isDestroyed() ? main : null;
     }
 
-    /**
-     * 切换液态玻璃开关后立即生效：开=安装玻璃，关=卸载玻璃恢复经典底栏。
-     * 沉浸式小白条独立于玻璃开关，两条路径都会按配置应用/还原
-     */
     public static void applyGlassEnabled(Activity activity) {
         try {
             if (GlassProvider.prefersHbmod(activity)) {
@@ -132,7 +126,6 @@ public final class LiquidGlassInstaller {
                     return;
                 }
                 if (root.findViewWithTag(LiquidGlassHostLayout.GLASS_TAG) != null) {
-                    // 已安装：onResume / 底栏回调重入，无需重复安装
                     return;
                 }
                 install(activity, root);
@@ -142,7 +135,6 @@ public final class LiquidGlassInstaller {
         });
     }
 
-    /** 安装前宿主底栏原始状态，运行时卸载玻璃按此还原 */
     private static final class BarSnapshot {
         int barIndex = -1;
         int tipsIndex = -1;
@@ -157,10 +149,8 @@ public final class LiquidGlassInstaller {
     }
 
     private static volatile BarSnapshot sSnapshot;
-    /** 递增使旧的 500ms 轮询自行终止，避免卸载后继续驱动玻璃逻辑 */
     private static volatile int sSyncGen;
 
-    /** 运行时卸载玻璃底栏并把宿主原始底栏装回原位（关闭液态玻璃免重启） */
     private static void uninstallGlass(Activity activity) {
         try {
             ViewGroup root = findViewByName(activity, ID_ROOT);
@@ -170,7 +160,6 @@ public final class LiquidGlassInstaller {
             BarSnapshot snap = sSnapshot;
             sSyncGen++;
             cancelGlassAnimators();
-            // 摘视图要在 host 还挂在窗口树上时做，findViewById 才找得到
             ViewGroup bar = findViewByName(activity, ID_BAR);
             ViewGroup tips = findViewByName(activity, ID_TIPS);
             View midTab = findViewByName(activity, ID_MID_TAB);
@@ -188,15 +177,12 @@ public final class LiquidGlassInstaller {
                 snap.legacyShadow.setVisibility(View.VISIBLE);
             }
             View host = root.findViewWithTag(LiquidGlassHostLayout.GLASS_TAG);
-            // 必须先把三件套从 host / center 包装里摘除，否则 addView 会因
-            // "child already has a parent" 抛异常，底栏就永远装不回去了
             removeFromParent(bar);
             removeFromParent(tips);
             removeFromParent(midTab);
             if (host != null) {
                 root.removeView(host);
             }
-            // 按原始索引升序装回：宿主其余子视图都在原相对位置，直接用原索引即可还原 z 序
             if (bar != null && snap != null) {
                 bar.setBackground(snap.barBackground);
                 bar.setPadding(snap.barPadLeft, snap.barPadTop,
@@ -269,16 +255,11 @@ public final class LiquidGlassInstaller {
         resetWidthAnimState();
     }
 
-    /** 经典底栏沉浸基线（rg_main 原高/原内边距、加号原下边距） */
     private static int sClassicBarHeight = -1;
     private static int sClassicBarPadBottom = -1;
     private static int sClassicMidMargin = -1;
     private static volatile boolean sClassicImmersive;
 
-    /**
-     * 无玻璃时的沉浸式小白条：窗口级透明由 apply() 负责，这里把 rg_main 加高
-     * navPad 并同步内边距，让底栏背景延伸进手势区而内容仍避开小白条
-     */
     private static void applyClassicImmersive(final Activity activity) {
         try {
             ViewGroup root = findViewByName(activity, ID_ROOT);
@@ -358,10 +339,6 @@ public final class LiquidGlassInstaller {
         sClassicImmersive = false;
     }
 
-    /**
-     * 与玻璃路径不同：不扣 decor 底部空隙——apply() 已声明 LAYOUT_HIDE_NAVIGATION，
-     * decor 即将延伸到屏幕底，直接按导航栏 inset 取值
-     */
     private static int computeClassicNavPad(ViewGroup root) {
         try {
             WindowInsets wi = root.getRootWindowInsets();
@@ -385,7 +362,6 @@ public final class LiquidGlassInstaller {
         if (root.findViewWithTag(LiquidGlassHostLayout.GLASS_TAG) != null) {
             return;
         }
-        // 卸载会递增代数：回调/重试与卸载竞态时以代数判废
         final int gen = sSyncGen;
         ViewGroup bar = findViewByName(activity, ID_BAR);
         if (bar == null || bar.getParent() != root) {
@@ -400,7 +376,6 @@ public final class LiquidGlassInstaller {
         ViewGroup content = findViewByName(activity, ID_CONTENT);
         View videoFull = findViewByName(activity, ID_VIDEO_FULL);
 
-        // 玻璃即将接管手势区避让，先撤销经典避让，避免快照与基准值被污染
         restoreClassicImmersive(bar, midTab);
 
         BarSnapshot snap = new BarSnapshot();
@@ -521,7 +496,6 @@ public final class LiquidGlassInstaller {
                         root.getViewTreeObserver()
                                 .removeOnGlobalLayoutListener(this);
                         if (gen != sSyncGen) {
-                            // 玻璃在首次布局前已被卸载，本轮回调作废
                             return;
                         }
                         host.attach();
@@ -544,27 +518,17 @@ public final class LiquidGlassInstaller {
     private static final float FIT_TAB_MAX_WIDTH_DP = 96f;
     private static final float SELECTED_TAB_WEIGHT = 1.4f;
     private static final float OTHER_TAB_WEIGHT = 0.9f;
-    /** Adaptive width: minimum tab cell width in dp (keeps icons/labels off the edges). */
     private static final float MIN_TAB_WIDTH_DP = 52f;
-    /** Adaptive width: extra horizontal padding added around measured tab content, in dp. */
     private static final float TAB_CONTENT_PAD_DP = 18f;
-    /** Adaptive width: fallback tab cell width in dp when content cannot be measured. */
     private static final float FALLBACK_TAB_WIDTH_DP = 54f;
-    /** Adaptive width: minimum center gap dp, must fit the ~56dp publish button. */
     private static final float MIN_PLUS_GAP_DP = 64f;
-    /** Upper bound of the configurable glass bar side inset, in dp. */
     private static final int MAX_SIDE_MARGIN_DP = 40;
     private static final long FIT_ANIM_MS = 380L;
     private static final float FIT_ANIM_TENSION = 1.1f;
     private static volatile boolean sTabBarActive;
-    /** 安装时的 host 基准 padding 与导航栏 inset（applyBarGeometry 以后者决定冲销量） */
     private static int sInstallPadBottom;
     private static int sNavPad;
 
-    /**
-     * 手势区避让由沉浸开关决定：开=冲销 navPad 让玻璃条延伸到手势区，关=保留避让。
-     * 必须同时写 sBasePadBottom，applyBarGeometry 会以它为基准重设 padding
-     */
     private static void applyNavPadState(ViewGroup host) {
         if (host == null || sInstallPadBottom <= 0) {
             return;
@@ -595,15 +559,10 @@ public final class LiquidGlassInstaller {
         }
     }
 
-    /**
-     * 供设置入口在切换沉浸等玻璃参数后调用：先从 prefs 重载配置再刷新，
-     * 避免宿主设置页只写 pref、GlassConfig 静态字段滞后的问题
-     */
     public static void refreshGlassWith(Activity activity) {
         GlassConfig.load(activity);
         refreshGlass();
         if (activeGlassHost() == null) {
-            // 玻璃未安装时沉浸仍需作用于经典底栏（必须落到 MainActivity 的窗口）
             Activity main = mainActivity();
             if (main != null) {
                 applyClassicImmersive(main);
@@ -956,7 +915,6 @@ public final class LiquidGlassInstaller {
             @Override
             public void run() {
                 if (gen != sSyncGen) {
-                    // 玻璃已卸载/重装，本轮询作废
                     return;
                 }
                 try {
@@ -1263,8 +1221,6 @@ public final class LiquidGlassInstaller {
             sFitActive = fit;
             float[] before = glide ? captureTabCenters(row) : null;
             int selected = Math.max(0, Math.min(selectedIndex, tabs - 1));
-            // Adaptive mode weights are plain dp values; adaptiveBarWidth derives the bar
-            // width from the very same metrics, so bar and content always stay in sync.
             float den = sDensity > 0 ? sDensity
                     : barV.getResources().getDisplayMetrics().density;
             float[] metrics = !fit && GlassConfig.barWidthMode == 0
@@ -1881,15 +1837,12 @@ public final class LiquidGlassInstaller {
             android.widget.LinearLayout.LayoutParams lp =
                     new android.widget.LinearLayout.LayoutParams(0,
                             ViewGroup.LayoutParams.MATCH_PARENT, CENTER_GAP_WEIGHT);
-            // (count+1)/2：奇数个 tab 时槽位也落在正中（3 tab → [t,t,槽,t]），
-            // 且与 glideCenterTo/placeCenterNow 的 n/2 查找一致
             ll.addView(spacer, (count + 1) / 2, lp);
         } catch (Throwable t) {
             LiquidGlassLog.logErr("center gap failed", t);
         }
     }
 
-    /** 发布按钮盖到中央槽位正上方（宽度=槽宽，整槽可点），行未测完时 post 重试 */
     private static void placeCenterNow(ViewGroup host, ViewGroup tabBar,
                                        View center, int attempt) {
         if (center == null || sPlusHidden || sCircleMode || attempt > 10) {
@@ -1977,7 +1930,6 @@ public final class LiquidGlassInstaller {
             if (parentWidth <= 0) {
                 return;
             }
-            // Side insets apply to every mode: even "fill" only fills the usable width (#34).
             float den = sDensity > 0 ? sDensity
                     : host.getResources().getDisplayMetrics().density;
             int side = sideMarginPx(den);
@@ -2009,12 +1961,6 @@ public final class LiquidGlassInstaller {
         }
     }
 
-    /**
-     * Adaptive width: size the bar to the measured tab content and center it (#34).
-     * The old code treated the 96dp/tab cap as the real width, so 5 tabs asked for 584dp
-     * and always got clamped to the parent width - adaptive behaved exactly like "fill".
-     * Now it is content width + center gap, bounded by the side insets.
-     */
     private static int adaptiveBarWidth(View host, int parentWidth) {
         float den = sDensity > 0 ? sDensity
                 : host.getResources().getDisplayMetrics().density;
@@ -2034,23 +1980,17 @@ public final class LiquidGlassInstaller {
             return max;
         }
         float[] metrics = adaptiveMetricsDp(den);
-        // Weights are dp, so bar width = visible tabs + center gap + bar padding.
         float w = (tabs * metrics[0] + metrics[1]) * den + Math.round(8f * den);
         return Math.max(Math.round(MIN_TAB_WIDTH_DP * den),
                 Math.min(Math.round(w), max));
     }
 
-    /** Glass bar side inset in px, clamped to 0-40dp. */
     private static int sideMarginPx(float den) {
         int dp = Math.max(0, Math.min(
                 GlassConfig.barSideMarginDp, MAX_SIDE_MARGIN_DP));
         return Math.round(dp * den);
     }
 
-    /**
-     * Adaptive width metrics in dp: {tab cell width, center gap width}.
-     * Shared with the weights written by {@link #applyTabWidths(int)}.
-     */
     private static float[] adaptiveMetricsDp(float den) {
         float scale = Math.max(50, Math.min(GlassConfig.tabWidthPct, 150)) / 100f;
         float content = measureTabContentDp(den);
@@ -2059,14 +1999,12 @@ public final class LiquidGlassInstaller {
         tab = Math.max(MIN_TAB_WIDTH_DP * scale,
                 Math.min(tab, FIT_TAB_MAX_WIDTH_DP * scale));
         if (content > 0f) {
-            // Never shrink a cell below its own content: smaller only clips icon/label.
             tab = Math.max(tab, content);
         }
         float gap = sCircleMode || sPlusHidden ? 0f : plusGapDp(den, tab);
         return new float[]{tab, gap};
     }
 
-    /** Center gap width in dp: measured publish button + padding, 64dp fallback. */
     private static float plusGapDp(float den, float tabDp) {
         float gap = MIN_PLUS_GAP_DP;
         try {
@@ -2080,7 +2018,6 @@ public final class LiquidGlassInstaller {
         return Math.max(gap, tabDp);
     }
 
-    /** Measured content width of the widest tab in dp (text via Paint, icon intrinsic). */
     private static float measureTabContentDp(float den) {
         try {
             View barV = sTabBarRef.get();
@@ -2141,7 +2078,6 @@ public final class LiquidGlassInstaller {
         if (best <= 0) {
             return 0;
         }
-        // Hard content only (icon/label + tab padding); breathing room is added by callers.
         return best + tab.getPaddingLeft() + tab.getPaddingRight();
     }
 
@@ -2327,7 +2263,6 @@ public final class LiquidGlassInstaller {
         }
     }
 
-    /** 卸载玻璃时还原宿主原始的底栏选中监听 */
     private static void unwrapCheckedListener(ViewGroup barView) {
         if (!(barView instanceof android.widget.RadioGroup)
                 || sWrappedListener == null) {
@@ -2347,7 +2282,6 @@ public final class LiquidGlassInstaller {
         sOriginalCheckedListener = null;
     }
 
-    /** 卸载玻璃时移除加号的 PreDraw 可见性强制，避免与经典路径拉锯 */
     private static void removeMidPreDraw(View midTab) {
         if (midTab == null || sMidPreDraw == null) {
             return;
@@ -2575,7 +2509,6 @@ public final class LiquidGlassInstaller {
         });
     }
 
-    /** 隐藏宿主自带的底栏上方渐变阴影，返回被隐藏的视图供卸载时还原 */
     private static View hideLegacyShadow(ViewGroup root, int barId) {
         for (int i = 0; i < root.getChildCount(); i++) {
             View child = root.getChildAt(i);

@@ -8,10 +8,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
-/**
- * 运行时检查点（Debug 构建）：在生命周期/Hook 安装关键节点打点，记录相对耗时、pid、线程名，输出到 logcat 与文件日志并保留最近快照供设置页查看/导出。
- * 小黑盒进程检查点在安装后写入 RemotePreferences 供设置页跨进程读取；Release 构建全部空操作
- */
 public final class Checkpoint {
 
     private static final String TAG = "BHX-CKPT";

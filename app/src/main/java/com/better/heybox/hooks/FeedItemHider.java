@@ -5,10 +5,8 @@ import android.view.ViewGroup;
 
 import java.util.WeakHashMap;
 
-/** 信息流条目隐藏与复用恢复 */
 public final class FeedItemHider {
 
-    /** 被隐藏 itemView 的原始高度，WeakHashMap 防泄漏 */
     private static final WeakHashMap<View, Integer> HIDDEN_HEIGHTS = new WeakHashMap<>();
 
     private FeedItemHider() {

@@ -6,15 +6,6 @@ import com.better.heybox.MainModule;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * 动态推送配置。全部存 betterheybox.xml，与模块其它开关一致。
- *
- * <p>对应设置面板「动态推送」分组；解析规则：
- * <ul>
- *   <li>关注列表：一行一个，支持纯 userid 或用户主页链接</li>
- *   <li>监控关键词：一行一个，regex: 前缀为正则（与发帖过滤同一套写法）</li>
- * </ul>
- */
 public final class WatchConfig {
 
     public static final int DEFAULT_WINDOW_DAYS = 3;
@@ -24,7 +15,6 @@ public final class WatchConfig {
     public static final int MAX_KEYWORDS = 20;
     public static final int MAX_TOPICS = 20;
     public static final int MAX_LIMIT_PER_USER = 20;
-    /** 已提醒 link_id 的记忆上限（有界，避免配置无限膨胀） */
     public static final int SEEN_LIMIT = 400;
 
     public final boolean enabled;
@@ -32,16 +22,12 @@ public final class WatchConfig {
     public final boolean notify;
     public final boolean pushEnabled;
     public final int windowDays;
-    /** 获取时间窗（分钟），优先于 windowDays */
     public final int windowMin;
     public final int intervalMin;
     public final List<String> users;
     public final List<String> keywords;
-    /** 关注的话题，每项形如 "topicId|话题名"（id 可能为空） */
     public final List<String> topics;
-    /** 关键词只匹配标题 */
     public final boolean titleOnly;
-    /** 关键词/话题主动拉流 */
     public final boolean streamFetch;
     public final String dingtalk;
     public final String wxpusher;
@@ -97,7 +83,6 @@ public final class WatchConfig {
 
     private static WatchConfig build(MainModule module) {
         int win = parseInt(module.getString(App.KEY_WATCH_WINDOW_DAYS, String.valueOf(DEFAULT_WINDOW_DAYS)), DEFAULT_WINDOW_DAYS);
-        // 新的「获取时间窗」按分钟存，未设置时回落到旧的「天」
         int winMin = parseInt(module.getString(App.KEY_WATCH_WINDOW_MIN, ""), 0);
         if (winMin <= 0) {
             winMin = clamp(win, 1, 30) * 24 * 60;
@@ -122,7 +107,6 @@ public final class WatchConfig {
                 module.getString(App.KEY_WATCH_PUSH_CUSTOM, "").trim());
     }
 
-    /** 没有任何监控目标时不必轮询 */
     public boolean hasTargets() {
         return !users.isEmpty() || !keywords.isEmpty() || !topics.isEmpty();
     }
@@ -136,7 +120,6 @@ public final class WatchConfig {
         return windowMin * 60L;
     }
 
-    /** 时间窗的可读描述，如 "3 天" / "6 小时" */
     public String windowText() {
         if (windowMin % (24 * 60) == 0) {
             return (windowMin / (24 * 60)) + " 天";
@@ -194,11 +177,6 @@ public final class WatchConfig {
         return out;
     }
 
-    /**
-     * 从用户输入解析 userid：支持 {@code 12345678} 与
-     * {@code https://www.xiaoheihe.cn/app/user/12345678} / {@code .../profile/user/12345678}
-     * 这类主页链接，取最长的一段连续数字（≥5 位）。
-     */
     public static String parseUserId(String raw) {
         if (raw == null) {
             return null;
@@ -207,7 +185,6 @@ public final class WatchConfig {
         if (s.isEmpty()) {
             return null;
         }
-        // 支持 "userid  # 昵称" / "userid | 昵称" 这类带注释的写法：只取第一段
         String head = s;
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);

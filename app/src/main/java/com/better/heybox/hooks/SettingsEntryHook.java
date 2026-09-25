@@ -3898,9 +3898,7 @@ public final class SettingsEntryHook {
         LogRecorder.setContext(activity);
         HeyboxPrefs.init(activity);
         boolean localOk = HeyboxPrefs.setBoolean(key, value);
-        // drop the log-switch cache so a verbose-log toggle applies on the next call (#37)
         module.invalidateLogSwitches();
-        // install hooks skipped at startup: enabling a switch takes effect without a restart (#37)
         module.onSettingChanged(key);
         LogRecorder.recordEvent("内嵌面板开关已写入小黑盒本地配置: key=" + key
                 + ", value=" + value + ", ok=" + localOk);

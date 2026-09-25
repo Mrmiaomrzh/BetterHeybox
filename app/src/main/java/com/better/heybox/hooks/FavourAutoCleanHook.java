@@ -20,17 +20,8 @@ import com.better.heybox.App;
 import com.better.heybox.Checkpoint;
 import com.better.heybox.MainModule;
 
-/**
- * 自动清理失效收藏：收藏列表装载后若含失效条目（宿主 BBSLinkObj.is_deleted == "1"），
- * 自动发起宿主自带的「清理失效内容」请求——等价于用户点列表底部「点击清理」并在确认框点确认。
- *
- * <p>不重复造接口：直接复用宿主 {@code BBSKtUtils$Companion} 的确认回调，
- * 由宿主自己发 {@code bbs/app/profile/fav/folder/clean} 并处理返回，模块只负责「发现失效 + 触发」。
- * 页面类名未混淆，方法名逐版本变化（1.3.394 与 1.3.395 已不同），故一律按方法签名定位。</p>
- */
 public final class FavourAutoCleanHook {
 
-    /** 宿主收藏列表页：总列表（含 tab 页）与单收藏夹页 */
     private static final String[] FRAGMENT_CLASSES = {
             "com.max.xiaoheihe.module.favour.FavourCollectionContentFragment",
             "com.max.xiaoheihe.module.favour.FavourLinkFolderFragment",
@@ -39,20 +30,16 @@ public final class FavourAutoCleanHook {
     private static final String COMPANION_CLASS =
             "com.max.xiaoheihe.module.bbs.utils.BBSKtUtils$Companion";
 
-    /** 收藏夹 id：宿主两个页面都用这个 key 从 arguments 取 */
     private static final String ARG_FOLDER_ID = "folder_id";
 
-    /** 同一页面实例两次自动清理的最小间隔：接口失败时不至于反复重试 */
     private static final long MIN_INTERVAL_MS = 30_000L;
 
     private final MainModule module;
 
     private final Handler main = new Handler(Looper.getMainLooper());
 
-    /** 页面实例 → 上次触发时间（WeakHashMap 防泄漏） */
     private final Map<Object, Long> lastTrigger = new WeakHashMap<>();
 
-    /** 宿主确认监听器结构，惰性解析并缓存 */
     private volatile ConfirmSpec confirmSpec;
     private volatile boolean confirmResolved;
 
@@ -73,18 +60,15 @@ public final class FavourAutoCleanHook {
         }
     }
 
-    // ---------- 挂点：收藏列表页的数据装载 ----------
 
     private boolean hookFragment(ClassLoader cl, String className) {
         try {
             Class<?> fragment = Class.forName(className, false, cl);
             int installed = 0;
-            // 主挂点：私有实例方法（数据装载后 is_deleted 已回写到 BBSLinkObj）
             Method setter = findListSetter(fragment);
             if (setter != null && hookListMethod(setter, fragment, false)) {
                 installed++;
             }
-            // 兜底挂点：public static synthetic 包装方法（同一份列表，重复触发由节流挡住）
             Method wrapper = findStaticListSetter(fragment);
             if (wrapper != null && hookListMethod(wrapper, fragment, true)) {
                 installed++;
@@ -127,7 +111,6 @@ public final class FavourAutoCleanHook {
         }
     }
 
-    /** 兜底：静态合成包装方法 (页面, List) */
     private Method findStaticListSetter(Class<?> fragment) {
         Method found = null;
         for (Method m : fragment.getDeclaredMethods()) {
@@ -145,7 +128,6 @@ public final class FavourAutoCleanHook {
         return found;
     }
 
-    /** 列表装载方法：唯一一个「单 java.util.List 参数、void、非静态」的方法 */
     private Method findListSetter(Class<?> fragment) {
         Method found = null;
         for (Method m : fragment.getDeclaredMethods()) {
@@ -155,7 +137,6 @@ public final class FavourAutoCleanHook {
                 continue;
             }
             if (found != null) {
-                // 出现多个候选说明结构已变：宁可不挂，也不挂错方法
                 module.logd(Log.WARN, module.TAG, "列表装载方法不唯一，放弃该挂点: " + fragment.getName());
                 return null;
             }
@@ -179,7 +160,6 @@ public final class FavourAutoCleanHook {
         triggerClean(fragment, cl);
     }
 
-    /** 失效判定沿用宿主逻辑：BBSLinkObj.is_deleted == "1"（渲染层同样按此灰化） */
     private int countInvalid(Object listArg) {
         if (!(listArg instanceof List)) {
             return 0;
@@ -205,7 +185,6 @@ public final class FavourAutoCleanHook {
         return true;
     }
 
-    // ---------- 触发宿主的清理请求 ----------
 
     private void triggerClean(final Object fragment, ClassLoader cl) {
         try {
@@ -257,7 +236,6 @@ public final class FavourAutoCleanHook {
         }
     }
 
-    /** 清理成功后刷新列表，与宿主确认回调行为一致 */
     private void refreshLater(WeakReference<Object> ref) {
         main.post(() -> {
             Object fragment = ref.get();
@@ -277,7 +255,6 @@ public final class FavourAutoCleanHook {
         });
     }
 
-    /** 收藏夹 id：宿主页面从 arguments 的 folder_id 取（总列表可能为 null，与宿主「点击清理」一致） */
     private String folderIdOf(Object fragment) {
         try {
             Object args = fragment.getClass().getMethod("getArguments").invoke(fragment);
@@ -289,7 +266,6 @@ public final class FavourAutoCleanHook {
         return null;
     }
 
-    // ---------- 宿主确认监听器解析（结构匹配，不依赖混淆名） ----------
 
     private static final class ConfirmSpec {
         final Constructor<?> ctor;
@@ -322,10 +298,6 @@ public final class FavourAutoCleanHook {
         }
     }
 
-    /**
-     * 宿主确认监听器形态（1.3.394 / 1.3.395 一致）：
-     * 实现 DialogInterface.OnClickListener、构造器 (String, CompositeDisposable, Function0, Function0)。
-     */
     private ConfirmSpec findConfirmSpec(ClassLoader cl) {
         try {
             Class<?> companion = Class.forName(COMPANION_CLASS, false, cl);
@@ -362,7 +334,6 @@ public final class FavourAutoCleanHook {
         return null;
     }
 
-    // ---------- 通用工具 ----------
 
     private Object newInstance(Class<?> type) {
         try {
@@ -382,7 +353,6 @@ public final class FavourAutoCleanHook {
         }
     }
 
-    /** 代理返回值：布尔真、基本类型零值、其余 null（Function0<Boolean> 必须返回非 null） */
     private static Object defaultValue(Class<?> returnType) {
         if (returnType == boolean.class || returnType == Boolean.class) {
             return Boolean.TRUE;

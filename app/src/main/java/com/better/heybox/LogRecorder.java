@@ -185,7 +185,7 @@ public final class LogRecorder {
                 }
                 if (sOut == null) {
                     if (sWrittenBytes == 0 && file.isFile()) {
-                        sWrittenBytes = file.length();   // 首次接管已存在的文件
+                        sWrittenBytes = file.length();
                     }
                     sOut = new BufferedOutputStream(new FileOutputStream(file, true), 16 * 1024);
                 }

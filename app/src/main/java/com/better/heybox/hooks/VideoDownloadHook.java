@@ -41,13 +41,8 @@ import com.better.heybox.ThemeUtils;
 import com.better.heybox.VideoDownloadManager;
 import com.better.heybox.ViewUtils;
 
-/**
- * 视频下载入口：捕获 AbsVideoView URL 设置（setVideoRes/W），在窗口 Decor 挂圆形下载按钮，点击弹底部抽屉。
- * 按钮按 Decor 去重，跟随「最近捕获且当前可见」的视频（Candidate 竞选）；只做捕获+UI，下载全委托 VideoDownloadManager
- */
 public final class VideoDownloadHook {
 
-    /** 液态玻璃调节面板打开时暂停窗口级 FAB，避免它覆盖面板内容。 */
     private static volatile boolean glassSettingsVisible;
 
     public static void setGlassSettingsVisible(boolean visible) {
@@ -73,7 +68,6 @@ public final class VideoDownloadHook {
 
     private void hookW(ClassLoader cl) {
         Throwable firstError = null;
-        // 三个入口（setVideoRes(String)/setVideoRes(String,Map)/W(String,Map)）都只在「设置 URL」处捕获，不碰播放；按 getArgs() 实际个数取参（getArg(1) 在单参重载曾越界丢捕获）
         String[] methods = {
                 "setVideoRes",
                 "setVideoRes",
@@ -90,7 +84,6 @@ public final class VideoDownloadHook {
                 java.lang.reflect.Method method = absVideoView.getDeclaredMethod(methods[i], signatures[i]);
                 final String label = methods[i] + (signatures[i].length == 2 ? "(String, Map)" : "(String)");
                 module.hook(method).intercept(chain -> {
-                    // 后置：等宿主设置完 URL 再捕获，不影响播放流程
                     Object result = chain.proceed();
                     try {
                         List<?> args = chain.getArgs();
@@ -122,7 +115,6 @@ public final class VideoDownloadHook {
         }
     }
 
-    /** 日志用 URL 精简（避免超长 token 刷屏） */
     private static String shorten(String url) {
         if (url.length() <= 120) {
             return url;
@@ -130,7 +122,6 @@ public final class VideoDownloadHook {
         return url.substring(0, 117) + "...";
     }
 
-    /** 专职视频播放页白名单：仅这些宿主页面挂下载入口（首页信息流/我的/游戏页等一律不挂） */
     private static final java.util.Set<String> VIDEO_PAGE_HOSTS =
             new java.util.HashSet<>(java.util.Arrays.asList(
                     "com.max.xiaoheihe.module.video.VideoActivity",
@@ -152,11 +143,9 @@ public final class VideoDownloadHook {
             return;
         }
         View videoView = (View) viewObject;
-        // 非专职播放页（信息流/我的等）不初始化下载管理器、不注册候选
         if (!isVideoPageHost(videoView)) {
             return;
         }
-        // 惰性初始化下载管理器（宿主进程内拿到 Context 后注册通知广播/恢复任务历史）
         VideoDownloadManager.get().init(videoView.getContext());
         ViewGroup decor = ViewUtils.findDecor(videoView);
         if (decor == null) {
@@ -164,7 +153,6 @@ public final class VideoDownloadHook {
         }
         EntryController controller = EntryController.get(decor);
         if (!enabled || !VideoDownloadManager.isSupportedUrl(url)) {
-            // 开关关闭或不可下载：该视频不再参与竞选（其余可见视频的入口不受影响）
             if (controller != null) {
                 controller.removeCandidate(videoView);
             }
@@ -177,9 +165,6 @@ public final class VideoDownloadHook {
         controller.addCandidate(videoView, url, headers);
         controller.sync();
     }
-    /**
- * 窗口级入口控制器：每 Decor 一个下载按钮，跟随「最近捕获且当前可见」的候选（预加载不可见时不抢占）
- */
     private static final class EntryController {
 
         private static final Map<ViewGroup, EntryController> CONTROLLERS =
@@ -199,7 +184,6 @@ public final class VideoDownloadHook {
 
         private final ViewGroup decor;
         private final MainModule module;
-        /** 候选列表，按捕获顺序（末尾最新） */
         private final List<Candidate> candidates = new ArrayList<>();
 
         private final ViewTreeObserver.OnScrollChangedListener decorScrollListener =
@@ -220,7 +204,6 @@ public final class VideoDownloadHook {
 
         private DownloadFab entry;
         private DownloadSheet sheet;
-        /** 当前参与竞选的候选（最新可见者），sync 中更新 */
         private Candidate active;
 
         EntryController(MainModule module, ViewGroup decor) {
@@ -240,13 +223,11 @@ public final class VideoDownloadHook {
             }
         }
 
-        /** 登记候选：同一 View 重复捕获（RecyclerView 复用/重新绑定）时更新其候选 */
         void addCandidate(View video, String url, Map<String, String> headers) {
             removeCandidateInternal(video);
             candidates.add(new Candidate(video, url, headers));
             module.logd(Log.INFO, MainModule.TAG, "入口候选登记: " + shorten(url)
                     + " (共" + candidates.size() + "个候选)");
-            // 布局帧兜底：万一 decor 无重绘帧，800ms 后强制同步一次
             decor.postDelayed(new Runnable() {
                 @Override
                 public void run() {
@@ -255,7 +236,6 @@ public final class VideoDownloadHook {
             }, 800);
         }
 
-        /** 移除某视频的候选 */
         void removeCandidate(View video) {
             if (removeCandidateInternal(video)) {
                 sync();
@@ -274,9 +254,6 @@ public final class VideoDownloadHook {
             return removed;
         }
 
-        /**
- * 竞选 + 位置同步（每帧调用，轻量）：选最新可见候选并定位按钮，无候选则隐藏
- */
         void sync() {
             try {
                 syncInternal();
@@ -301,10 +278,9 @@ public final class VideoDownloadHook {
                 Candidate c = candidates.get(i);
                 View v = c.video.get();
                 if (v == null) {
-                    candidates.remove(i); // 弱引用已死，顺手清理
+                    candidates.remove(i);
                     continue;
                 }
-                // 信息流自动播放的 AbsVideoView 宽高可为 0，位置/可见性判定用「向上第一个有尺寸的祖先」作锚点
                 View anchor = anchorOf(v);
                 if (chosen == null && anchor.isShown() && anchor.getWidth() > 0
                         && anchor.getWindowToken() != null
@@ -366,7 +342,6 @@ public final class VideoDownloadHook {
             entry.invalidate();
         }
 
-        /** 向上找第一个自身有尺寸的祖先（AbsVideoView 宽高可为 0，锚点用其容器） */
         private static View anchorOf(View v) {
             View cur = v;
             ViewParent p = v.getParent();
@@ -377,7 +352,6 @@ public final class VideoDownloadHook {
             return cur;
         }
 
-        /** 视频区域与 Decor 实质相交（≥64dp）判断，防屏外预加载抢占入口 */
         private static boolean intersectsDecor(View v, int decorH) {
             int[] xy = new int[2];
             v.getLocationInWindow(xy);
@@ -387,7 +361,6 @@ public final class VideoDownloadHook {
             return visible >= ThemeUtils.dp(v.getContext(), 64);
         }
 
-        /** 被后绘制且不透明的兄弟页面层盖住时判为遮挡（叠层下 isShown 恒真） */
         private static boolean coveredBySiblingLayer(View anchor, ViewGroup decor) {
             float px = anchor.getWidth() / 2f;
             float py = anchor.getHeight() / 2f;
@@ -419,7 +392,6 @@ public final class VideoDownloadHook {
             return false;
         }
 
-        /** 探测点处最上层内容是否不透明 */
         private static boolean occludesAt(View v, float px, float py) {
             if (v.isOpaque()) {
                 return true;
@@ -486,9 +458,6 @@ public final class VideoDownloadHook {
                     videoView != null ? cardTitle(videoView) : null);
         }
 
-        /**
- * 视频卡片标题（下载文件名用）：祖先链找 tv_title/tvTitle，回退 Activity 标题
- */
         private static String cardTitle(View video) {
             for (String idName : new String[]{"tv_title", "tvTitle"}) {
                 String title = titleFromAncestors(video, idName, false);
@@ -539,7 +508,6 @@ public final class VideoDownloadHook {
         }
     }
 
-    /** 供 cardTitle 回退使用 */
         private static final class BottomSheetFallback {
             static String videoTitle(Context context) {
                 Activity activity = ViewUtils.findActivity(context);
@@ -562,9 +530,6 @@ public final class VideoDownloadHook {
         }
     }
 
-    /**
- * 圆形 Monet 渐变下载按钮：accent→accent2 渐变底 + 白色图标；四态（空闲/下载中/完成/失败）+ 按压缩放与 Ripple 反馈
- */
     private static final class DownloadFab extends View {
 
         private static final int PHASE_IDLE = 0;
@@ -580,9 +545,6 @@ public final class VideoDownloadHook {
         private int phase = PHASE_IDLE;
         private int progress = -1;
 
-        /**
-         * 任务状态由监听器驱动（attach/detach 配对增删，随 FAB 生命周期），onDraw 只画不查表
-         */
         private final VideoDownloadManager.TaskListener taskListener =
                 new VideoDownloadManager.TaskListener() {
                     @Override
@@ -624,7 +586,7 @@ public final class VideoDownloadHook {
                                     .setInterpolator(new DecelerateInterpolator()).start();
                             break;
                     }
-                    return false; // 不消费，保留点击
+                    return false;
                 }
             });
         }
@@ -668,7 +630,6 @@ public final class VideoDownloadHook {
             }
             Context context = getContext();
 
-            // 底：强档位 accent → accent2 的 45° 轻渐变（任意视频画面上都有足够对比度）
             if (!(paint.getShader() instanceof LinearGradient)) {
                 paint.setShader(new LinearGradient(0, 0, w, h,
                         ThemeUtils.resolveAccentStrong(context),
@@ -760,9 +721,6 @@ public final class VideoDownloadHook {
         }
     }
 
-    /**
- * Material 底部抽屉下载面板：下拉/点外部关闭；五状态由任务注册表驱动，进度原地更新不重建视图
- */
     private static final class DownloadSheet {
 
         private final Context context;
@@ -776,15 +734,12 @@ public final class VideoDownloadHook {
         private Map<String, String> headers;
         private String title;
         private volatile boolean dismissed;
-        /** 面板当前展示的状态桶（null=无任务空闲）；PENDING 归并入 DOWNLOADING 避免重复重建 */
         private VideoDownloadManager.State shownState;
 
-        /** 探测到的预计大小（-1 未知）与 HLS 分段数（-1 非 HLS） */
         private volatile long probeTotal = -1;
         private volatile int probeSegments = -1;
         private boolean probing;
 
-        // 下载中/暂停内容引用（原地更新，不重建）
         private View progressBar;
         private TextView pctText;
         private final int[] progressHolder = new int[1];
@@ -879,7 +834,6 @@ public final class VideoDownloadHook {
             VideoDownloadManager.get().addListener(listener);
         }
 
-        /** 拖动指示条下拉关闭（超阈值 dismiss，否则回弹） */
         private void attachDragToClose(View dragArea) {
             final float[] downY = {0};
             final float[] lastY = {0};
@@ -906,7 +860,7 @@ public final class VideoDownloadHook {
                         case MotionEvent.ACTION_CANCEL: {
                             float dy = event.getRawY() - downY[0];
                             long dt = Math.max(1, System.currentTimeMillis() - lastT[0]);
-                            float velocity = (event.getRawY() - lastY[0]) / dt; // px/ms
+                            float velocity = (event.getRawY() - lastY[0]) / dt;
                             if (dy > ThemeUtils.dp(context, 96) || (dy > 24 && velocity > 1.4f)) {
                                 dismiss();
                             } else {
@@ -931,7 +885,6 @@ public final class VideoDownloadHook {
                     ? VideoDownloadManager.State.DOWNLOADING : task.state;
         }
 
-        /** 状态切换时整块重建内容；同状态进度变化走 updateProgress 原地更新 */
         private void rebuild(final VideoDownloadManager.DownloadTask task) {
             if (dismissed || content == null) {
                 return;
@@ -983,7 +936,6 @@ public final class VideoDownloadHook {
             }
         }
 
-        /** 下载中/暂停：原地更新进度文本与进度条（不重建视图，按钮点击不受影响） */
         private void updateProgress(VideoDownloadManager.DownloadTask task) {
             progressHolder[0] = Math.max(0, task.percent());
             if (progressBar != null) {
@@ -994,7 +946,6 @@ public final class VideoDownloadHook {
             }
         }
 
-        /** 异步探测大小（一次） */
         private void maybeProbe() {
             if (probing) {
                 return;
@@ -1176,7 +1127,6 @@ public final class VideoDownloadHook {
             button.setTextColor(textColor);
         }
 
-        /** dismissAfter：true 时执行动作后关闭抽屉（开始/暂停/继续为 false，保持面板查看进度） */
         private TextView sheetButton(Context c, ButtonStyle style, String text,
                                      final Runnable action, final boolean dismissAfter) {
             TextView button = new TextView(c);

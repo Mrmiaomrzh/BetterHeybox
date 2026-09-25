@@ -257,7 +257,6 @@ public final class GlassSettingsSheet {
 
     private static final int[] WIDTH_MODE_VALUES = {0, 1, 2};
 
-    /** 玻璃条宽度三模式 chips（自适应/占满/自定义）+ 仅自定义模式可见的百分比滑杆 */
     private static View widthModeGroup(Activity activity, int textPrimary,
                                        int textSecondary, int accent, int hairline,
                                        float density) {
@@ -317,7 +316,6 @@ public final class GlassSettingsSheet {
 
     private static final int[] BAR_LAYOUT_VALUES = {1, 2, 0};
 
-    /** 底栏形态 chips（经典居中/右侧圆钮/自动） */
     private static View barLayoutGroup(Activity activity, int textPrimary,
                                        int textSecondary, int accent, int hairline,
                                        float density) {

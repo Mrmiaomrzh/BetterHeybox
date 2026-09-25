@@ -8,7 +8,6 @@ import java.lang.reflect.Constructor;
 import com.better.heybox.App;
 import com.better.heybox.MainModule;
 
-/** 为小黑盒内置 WebView 开启 Chrome DevTools 远程调试。 */
 public final class WebViewDevToolsHook {
     private final MainModule module;
 

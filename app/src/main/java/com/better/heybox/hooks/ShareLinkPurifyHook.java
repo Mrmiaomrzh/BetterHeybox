@@ -11,15 +11,10 @@ import java.util.List;
 import com.better.heybox.App;
 import com.better.heybox.MainModule;
 
-/**
- * 净化分享链接：去掉 sid、share_app_id 等追踪参数。
- * 拦截点：所有分享出口统一经 model 的 getShareUrl() 取链接，Hook 各 model getter 全覆盖（CopyAction.getUrl / HBShareProtocolData.getShare_url 兜底）
- */
 public final class ShareLinkPurifyHook {
 
     private final MainModule module;
 
-    /** 分享出口 model：Kotlin 属性 getter 名字稳定，类按存在性逐个尝试（393/394 通用） */
     private static final String[] TARGET_CLASSES = {
             "com.max.data.model.community.LinkPostForwardModel",
             "com.max.data.model.community.CommentForwardModel",
@@ -33,28 +28,23 @@ public final class ShareLinkPurifyHook {
             "com.max.data.model.share.MeModel",
             "com.max.data.model.share.WebViewModel",
             "com.max.data.bean.community.LinkShareInfoDto",
-            // 兜底：复制链接动作与协议分享数据
             "com.max.data.model.share.IAction$CopyAction",
             "com.max.hbshare.bean.HBShareProtocolData",
     };
 
-    /** 小黑盒域名后缀（仅净化自家链接，第三方链接原样放行） */
     private static final String HEYBOX_HOST_SUFFIX = "xiaoheihe.cn";
 
-    /** 追踪参数黑名单（匹配 query 参数名，小写比较） */
     private static final List<String> BLACKLIST = Arrays.asList(
-            // 小黑盒实测分享链接携带的 h_* 追踪参数
-            "h_camp",                 // 分享活动归因
-            "h_session_id",           // 分享会话标识
-            "new_post_share_style",   // 分享样式 A/B 实验标记
-            "h_src",                  // base64 信息流曝光轨迹
-            // 其他常见追踪参数
-            "sid",                    // 分享会话/来源标识
-            "share_app_id",           // 分享渠道
-            "share_strategys",        // 分享策略
+            "h_camp",
+            "h_session_id",
+            "new_post_share_style",
+            "h_src",
+            "sid",
+            "share_app_id",
+            "share_strategys",
             "share_xy_from", "sh_from", "share_from", "share_channel", "share_xy",
-            "web_sign",               // 签名（link_id 短链不需要）
-            "identify",               // 设备/用户识别
+            "web_sign",
+            "identify",
             "heybox_id", "user_id", "userid",
             "did", "device_id",
             "from", "spm", "traceid", "request_id",
@@ -76,7 +66,6 @@ public final class ShareLinkPurifyHook {
                 continue;
             }
             boolean hooked = false;
-            // getShareUrl：分享 model；getShare_url：HBShareProtocolData；getUrl：CopyAction
             for (String methodName : new String[]{"getShareUrl", "getShare_url", "getUrl"}) {
                 try {
                     Method method = clazz.getDeclaredMethod(methodName);
@@ -111,9 +100,6 @@ public final class ShareLinkPurifyHook {
         }
     }
 
-    /**
- * 去掉追踪参数；仅当确实删除参数时重建 URL（避免重新编码破坏未识别参数）
- */
     String purify(String url) {
         if (url == null) {
             return url;
@@ -162,7 +148,6 @@ public final class ShareLinkPurifyHook {
         if (kept.length() > 0) {
             out.append(url, 0, queryStart + 1).append(kept);
         } else {
-            // 参数全部被剔除时丢弃悬空的 '?'
             out.append(url, 0, queryStart);
         }
         if (fragmentStart >= 0) {

@@ -2,24 +2,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- 无 root 重启小黑盒：杀掉其后台进程（普通权限，自动授予） -->
     <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
 
-    <!--
-      现代 API 102：不再使用 xposedmodule / xposedminversion meta-data。
-      模块声明全部由 META-INF/xposed/ 下的文件提供：
-        - module.prop     API 版本 / staticScope / autoHotReload
-        - java_init.list  入口类
-        - scope.list      作用域（staticScope=true 时生效）
-      模块名称 = android:label，模块描述 = android:description。
-    -->
     <application
         android:name=".App"
         android:label="@string/app_name"
         android:description="@string/module_description"
         tools:ignore="MissingApplicationIcon">
 
-        <!-- 设置仅通过小黑盒内嵌面板提供（SettingsEntryHook 注入），模块无独立界面。 -->
 
         <receiver
             android:name=".PreferenceReceiver"

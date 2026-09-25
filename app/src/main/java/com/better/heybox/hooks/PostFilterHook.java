@@ -14,28 +14,23 @@ import com.better.heybox.HeyboxTargets;
 import com.better.heybox.MainModule;
 import io.github.libxposed.api.XposedInterface;
 
-/** 发帖过滤：低等级 / 关键词 / AI 标题党，多挂点分工，fail-open */
 public final class PostFilterHook {
 
     private static volatile PostFilterHook sInstance;
 
-    /** 委托入口 */
     public static PostFilterHook get() {
         return sInstance;
     }
 
     private final MainModule module;
 
-    /** itemView → 当前绑定帖子的缓存键（AI 判定返回时校验该 view 是否仍显示同一帖子） */
     private final WeakHashMap<View, String> boundPostKeys = new WeakHashMap<>();
 
-    /** 关键词编译缓存：原始串未变则不重解析（bind 高频调用） */
     private final Object keywordLock = new Object();
 
     private String keywordRaw;
     private List<Object> keywordMatchers;
 
-    /** AI 判定返回（主线程）：命中且 view 仍绑定同一帖子时回补隐藏 */
     private final AIClickbaitChecker.VerdictCallback aiCallback;
 
     private volatile java.lang.ref.WeakReference<Object> sFlowControllerRef;
@@ -98,9 +93,7 @@ public final class PostFilterHook {
         hookRecommendFlowController(cl);
     }
 
-    // ---------- BBS post lists ----------
 
-    /** Hooks the shared data source of BBS post lists. */
     private void hookBbsLinkListGetter(ClassLoader cl) {
         try {
             HeyboxTargets.install(PromoteDetector.TARGET_BBS_LINKS_GETTER, method -> {
@@ -122,7 +115,6 @@ public final class PostFilterHook {
         }
     }
 
-    /** Hooks adapter bind as a fallback for the data layer. */
     private void hookBbsLinkListAdapter(ClassLoader cl) {
         try {
             int[] installed = {0};
@@ -159,7 +151,6 @@ public final class PostFilterHook {
         return chain.proceed();
     }
 
-    /** Drops blocked entries. */
     private List<?> filterBbsLinks(List<?> raw) {
         List<Object> keep = new ArrayList<>(raw.size());
         int blocked = 0;
@@ -183,12 +174,10 @@ public final class PostFilterHook {
         return keep;
     }
 
-    /** True when the entry looks like a post. */
     private boolean isPostLike(Object item) {
         return item != null && safeInvoke(item, "getUser") != null;
     }
 
-    /** Excluded pages, resolved from the call stack. */
     private boolean isExcludedListCaller() {
         try {
             for (StackTraceElement frame : Thread.currentThread().getStackTrace()) {
@@ -201,7 +190,6 @@ public final class PostFilterHook {
         return false;
     }
 
-    /** Excluded pages, resolved from the item view context. */
     private boolean isExcludedPageContext(View itemView) {
         if (itemView == null) {
             return false;
@@ -232,7 +220,6 @@ public final class PostFilterHook {
                 || name.startsWith("com.max.xiaoheihe.module.account.specificsearch."));
     }
 
-    /** True when at least one filter is on. */
     private boolean hasSyncRule() {
         if (module.isEnabled(App.KEY_PROMOTE_AD, true)
                 || module.isEnabled(App.KEY_BLOCK_VIDEO_POST, false)
@@ -495,11 +482,9 @@ public final class PostFilterHook {
         return result;
     }
 
-    /** 帖子模型判定缓存 */
     private final java.util.concurrent.ConcurrentHashMap<Class<?>, Boolean> postModelCache =
             new java.util.concurrent.ConcurrentHashMap<>();
 
-    /** 视频帖判定：模型 hasVideo() 查找结果缓存（命中 + 未命中分别记录，避免反复查找） */
     private final java.util.concurrent.ConcurrentHashMap<Class<?>, java.lang.reflect.Method> hasVideoCache =
             new java.util.concurrent.ConcurrentHashMap<>();
     private final java.util.Set<Class<?>> hasVideoMiss =
@@ -524,9 +509,7 @@ public final class PostFilterHook {
         return isPost;
     }
 
-    // ---------- 视频帖过滤 ----------
 
-    /** 视频帖开关开启时判定条目是否为视频帖 */
     private boolean videoBlocked(Object item) {
         if (item == null || !module.isEnabled(App.KEY_BLOCK_VIDEO_POST, false)) {
             return false;
@@ -947,7 +930,6 @@ public final class PostFilterHook {
         }
     }
 
-    // ---------- 同步过滤判定 ----------
 
     private boolean applySyncFilters(Object item) {
         return applySyncFilters(item, "列表绑定");
@@ -1034,9 +1016,7 @@ public final class PostFilterHook {
         }
     }
 
-    // ---------- 关键词过滤 ----------
 
-    /** Matches the configured keywords against the entry. */
     private String keywordHit(Object item) {
         if (item == null) {
             return null;
@@ -1066,7 +1046,6 @@ public final class PostFilterHook {
         return matchAny(matchers, title, text);
     }
 
-    /** Returns the first matching keyword. */
     private String matchAny(List<Object> matchers, String... fields) {
         boolean hasText = false;
         String[] lower = new String[fields.length];
@@ -1240,7 +1219,6 @@ public final class PostFilterHook {
         return null;
     }
 
-    /** 条目为小写子串或预编译正则 */
     private List<Object> keywordMatchers() {
         String raw = module.getString(App.KEY_POST_KEYWORDS, "");
         synchronized (keywordLock) {
@@ -1272,9 +1250,7 @@ public final class PostFilterHook {
         return list;
     }
 
-    // ---------- 通用工具 ----------
 
-    /** 标题优先，正文兜底 */
     private String postCacheKey(Object bbsLink) {
         String title = safeTitle(bbsLink);
         if (!title.isEmpty()) {
@@ -1295,7 +1271,6 @@ public final class PostFilterHook {
         return safeGet(item, "getText");
     }
 
-    /** Cached reflective getters. */
     private final java.util.concurrent.ConcurrentHashMap<Class<?>, java.util.concurrent.ConcurrentHashMap<String, Object>>
             getterCache = new java.util.concurrent.ConcurrentHashMap<>();
 

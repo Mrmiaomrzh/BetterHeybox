@@ -30,9 +30,6 @@ import com.better.heybox.App;
 import com.better.heybox.MainModule;
 import com.better.heybox.LogRecorder;
 
-/**
- * 图片系统分享：图片查看流程的分享面板追加「系统分享」，下载图片后唤起系统分享界面,仅图片查看器生效
- */
 public final class ImageShareHook {
 
     private final MainModule module;
@@ -256,9 +253,6 @@ public final class ImageShareHook {
         return null;
     }
 
-    /**
- * 分享动作图标：按名称运行时解析
- */
     private static int resolveShareArrowIcon(Context context) {
         if (context == null) {
             return 0;
@@ -272,7 +266,6 @@ public final class ImageShareHook {
         }
     }
 
-    /** 从 HBShareDialog 对象反射取 Context 字段 */
     private Context findDialogContext(Object dialog) {
         if (dialog == null) {
             return null;
@@ -303,7 +296,6 @@ public final class ImageShareHook {
         }
     }
 
-    /** 面板门禁：ImageForwardModel 全 app 仅图片查看器构造，命中即视为图片分享面板 */
     private static boolean isImageForward(Object forward, ClassLoader cl) {
         if (forward == null) {
             return false;
@@ -316,7 +308,6 @@ public final class ImageShareHook {
         }
     }
 
-    /** 按类型取 dialog 的 forward 字段*/
     private static Object readForwardModel(Object dialog, ClassLoader cl) {
         if (dialog == null) {
             return null;
@@ -366,10 +357,9 @@ public final class ImageShareHook {
         try {
             output = downloadImage(context, imageUrl);
             String mime = guessMimeType(output.getName());
-            // 优先写系统相册，失败回退 FileProvider
             Uri uri = publishToGallery(context, output);
             if (uri != null) {
-                output.delete(); // 已复制进相册，临时文件不再需要
+                output.delete();
                 module.logd(Log.INFO, module.TAG, "图片已保存到系统相册: uri=" + uri);
             } else {
                 uri = getTargetFileUri(context, output);
@@ -419,7 +409,6 @@ public final class ImageShareHook {
         if (connection.getResponseCode() < 200 || connection.getResponseCode() >= 300) {
             throw new IllegalStateException("HTTP " + connection.getResponseCode());
         }
-        // 写到外部缓存目录：wbsdk_filepaths 的 external-cache-path 覆盖它，FileProvider 回退路径可用
         File dir = context.getExternalCacheDir();
         if (dir == null) {
             dir = context.getCacheDir();
@@ -439,23 +428,20 @@ public final class ImageShareHook {
         } finally {
             connection.disconnect();
         }
-        // 按文件头识别真实格式，避免扩展名与内容不符导致接收方无法查看/解码
         String ext = sniffImageExtension(tmp);
         if (ext == null) {
             ext = guessExtensionFromUrl(imageUrl);
         }
         File output = new File(shareDir, "image-" + System.currentTimeMillis() + "." + ext);
         if (!tmp.renameTo(output)) {
-            output = tmp; // 重命名失败则沿用 tmp
+            output = tmp;
         }
         return output;
     }
 
-    /** 写入系统相册，返回 content URI；失败返回 null */
     private Uri publishToGallery(Context context, File file) {
         try {
             if (Build.VERSION.SDK_INT < 29) {
-                // Android 8~9 写入公共相册需要存储权限
                 if (context.checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
                         != PackageManager.PERMISSION_GRANTED) {
                     module.logd(Log.WARN, module.TAG, "无 WRITE_EXTERNAL_STORAGE 权限，回退 FileProvider");
@@ -524,7 +510,6 @@ public final class ImageShareHook {
         return null;
     }
 
-    /** 从 URL 路径猜测图片扩展名 */
     private static String guessExtensionFromUrl(String imageUrl) {
         try {
             String path = new URL(imageUrl).getPath();

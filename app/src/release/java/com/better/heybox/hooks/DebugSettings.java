@@ -1,6 +1,5 @@
 package com.better.heybox.hooks;
 
-/** Release variant: no debug-only rows. */
 public final class DebugSettings {
 
     private DebugSettings() {

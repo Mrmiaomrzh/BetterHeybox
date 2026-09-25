@@ -10,10 +10,6 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 
-/**
- * 底部弹层抬升：底部 Toast / 应用内通知（Notification 组件）在玻璃栏上方 12dp 让位。
- * 三处 addView/setView 钩点加窗口级 y 调整，窗内 inflate 的提示布局走 translationY
- */
 public final class BottomToastLifter {
 
     private static final String NOTIFICATION_VIEW =
@@ -220,7 +216,6 @@ public final class BottomToastLifter {
         }
     }
 
-    /** 找弹层里带背景的最小"药丸"（真正的提示气泡），没有就退到最深的叶子节点 */
     private static void findPill(View view, int top,
                                  View[] pill, int[] pillTop,
                                  View[] leaf, int[] leafTop) {
@@ -322,7 +317,6 @@ public final class BottomToastLifter {
         return null;
     }
 
-    /** 诊断探针：Toast.show / 应用内通知构造打点，排"抬升没生效"时看类型 */
     private static void armDiagProbes() {
         try {
             java.lang.reflect.Method show = Class.forName("android.widget.Toast")
@@ -371,7 +365,6 @@ public final class BottomToastLifter {
             "layout_toast_click_bottom_hint", "toast_bottom_hint",
     };
 
-    /** 窗内 inflate 的底部提示布局：预解析宿主 toast 布局 id，命中才挂布局监听 */
     private static void armInflateProbe() {
         try {
             java.lang.reflect.Method inflate = android.view.LayoutInflater.class

@@ -33,9 +33,6 @@ import org.luckypray.dexkit.query.matchers.ClassMatcher;
 import org.luckypray.dexkit.result.ClassData;
 import org.luckypray.dexkit.result.ClassDataList;
 
-/**
- * DexKit 字节码特征解析：宿主更新致混淆名变化后自动重新定位 HeyBoxDialog。
- */
 public final class DexKitResolver {
 
     private static final String TAG = MainModule.TAG;
@@ -234,9 +231,6 @@ public final class DexKitResolver {
         return null;
     }
 
-    /**
- * Builder 流式方法分类：1=CharSequence、2=View、3=按钮、4=build、0=其它
- */
     private static int classifyBuilderMethod(Method m, Class<?> builderClass, Class<?> dialogClass) {
         Class<?>[] ps = m.getParameterTypes();
         if (m.getReturnType() == builderClass) {

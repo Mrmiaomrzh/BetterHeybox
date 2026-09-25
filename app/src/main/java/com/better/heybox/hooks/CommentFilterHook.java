@@ -53,7 +53,6 @@ public final class CommentFilterHook {
             "com.max.xiaoheihe.module.bbs.adapter.n",
     };
 
-    /** Pure cy text (invisible chars stripped). */
     private static final Pattern INVISIBLE =
             Pattern.compile("[\\s\\u200b-\\u200f\\u202a-\\u202e\\ufeff]+");
 
@@ -88,10 +87,8 @@ public final class CommentFilterHook {
 
     private final MainModule module;
 
-    /** Seen adapters (weak). */
     private final WeakHashMap<Object, Boolean> adapterRefs = new WeakHashMap<>();
 
-    /** Auto load-more count per floor (weak, key = main comment). */
     private final java.util.Map<Object, Integer> autoLoadCounts =
             java.util.Collections.synchronizedMap(new WeakHashMap<>());
 
@@ -118,7 +115,6 @@ public final class CommentFilterHook {
 
     private final Handler main = createMainHandler();
 
-    /** Compiled keyword cache. */
     private final Object keywordLock = new Object();
     private String keywordRaw;
     private List<Object> keywordMatchers;
@@ -161,16 +157,11 @@ public final class CommentFilterHook {
 
     public void install(ClassLoader cl) {
         boolean data = hookPostCommentsGetter(cl);
-        // generic comment adapter
         boolean broad = hookBaseAdapterBind(cl);
         int legacy = broad ? 0 : hookCommentAdapterBinds(cl);
-        // sub-comments: preview watcher + auto load more
         boolean subList = hookSubCommentListFilter(cl);
-        // sub-comment rows: data-based hide (container kept)
         int subRows = hookSubCommentRowBinds(cl);
-        // sub-comment rows as actually rendered by SubCommentView
         boolean subRowViews = hookSubCommentRowViews(cl);
-        // newer Compose/Epoxy comment section rows
         int epoxy = hookEpoxyItemRows(cl);
         module.logd(Log.WARN, module.TAG, "[评论过滤] Hook 安装结果：数据层="
                 + (data ? "✔" : "✘") + " / 通用列表=" + (broad ? "✔" : "✘")
@@ -318,7 +309,6 @@ public final class CommentFilterHook {
         }
     }
 
-    // ---------- adapter bind ----------
 
     private int hookCommentAdapterBinds(ClassLoader cl) {
         int installed = 0;
@@ -356,7 +346,6 @@ public final class CommentFilterHook {
         return targets.size();
     }
 
-    /** Comment floor binder. */
     private boolean isCommentBinder(Method method) {
         if (method.getReturnType() != void.class || method.getParameterCount() != 2) {
             return false;
@@ -423,7 +412,6 @@ public final class CommentFilterHook {
         }
     }
 
-    // ---------- generic list adapter ----------
 
     private boolean hookBaseAdapterBind(ClassLoader cl) {
         try {
@@ -480,9 +468,7 @@ public final class CommentFilterHook {
         return result;
     }
 
-    // ---------- sub-comment rows ----------
 
-    /** Sub-comment row binder (data-based only). */
     private int hookSubCommentRowBinds(ClassLoader cl) {
         int installed = 0;
         for (String name : ADAPTER_CLASSES) {
@@ -556,7 +542,6 @@ public final class CommentFilterHook {
                 module.logd(Log.INFO, module.TAG, "屏蔽评论[楼中楼行] 原因=" + reason
                         + ", commentid=" + safeGet(comment, "getCommentid"));
             } else {
-                // restore only rows we hid
                 restoreCyView(row);
             }
         } catch (Throwable t) {
@@ -837,7 +822,6 @@ public final class CommentFilterHook {
         }
     }
 
-    /** Find view-more footer (text based, skip collapse). */
     private View findLoadMoreFooter(ViewGroup group) {
         for (int i = group.getChildCount() - 1; i >= 0; i--) {
             View child = group.getChildAt(i);
@@ -886,19 +870,15 @@ public final class CommentFilterHook {
         FeedItemHider.restore(view);
     }
 
-    // ---------- checks ----------
 
-    /** Fallback switch. */
     private boolean isEnabled() {
         return module.isEnabled(App.KEY_BLOCK_CY_COMMENT, false);
     }
 
-    /** Host hide-cy switch (default on). */
     private boolean isHostHideCyEnabled() {
         return module.isEnabled(App.KEY_HOST_HIDE_CY, true);
     }
 
-    /** Either switch on. */
     private boolean cyMarkFilterActive() {
         return isEnabled() || isHostHideCyEnabled();
     }
@@ -1107,7 +1087,6 @@ public final class CommentFilterHook {
         return null;
     }
 
-    /** Cy mark only: is_cy or pure cy text. */
     private String cyMarkReason(Object comment) {
         if (comment == null) {
             return null;
@@ -1163,7 +1142,6 @@ public final class CommentFilterHook {
         return false;
     }
 
-    /** Verbose per-comment log. */
     private void diagnose(String where, Object item) {
         if (!module.isEnabled(App.KEY_VERBOSE_LOG, false)) {
             return;
@@ -1196,7 +1174,6 @@ public final class CommentFilterHook {
         return value instanceof List ? (List<?>) value : null;
     }
 
-    /** Pure cy text. */
     private boolean isCyText(String raw) {
         if (raw == null || raw.isEmpty()) {
             return false;
@@ -1205,7 +1182,6 @@ public final class CommentFilterHook {
         return "cy".equals(text) || "插眼".equals(text);
     }
 
-    // ---------- keywords ----------
 
     private String keywordHit(String text) {
         if (text == null || text.isEmpty()) {
@@ -1260,7 +1236,6 @@ public final class CommentFilterHook {
         return list;
     }
 
-    // ---------- rebind ----------
 
     private void registerAdapter(Object adapter) {
         synchronized (adapterRefs) {
@@ -1297,7 +1272,6 @@ public final class CommentFilterHook {
         }
     }
 
-    // ---------- reflection ----------
 
     private String safeGet(Object item, String getter) {
         Object value = safeInvoke(item, getter);

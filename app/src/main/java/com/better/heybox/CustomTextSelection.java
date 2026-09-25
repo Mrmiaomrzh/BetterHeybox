@@ -33,17 +33,11 @@ import java.util.Collections;
 import java.util.Map;
 import java.util.WeakHashMap;
 
-/**
- * 自绘制文本选择：长按选中、拖动手柄、高亮、菜单全由本类实现，不触发系统与小黑盒的选择 UI。
- * 要点：Monet 取色回退链；逐行圆角高亮 UNION 合并；菜单浮层挂 Decor；反射链式调用原有 Touch/长按监听
- */
 public final class CustomTextSelection {
 
-    /** Marker for our own listeners (used to avoid re-entrancy) */
     public interface OwnListener {
     }
 
-    /** Delay before showing the selection after the host sheet closes */
     private static final long MENU_DISMISS_DELAY_MS = 220L;
 
     private static final String TAG = "BetterHeybox";
@@ -54,10 +48,6 @@ public final class CustomTextSelection {
     private CustomTextSelection() {
     }
 
-    /**
-     * 选中终点锚点（手柄与高亮共用）：end 落在行首时回退上一行取行右，
-     * 前字符为换行符时同样取行右，避免锚点悬到下一行行首；outLine[0] 回填实际所在行
-     */
     private static float endAnchor(Layout layout, CharSequence text, int end, int[] outLine) {
         int line = layout.getLineForOffset(end);
         float x = layout.getPrimaryHorizontal(end);
@@ -71,30 +61,18 @@ public final class CustomTextSelection {
         outLine[0] = line;
         return x;
     }
-    /** Attach with long-press takeover (post body) */
     public static void attach(TextView tv) {
         attach(tv, true, null);
     }
 
-    /** Attach with long-press takeover into an explicit overlay host (e.g. a dialog decor) */
     public static void attach(TextView tv, ViewGroup overlayHost) {
         attach(tv, true, overlayHost);
     }
 
-    /**
-     * Passive attach (comments): wraps only the touch listener (records the down point
-     * and forwards events); OnLongClickListener is left alone, so the host comment menu
-     * still opens. Use {@link #beginSelection(TextView, float, float)} to start selecting.
-     * Safe to call repeatedly (the host resets OnTouchListener on every bind).
-     */
     public static void attachPassive(TextView tv) {
         attach(tv, false, null);
     }
 
-    /**
-     * Attach (if needed) and start selecting immediately at x/y (negative => whole text).
-     * Used as a fallback when the system text selection refuses to start in our dialog.
-     */
     public static boolean startSelectionNow(TextView tv, ViewGroup overlayHost, float x, float y) {
         if (tv == null) {
             return false;
@@ -124,15 +102,10 @@ public final class CustomTextSelection {
         }
     }
 
-    /** True when the listener belongs to this module */
     public static boolean isOwnListener(Object listener) {
         return listener instanceof OwnListener;
     }
 
-    /**
-     * Start selecting programmatically (host "copy" tap). x/y are view-local; negative
-     * means unknown (select all). false => caller must fall back to the host copy.
-     */
     public static boolean beginSelection(TextView tv, float x, float y) {
         if (tv == null || tv.getWindowToken() == null || !tv.isShown()) {
             return false;
@@ -147,7 +120,6 @@ public final class CustomTextSelection {
         return controller.beginSelectionAt(x, y);
     }
 
-    /** Last ACTION_DOWN point of that view (picks the word under the finger) */
     public static boolean lastDownPoint(TextView tv, float[] out) {
         if (tv == null || out == null || out.length < 2) {
             return false;
@@ -190,9 +162,7 @@ public final class CustomTextSelection {
             OwnListener {
 
         private final TextView tv;
-        /** Where the highlight / handles / menu are added; null = the view's activity decor */
         private ViewGroup overlayHost;
-        /** Long-press takeover: true = post body, false = comments (host menu keeps it) */
         private boolean takeLongPress;
         private View.OnTouchListener prevTouch;
         private final View.OnLongClickListener prevLongClick;
@@ -270,25 +240,17 @@ public final class CustomTextSelection {
         void attach() {
             tv.setOnTouchListener(this);
             if (takeLongPress) {
-                // keep no system selection / link movement method while self-drawing (post body)
                 if (tv.isTextSelectable()) {
                     tv.setTextIsSelectable(false);
                 }
                 tv.setMovementMethod(null);
-                // re-assert: setTextIsSelectable(false) clears clickable/longClickable, so this
-                // must come last or long-press would never fire
                 tv.setOnLongClickListener(this);
             }
             tv.addOnLayoutChangeListener(layoutListener);
         }
 
-        /**
-         * Refresh after the host reset its touch listener: remember the new one as prevTouch
-         * (still chained) and install ours again; runs right after the host set it.
-         */
         void rebind(boolean takeLongPressNow) {
             if (takeLongPress && !takeLongPressNow) {
-                // takeover -> passive: hand the host long-press listener back
                 tv.setOnLongClickListener(prevLongClick);
             }
             takeLongPress = takeLongPressNow;
@@ -304,7 +266,6 @@ public final class CustomTextSelection {
             tv.removeOnLayoutChangeListener(layoutListener);
             tv.setOnTouchListener(prevTouch);
             if (takeLongPress) {
-                // restore only if we took over long-press (never clobber the host's own listener)
                 tv.setOnLongClickListener(prevLongClick);
             }
         }
@@ -347,10 +308,6 @@ public final class CustomTextSelection {
             }
         }
 
-        /**
-         * Triggered by the sheet's "copy": wait for the host dialog to close, then select.
-         * Picks the word at the last down point (CJK per char, latin per word); none => all.
-         */
         boolean beginSelectionAt(final float x, final float y) {
             try {
                 tv.postDelayed(new Runnable() {
@@ -366,7 +323,6 @@ public final class CustomTextSelection {
             }
         }
 
-        /** Select right now (caller already waited); picks the word at x/y, negative => all */
         boolean beginSelectionNow(float x, float y) {
             selectAt(x, y);
             return selStart >= 0 && selEnd > selStart;
@@ -394,7 +350,6 @@ public final class CustomTextSelection {
                     }
                 }
                 startSelection(start, end);
-                // finger is up: go straight to the finish path and show the action bar
                 finishSelection();
             } catch (Throwable t) {
                 Log.w(TAG, "进入选择态失败: " + t);
@@ -1093,9 +1048,6 @@ public final class CustomTextSelection {
             return new int[]{s, e};
         }
 
-        /**
-         * Copy/share sanitising: strip zero-width chars the host parks in comment text
-         */
         private static CharSequence copyText(CharSequence src) {
             if (src == null) {
                 return "";

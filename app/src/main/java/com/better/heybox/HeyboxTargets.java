@@ -43,7 +43,6 @@ public final class HeyboxTargets {
 
     private static final int MAX_RELAXED = 4;
 
-    /** Candidate list adapters. */
     private static final String[] BBS_LIST_ADAPTERS = new String[]{
             "com.max.xiaoheihe.module.bbs.adapter.t",
             "com.max.xiaoheihe.module.bbs.LinkRankingFragment$a",
@@ -171,7 +170,6 @@ public final class HeyboxTargets {
         }
     }
 
-    /** Installs every target sharing the key prefix. */
     public static void installGroup(String keyPrefix, MethodHook hook) {
         boolean matched = false;
         for (Target target : ORDER) {
@@ -608,7 +606,6 @@ public final class HeyboxTargets {
                 .equals(method.getParameterTypes()[1].getName());
     }
 
-    /** List bind method signature. */
     private static boolean isBbsLinkBinder(Method method) {
         if (method.isBridge() || method.isSynthetic()) {
             return false;
@@ -623,7 +620,6 @@ public final class HeyboxTargets {
         return isViewHolderParam(types[0]);
     }
 
-    /** First parameter must be a view holder. */
     private static boolean isViewHolderParam(Class<?> type) {
         Class<?> holder = sViewHolderClass;
         if (holder == null) {
@@ -677,7 +673,6 @@ public final class HeyboxTargets {
         return false;
     }
 
-    /** List getter signature. */
     private static boolean isLinksGetter(Method method) {
         return !method.isBridge()
                 && method.getParameterCount() == 0

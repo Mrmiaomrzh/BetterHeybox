@@ -20,9 +20,7 @@ public final class PromoteDetector {
     public static final String TARGET_ADS_BUBBLE = "ads.bubble";
     public static final String TARGET_ADS_CORNER = "ads.corner";
     public static final String TARGET_FEEDS_BIND = "feeds.list.bind";
-    /** List data target. */
     public static final String TARGET_BBS_LINKS_GETTER = "bbs.links.getter";
-    /** List bind target, one per class. */
     public static final String TARGET_BBS_LIST_BIND = "bbs.list.bind";
 
     public static final String BBS_LINK_OBJ = "com.max.xiaoheihe.bean.bbs.BBSLinkObj";

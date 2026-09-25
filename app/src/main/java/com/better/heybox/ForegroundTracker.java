@@ -7,9 +7,6 @@ import android.os.Bundle;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/**
- * 前台跟踪（Debug 构建）：统计活跃 Activity 数，0→1 记一次「打开应用」，1→0 不记录
- */
 public final class ForegroundTracker {
 
     private static final AtomicBoolean sRegistered = new AtomicBoolean(false);
@@ -19,13 +16,11 @@ public final class ForegroundTracker {
     private ForegroundTracker() {
     }
 
-    /** 由 BaseActivity.onResume Hook 调用（首次触发时注册生命周期回调） */
     public static void onActivityResumed(Activity activity) {
         if (!BuildFlags.DEBUG) {
             return;
         }
         registerIfNeeded(activity);
-        // 注册晚于首个 onActivityStarted 的情况：首个 resume 补记一次「打开应用」
         if (sActiveCount == 0 && sFirstResume.compareAndSet(false, true)) {
             sActiveCount = 1;
             Checkpoint.mark("应用打开（前台）: %s", activity.getClass().getSimpleName());

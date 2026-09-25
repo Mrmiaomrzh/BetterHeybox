@@ -12,9 +12,6 @@ import com.better.heybox.MainModule;
 import com.better.heybox.ViewUtils;
 import com.better.heybox.liquidglass.LiquidGlassInstaller;
 
-/**
- * 底部导航栏屏蔽：按开关隐藏首页 / 热点 / 游戏库 / 加号（需重启小黑盒生效）。
- */
 public final class BottomTabHook {
 
     private final MainModule module;
@@ -42,7 +39,6 @@ public final class BottomTabHook {
             });
             module.logd(Log.INFO, module.TAG, "✔ 底部导航栏 Hook 已安装");
 
-            // hook onResume：热重载后切回小黑盒立即重新应用底栏设置
             try {
                 Method onResume = clazz.getDeclaredMethod("onResume");
                 module.hook(onResume).intercept(chain -> {
@@ -59,7 +55,6 @@ public final class BottomTabHook {
                 module.logd(Log.WARN, module.TAG, "底栏 onResume Hook 失败: " + t);
             }
 
-            // 底栏会被 MainActivity$j.b(Boolean) 回调重新显示，hook 该回调后重新应用隐藏
             try {
                 Class<?> observerCls = Class.forName("com.max.xiaoheihe.MainActivity$j", false, cl);
                 Method b = ViewUtils.findMethod(observerCls, "b", Boolean.class);
@@ -86,7 +81,6 @@ public final class BottomTabHook {
         }
     }
 
-    /** 隐藏 tab 与加号 */
     private void applyBottomTabSettings(Object activityObj) {
         applyBottomTabSettings(activityObj, true);
     }
@@ -119,7 +113,6 @@ public final class BottomTabHook {
             View plus = findPlusButton(activity, binding);
             if (module.isEnabled(App.KEY_HIDE_ADD, false)) {
                 hideView(findPlaceholder(activity, binding, group), "推荐占位");
-                // 玻璃栏激活时加号可见性归玻璃安装器（PreDraw 强制），此处让位避免拉锯
                 if (plus != null && !LiquidGlassInstaller.isGlassBarActive()) {
                     hideView(plus, "加号");
                 }

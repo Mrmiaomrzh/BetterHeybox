@@ -25,41 +25,25 @@ import com.better.heybox.App;
 import com.better.heybox.HeyboxPrefs;
 import com.better.heybox.MainModule;
 
-/**
- * Browser redirect + web log. Layers: entry-intent rewrite, WebView.loadUrl,
- * in-page navigation, container onCreate fallback.
- * Order: block list > force list > host-app H5 pages > defaults. Known hosts,
- * sensitive pages and host-app H5 pages stay in-app (login cookies are injected
- * into the built-in WebView only).
- * Hard rule: swallow a load only when the container is closeable, see canCloseContainer.
- */
 public final class BrowserRedirectHook {
 
     private final MainModule module;
 
-    /** Web container entries; subclasses covered by the family check */
     private static final String[] ENTRY_ACTIVITIES = {
             "com.max.xiaoheihe.module.webview.WebActionActivity",
             "com.max.xiaoheihe.module.webview.NativeWebActionActivity",
     };
 
-    /** Fallback entry-container list, used only when the component class cannot be resolved */
     private static final Set<String> ENTRY_ACTIVITY_CLASSES = new HashSet<>(Arrays.asList(
             "com.max.xiaoheihe.module.webview.WebActionActivity",
             "com.max.xiaoheihe.module.webview.NativeWebActionActivity",
             "com.max.xiaoheihe.module.webview.TransparentWebActionActivity"));
 
-    /**
-     * Web container family roots. Subclasses are covered by walking the superclass chain:
-     * TransparentWebAction, InjectJsV2, MiniProgramHost (mini programs) all extend
-     * WebActionActivity, which an exact-name list misses.
-     */
     private static final String[] CONTAINER_ROOT_CLASSES = {
             "com.max.xiaoheihe.module.webview.WebActionActivity",
             "com.max.xiaoheihe.module.webview.NativeWebActionActivity",
     };
 
-    /** True when cls or a superclass is a container root */
     private static boolean isWebContainer(Class<?> cls) {
         for (Class<?> c = cls; c != null; c = c.getSuperclass()) {
             String name = c.getName();
@@ -72,7 +56,6 @@ public final class BrowserRedirectHook {
         return false;
     }
 
-    /** Closeable container: family member and not finishing */
     private static boolean canCloseContainer(android.content.Context context) {
         if (!(context instanceof Activity)) {
             return false;
@@ -82,22 +65,15 @@ public final class BrowserRedirectHook {
                 && isWebContainer(activity.getClass());
     }
 
-    /** Known host suffixes (host whitelist); login cookies go to these only */
     private static final String[] KNOWN_HOST_SUFFIXES = {
             "xiaoheihe.cn", "maxjia.com", "max-c.com", "dotamax.com", "debugmode.cn", "heybox.hk",
     };
 
-    /**
-     * Host-app H5 page domains; official pages and mini programs live here and need the
-     * built-in WebView cookies (x0.c writes pkey / x_heybox_id), so never redirect them.
-     * The user's force-redirect list still wins.
-     */
     private static final String[] HOST_APP_PAGE_HOSTS = {
             "web.xiaoheihe.cn",
             "web.debugmode.cn",
     };
 
-    /** Host-app H5 page domain, subdomains included */
     private static boolean isHostAppPage(String host) {
         for (String h : HOST_APP_PAGE_HOSTS) {
             if (host.equals(h) || host.endsWith("." + h)) {
@@ -107,7 +83,6 @@ public final class BrowserRedirectHook {
         return false;
     }
 
-    /** Host of url, lowercase; empty on failure */
     private static String hostOf(String url) {
         try {
             String host = Uri.parse(url).getHost();
@@ -117,15 +92,10 @@ public final class BrowserRedirectHook {
         }
     }
 
-    /**
-     * Mini program container (MiniProgramHostActivity, MiniProgramContainerActivity, ...).
-     * Its first page is an in-app page and stays in-app; links clicked inside still redirect.
-     */
     private static boolean isMiniProgramContainer(android.content.Context context) {
         return context != null && isMiniProgramContainer(context.getClass());
     }
 
-    /** Class flavour, for the entry layer which only has the component class */
     private static boolean isMiniProgramContainer(Class<?> cls) {
         for (Class<?> c = cls; c != null; c = c.getSuperclass()) {
             String name = c.getName();
@@ -137,14 +107,12 @@ public final class BrowserRedirectHook {
         return false;
     }
 
-    /** Sensitive pages (login / auth / wallet / pay) stay in-app */
     private static final String[] SENSITIVE_KEYWORDS = {
             "login", "logon", "signin", "signup", "register", "oauth", "passport", "auth",
             "account", "realname", "real_name", "bind", "verify",
             "wallet", "pay", "cashier", "checkout", "recharge", "trade", "order",
     };
 
-    /** Hooked clients / methods; host clients share base classes */
     private final Set<Class<?>> hookedClients = new HashSet<>();
     private final Set<Method> hookedMethods = new HashSet<>();
 
@@ -152,16 +120,12 @@ public final class BrowserRedirectHook {
         this.module = module;
     }
 
-    /** Host class loader, used to resolve entry component classes */
     private ClassLoader hostClassLoader;
 
     public void install(ClassLoader cl) {
         hostClassLoader = cl;
         int installed = 0;
-        // main hook: every activity start goes through execStartActivity, so the intent is
-        // rewritten before the container exists (no open-then-close flash)
         installed += hookActivityStart();
-        // fallback for starts that bypass execStartActivity (task restore)
         for (String className : ENTRY_ACTIVITIES) {
             Class<?> activity;
             try {
@@ -170,7 +134,6 @@ public final class BrowserRedirectHook {
                 continue;
             }
             try {
-                // onCreate is usually inherited from BaseActivity: walk up
                 Method onCreate = findMethodInHierarchy(activity, "onCreate", Bundle.class);
                 if (onCreate == null) {
                     throw new NoSuchMethodException("onCreate(Bundle) not declared");
@@ -193,7 +156,6 @@ public final class BrowserRedirectHook {
             }
         }
 
-        // fragment navigation embeds a container without startActivity, so hook loadUrl too
         int loads = 0;
         try {
             for (Method method : WebView.class.getDeclaredMethods()) {
@@ -212,15 +174,12 @@ public final class BrowserRedirectHook {
                         WebView webView = self instanceof WebView ? (WebView) self : null;
                         android.content.Context context = webView == null ? null : webView.getContext();
                         if (!canCloseContainer(context)) {
-                            // not a closeable container: let it load
                             module.logd(Log.WARN, module.TAG, "跳过重定向(容器不可关闭): "
                                     + (context == null ? "unknown" : context.getClass().getName())
                                     + " " + url);
                         } else if (isMiniProgramContainer(context) && !forcedByUser(url)) {
-                            // mini program page: keep in-app (force list can override)
                             module.logd(Log.INFO, module.TAG, "跳过重定向(小程序页面): " + url);
                         } else {
-                            // swallow the load and finish the container together (#33)
                             redirectLoadedPage(webView, url);
                             return null;
                         }
@@ -272,7 +231,6 @@ public final class BrowserRedirectHook {
         }
     }
 
-    /** Find a declared method up the chain (lifecycle methods live in base classes) */
     private static Method findMethodInHierarchy(Class<?> start, String name, Class<?>... paramTypes) {
         for (Class<?> c = start; c != null; c = c.getSuperclass()) {
             try {
@@ -283,10 +241,6 @@ public final class BrowserRedirectHook {
         return null;
     }
 
-    /**
-     * loadUrl: open externally, then finish the container. Family-based rather than
-     * exact-named, otherwise a missed subclass keeps an empty container on the stack (#33).
-     */
     private void redirectLoadedPage(WebView webView, String url) {
         openExternal(webView.getContext(), url);
         try {
@@ -298,13 +252,10 @@ public final class BrowserRedirectHook {
         }
     }
 
-    /** onCreate fallback: redirect the container page from its intent and finish it */
     private void handleEntry(Activity activity) {
         if (activity.isFinishing() || activity.isDestroyed()) {
             return;
         }
-        // the hook sits on BaseActivity.onCreate and sees every activity: limit it to
-        // the container family, other activities keep their pageurl untouched
         if (!isWebContainer(activity.getClass())) {
             return;
         }
@@ -312,13 +263,11 @@ public final class BrowserRedirectHook {
         if (!shouldRedirect(url)) {
             return;
         }
-        // same rule as loadUrl: mini program pages stay in-app
         if (isMiniProgramContainer(activity.getClass()) && !forcedByUser(url)) {
             module.logd(Log.INFO, module.TAG, "跳过重定向(小程序页面·入口): " + url);
             return;
         }
         openExternal(activity, url);
-        // fallback path only: skip the close animation
         try {
             activity.overridePendingTransition(0, 0);
         } catch (Throwable ignored) {
@@ -326,7 +275,6 @@ public final class BrowserRedirectHook {
         activity.finish();
     }
 
-    /** Hook Instrumentation.execStartActivity; returns the overloads hooked */
     private int hookActivityStart() {
         int installed = 0;
         try {
@@ -335,7 +283,6 @@ public final class BrowserRedirectHook {
                     continue;
                 }
                 Class<?>[] params = method.getParameterTypes();
-                // (who, contextThread, token, target, intent, requestCode, options[, userId])
                 if (params.length < 7 || params[4] != Intent.class) {
                     continue;
                 }
@@ -358,10 +305,6 @@ public final class BrowserRedirectHook {
         return installed;
     }
 
-    /**
-     * Rewrite the intent in place to ACTION_VIEW: the container is never created and the
-     * browser opens straight from the current screen.
-     */
     private void redirectEntryIntent(Intent intent) {
         android.content.ComponentName component = intent.getComponent();
         if (component == null) {
@@ -369,19 +312,16 @@ public final class BrowserRedirectHook {
         }
         String className = component.getClassName();
         Class<?> target = resolveTargetClass(className);
-        // resolved class -> family check; unresolved -> exact-name fallback
         boolean container = target != null
                 ? isWebContainer(target)
                 : ENTRY_ACTIVITY_CLASSES.contains(className);
         if (!container) {
             return;
         }
-        // protocol containers (mini programs) keep the url in web_protocol.webview.url
         String url = entryUrl(intent);
         if (!shouldRedirect(url)) {
             return;
         }
-        // mini program page stays in-app (force list can override)
         if (target != null && isMiniProgramContainer(target) && !forcedByUser(url)) {
             module.logd(Log.INFO, module.TAG, "跳过重定向(小程序页面·启动): " + url);
             return;
@@ -389,15 +329,12 @@ public final class BrowserRedirectHook {
         intent.setAction(Intent.ACTION_VIEW)
                 .setDataAndType(Uri.parse(url), null)
                 .setComponent(null)
-                // router-built intents may carry setPackage(host): clear it, else it lands on
-                // our own RouterActivity and flashes a splash-themed window
                 .setPackage(null)
                 .replaceExtras((Bundle) null);
         applyTargetPackage(intent);
         module.logd(Log.INFO, module.TAG, "浏览器重定向(启动): " + url);
     }
 
-    /** Preferred browser package; skips the system resolver when set */
     private volatile String cachedTarget;
     private volatile boolean cachedTargetUsable;
 
@@ -437,7 +374,6 @@ public final class BrowserRedirectHook {
         }
     }
 
-    /** Proxy the real WebViewClient subclass (framework method names never obfuscate) */
     private void hookClientClass(Class<?> clientClass) {
         if (clientClass == null || clientClass == WebViewClient.class) {
             return;
@@ -481,7 +417,6 @@ public final class BrowserRedirectHook {
                 module.logd(Log.WARN, module.TAG, "shouldOverrideUrlLoading Hook 失败: " + name, t);
             }
         }
-        // log host clients only, not third-party SDK webviews
         if (name.startsWith("com.max.")) {
             for (Method method : findHookTargets(clientClass, "onPageStarted")) {
                 Class<?>[] params = method.getParameterTypes();
@@ -509,7 +444,6 @@ public final class BrowserRedirectHook {
         }
     }
 
-    /** Page title when the host chrome client exposes onReceivedTitle */
     private void hookChromeClientClass(Class<?> clientClass) {
         if (clientClass == null || clientClass == WebChromeClient.class
                 || isFrameworkClass(clientClass.getName()) || !clientClass.getName().startsWith("com.max.")) {
@@ -537,10 +471,6 @@ public final class BrowserRedirectHook {
         }
     }
 
-    /**
-     * Find by name up the chain, stopping at framework classes: the first declaration
-     * catches every call. Methods are deduped globally so shared base classes hook once.
-     */
     private List<Method> findHookTargets(Class<?> start, String name) {
         List<Method> out = new ArrayList<>();
         for (Class<?> c = start; c != null && !isFrameworkClass(c.getName()); c = c.getSuperclass()) {
@@ -585,7 +515,6 @@ public final class BrowserRedirectHook {
         return null;
     }
 
-    /** Three-arg overload: main frame only, iframes untouched */
     private static boolean isMainFrameRequest(boolean isRequestVariant, List<Object> args) {
         if (!isRequestVariant) {
             return true;
@@ -605,7 +534,6 @@ public final class BrowserRedirectHook {
         return true;
     }
 
-    /** Resolve a host component class; null when unavailable */
     private Class<?> resolveTargetClass(String className) {
         try {
             ClassLoader cl = hostClassLoader;
@@ -615,10 +543,6 @@ public final class BrowserRedirectHook {
         }
     }
 
-    /**
-     * Entry url: pageurl first, else web_protocol -> WebCfgObj.url. Host classes are
-     * obfuscated, so the getters are called reflectively; null when unavailable.
-     */
     private static String entryUrl(Intent intent) {
         String url = intent.getStringExtra("pageurl");
         if (url != null && !url.trim().isEmpty()) {
@@ -637,7 +561,6 @@ public final class BrowserRedirectHook {
         }
     }
 
-    /** Reflective no-arg getter; null on failure */
     private static Object invokeNoArg(Object target, String name) {
         try {
             return target.getClass().getMethod(name).invoke(target);
@@ -658,13 +581,11 @@ public final class BrowserRedirectHook {
         }
     }
 
-    /** True when the url matches the user's force-redirect list */
     private boolean forcedByUser(String url) {
         return matchesDomain(hostOf(url),
                 parseDomains(module.getString(App.KEY_BROWSER_REDIRECT_FORCE, "")));
     }
 
-    /** Rule check: http(s) only; block list > force list > host-app pages > defaults */
     boolean shouldRedirect(String url) {
         if (url == null) {
             return false;
@@ -679,7 +600,6 @@ public final class BrowserRedirectHook {
         }
         Uri uri = Uri.parse(trimmed);
         String host = hostOf(trimmed);
-        // keywords match path+query only ("pay" in a host would hit paypal.com)
         String path = (uri.getPath() == null ? "" : uri.getPath().toLowerCase())
                 + "?" + (uri.getQuery() == null ? "" : uri.getQuery().toLowerCase());
 
@@ -691,8 +611,6 @@ public final class BrowserRedirectHook {
         if (matchesDomain(host, forced)) {
             return true;
         }
-        // host-app H5 pages: cookies are injected in-app only. Checked after the force
-        // list, so an explicit user entry still wins
         if (isHostAppPage(host)) {
             return false;
         }
@@ -717,7 +635,6 @@ public final class BrowserRedirectHook {
         return true;
     }
 
-    /** One domain per line, full urls accepted; blank lines ignored */
     static List<String> parseDomains(String raw) {
         List<String> out = new ArrayList<>();
         if (raw == null || raw.isEmpty()) {
@@ -744,7 +661,6 @@ public final class BrowserRedirectHook {
         return out;
     }
 
-    /** Exact or subdomain match */
     private static boolean matchesDomain(String host, List<String> domains) {
         for (String d : domains) {
             if (host.equals(d) || host.endsWith("." + d)) {
@@ -754,7 +670,6 @@ public final class BrowserRedirectHook {
         return false;
     }
 
-    // ---- web log ----
 
     private static final int LOG_MAX_ENTRIES = 80;
 
@@ -786,7 +701,6 @@ public final class BrowserRedirectHook {
         persistLog();
     }
 
-    /** Title lands after onPageStarted: attach it to the newest same-url entry */
     private void recordTitle(WebView webView, String title) {
         if (!module.isEnabled(App.KEY_WEB_LOG, false) || title == null || title.isEmpty()) {
             return;
@@ -821,7 +735,6 @@ public final class BrowserRedirectHook {
         }
     }
 
-    /** Clear the memory ring and the persisted log (settings panel) */
     public static void clearLog() {
         synchronized (logLock) {
             logEntries.clear();

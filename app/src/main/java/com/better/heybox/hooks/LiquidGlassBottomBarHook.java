@@ -7,13 +7,10 @@ import com.better.heybox.MainModule;
 import com.better.heybox.ViewUtils;
 import com.better.heybox.liquidglass.LiquidGlassInstaller;
 
-/** Hooks host lifecycle and delegates to the complete ported glass installer. */
 public final class LiquidGlassBottomBarHook {
     private final MainModule module;
     public LiquidGlassBottomBarHook(MainModule module) { this.module = module; }
     public void install(ClassLoader cl) {
-        // 底部 Toast/应用内通知抬升避让玻璃栏；进程级一次，与玻璃是否启用无关
-        //（preLift 只在玻璃 host 存活时才动 y）
         com.better.heybox.liquidglass.BottomToastLifter.install();
         LiquidGlassInstaller.installSettingsEntries(cl);
         try {

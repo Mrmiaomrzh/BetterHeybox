@@ -5,7 +5,6 @@ on:
     branches:
       - "**"
 
-# Serialize CI builds so the daily build number is deterministic.
 concurrency:
   group: ci-daily-build-number
   cancel-in-progress: false

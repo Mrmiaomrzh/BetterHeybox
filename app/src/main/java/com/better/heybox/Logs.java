@@ -2,9 +2,6 @@ package com.better.heybox;
 
 import android.util.Log;
 
-/**
- * 统一日志出口：Release 放行 warn 及以上（异常与降级需可排查），Debug 全量；模块内请勿直接调用 Log
- */
 public final class Logs {
 
     private Logs() {

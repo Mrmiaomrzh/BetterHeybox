@@ -3,7 +3,6 @@ package com.better.heybox;
 import android.content.Context;
 import android.content.pm.PackageInfo;
 
-/** 从已安装 APK 的 Manifest 读取工作流注入的 versionName。 */
 public final class VersionUtils {
 
     private static final String MODULE_PACKAGE = "com.better.heybox";

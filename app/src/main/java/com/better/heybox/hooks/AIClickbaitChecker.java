@@ -23,20 +23,16 @@ import java.util.Map;
 import com.better.heybox.App;
 import com.better.heybox.MainModule;
 
-/** AI 标题党判定：OpenAI 兼容协议，批量 + 缓存 + 冷却，fail-open */
 public final class AIClickbaitChecker {
 
     public interface VerdictCallback {
-        /** verdicts: 缓存键 → 是否标题党；主线程回调 */
         void onVerdicts(Map<String, Boolean> verdicts);
     }
 
     public interface TestCallback {
-        /** ok=true 时 message 为成功描述；主线程回调 */
         void onResult(boolean ok, String message);
     }
 
-    // ---------- 提供商预设 ----------
 
     public static final String[] PROVIDER_IDS = {
             "deepseek", "kimi", "qwen", "zhipu", "openai", "openrouter", "local", "custom"};
@@ -58,7 +54,6 @@ public final class AIClickbaitChecker {
             "gpt-4o-mini", "openrouter/auto", "qwen2.5:3b", "",
     };
 
-    /** 默认判定提示词 */
     public static final String DEFAULT_PROMPT =
             "你是社区帖子的标题党判定器。逐条判断给定帖子标题是否属于标题党：夸大其词、"
                     + "制造悬念或恐慌、诱导点击或互动（例如「不看后悔」「速来」「惊了」「白嫖」"
@@ -73,7 +68,6 @@ public final class AIClickbaitChecker {
     private static final long COOLDOWN_IO_MS = 60_000;
     private static final long COOLDOWN_AUTH_MS = 300_000;
 
-    /** 输出 token 上限可选值（设置页选择行） */
     public static final int[] MAX_TOKEN_OPTIONS = {300, 500, 700, 1000, 1500};
     private static final int DEFAULT_MAX_TOKENS = 700;
 
@@ -96,7 +90,6 @@ public final class AIClickbaitChecker {
         return key == null ? null : sVerdictCache.get(key);
     }
 
-    /** 单次请求输出 token 上限（设置页可选）；非法值回落默认 */
     public static int maxTokens(MainModule module) {
         try {
             int v = Integer.parseInt(
@@ -126,7 +119,6 @@ public final class AIClickbaitChecker {
         return idx >= 0 ? PROVIDER_LABELS[idx] : "未选择";
     }
 
-    /** 入队待判定；冷却期直接丢弃 */
     public static void requestVerdicts(MainModule module, String key, String title,
                                        VerdictCallback callback) {
         if (System.currentTimeMillis() < sCooldownUntil) {
@@ -145,7 +137,6 @@ public final class AIClickbaitChecker {
         sWorkHandler.postDelayed(AIClickbaitChecker::flush, BATCH_DELAY_MS);
     }
 
-    /** 测试连接，主线程回调 */
     public static void testConnection(MainModule module, TestCallback callback) {
         ensureWorker();
         sWorkHandler.post(() -> {
@@ -261,10 +252,8 @@ public final class AIClickbaitChecker {
             enterCooldown(code == 401 || code == 403 ? COOLDOWN_AUTH_MS : COOLDOWN_HTTP_5XX_MS);
             return;
         }
-        // 解析失败放行
         Map<String, Boolean> verdicts = parseVerdicts(response.toString(), batch);
         if (verdicts.isEmpty()) {
-            // 整批无判定：多半是 max_tokens 截断或模型没按 JSON 输出，留痕供排查
             String snippet = response.length() > 160
                     ? response.substring(response.length() - 160) : response.toString();
             module.logd(Log.WARN, module.TAG,
@@ -287,7 +276,6 @@ public final class AIClickbaitChecker {
         }
     }
 
-    /** 尽力解析模型输出，失败返回空 */
     private static Map<String, Boolean> parseVerdicts(String raw, List<String[]> batch) {
         Map<String, Boolean> out = new LinkedHashMap<>();
         try {
@@ -318,7 +306,6 @@ public final class AIClickbaitChecker {
         return out;
     }
 
-    /** choices[0].message.content */
     private static String extractContent(String raw) {
         try {
             JSONObject root = new JSONObject(raw);
@@ -353,7 +340,6 @@ public final class AIClickbaitChecker {
             if (verdicts != null) {
                 return verdicts;
             }
-            // 兜底：{"1":true,"2":false} 形态
             JSONArray arr = new JSONArray();
             Iterator<String> keys = obj.keys();
             while (keys.hasNext()) {
@@ -368,7 +354,6 @@ public final class AIClickbaitChecker {
         }
     }
 
-    /** 兼容常见判定键名 */
     private static Boolean readFlag(JSONObject v) {
         for (String key : new String[]{"clickbait", "block", "is_clickbait"}) {
             if (v.has(key)) {
@@ -382,7 +367,6 @@ public final class AIClickbaitChecker {
         sCooldownUntil = System.currentTimeMillis() + durationMs;
     }
 
-    /** @return HTTP 状态码 */
     private static int postChatCompletion(String base, String token, JSONObject body,
                                           StringBuilder responseOut) throws java.io.IOException {
         String url = base.startsWith("http") ? base : "https://" + base;

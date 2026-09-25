@@ -15,19 +15,12 @@ import com.better.heybox.MainModule;
 import com.better.heybox.LogRecorder;
 import com.better.heybox.SelectionSafeLinkMovementMethod;
 
-/**
- * 帖子正文/标题复制。
- * 默认模式：解除 TextSelectHandler 拦截 + 正文原生 textIsSelectable + 透明 LinkMovementMethod 保留 @提及点击；不碰 Selection、触摸、NestedScrollView。
- * 自绘制模式：不开启系统选择，选区由 CustomTextSelection 自绘，切换后 refresh() 立即重放
- */
 public final class TextSelectHook {
 
     private final MainModule module;
 
-    /** refresh 用 */
     private static volatile TextSelectHook sInstance;
 
-    /** 已注入过文本选择的根 View（WeakReference，随 Fragment 回收自动清理） */
     private static final List<WeakReference<View>> sRegisteredRoots = new ArrayList<>();
 
     public TextSelectHook(MainModule module) {
@@ -35,7 +28,6 @@ public final class TextSelectHook {
         sInstance = this;
     }
 
-    /** 对已注册根 View 重放文本选择 */
     public static void refresh() {
         TextSelectHook instance = sInstance;
         if (instance != null) {
@@ -257,9 +249,6 @@ public final class TextSelectHook {
         applyTextSelectByIds(root, customSelect,
                 new String[]{"tv_title", "tv_desc"}, true, "设置文本选择失败");
 
-        /*
-         * 头部用户名：原生仅长按选择，自绘制模式由模块接管，均不改点击行为
-         */
         applyTextSelectByIds(root, customSelect,
                 new String[]{"bbs_name", "bbs_username", "bbs_user_name", "tv_post_author",
                         "tv_author", "tv_username", "tv_nickname", "tv_user_name",
@@ -286,11 +275,7 @@ public final class TextSelectHook {
         }
     }
 
-    /**
- * 对单个 TextView 应用选择：自绘制模式先卸载旧控制器再挂载并关闭系统选择；原生模式恢复标准选择（正文挂透明 LinkMovementMethod 保留 @提及点击）
- */
     private void applyTextSelect(TextView tv, String idName, boolean body, boolean customSelect) {
-        // 先卸载旧的自绘制控制器，避免刷新时新旧逻辑叠加
         CustomTextSelection.detach(tv);
 
         if (customSelect) {

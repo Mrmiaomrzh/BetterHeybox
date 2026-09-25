@@ -22,21 +22,12 @@ import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * Output layer: notification, in-app banner, third-party push (DingTalk / WxPusher /
- * OneBot / custom webhook).
- *
- * The channel is self-made and registered under the host package, so the host's
- * existing notification permission is reused.
- */
 public final class WatchOutput {
 
     public static final String CHANNEL_ID = "betterheybox_watch";
     private static final String CHANNEL_NAME = "动态推送";
 
-    /** Host router: dispatches a web/share url to post / web / native pages */
     private static final String HOST_ROUTER = "com.max.xiaoheihe.RouterActivity";
-    /** Host post page used when the router is missing (needs link_id) */
     private static final String HOST_POST_PAGE =
             "com.max.xiaoheihe.module.bbs.post.ui.activitys.NormalPostPageActivity";
 
@@ -49,7 +40,6 @@ public final class WatchOutput {
         sModule = module;
     }
 
-    // ---- notification ----
 
     private static void ensureChannel(Context ctx) {
         try {
@@ -66,7 +56,6 @@ public final class WatchOutput {
         }
     }
 
-    /** @return true when the notification was posted */
     public static boolean notifyPost(Context ctx, WatchItem item) {
         try {
             ensureChannel(ctx);
@@ -74,14 +63,10 @@ public final class WatchOutput {
             if (nm == null) {
                 return false;
             }
-            // stay in-app: target the host's own component. An implicit ACTION_VIEW is
-            // resolved by the system and lands in a browser (no login, no in-app comments)
             Intent intent = buildPostIntent(ctx, item);
             if (intent == null) {
-                // host names changed and both components are missing: fall back to the browser
                 intent = new Intent(Intent.ACTION_VIEW, Uri.parse(item.webUrl()));
             }
-            // posted from outside the process: NEW_TASK required
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             int code = item.linkId.hashCode();
             int flags = PendingIntent.FLAG_UPDATE_CURRENT;
@@ -105,7 +90,6 @@ public final class WatchOutput {
         }
     }
 
-    // ---- in-app banner ----
 
     public static void bannerOrToast(final Activity activity, final WatchItem item) {
         if (activity == null) {
@@ -121,7 +105,6 @@ public final class WatchOutput {
         }
     }
 
-    /** Summary banner when a batch has several posts */
     public static void bannerSummary(Activity activity, String title, String sub, Runnable onClick) {
         if (activity == null) {
             return;
@@ -133,7 +116,6 @@ public final class WatchOutput {
         }
     }
 
-    /** Open a post in-app (banner / summary banner / debug push) */
     public static void openPost(Context ctx, WatchItem item) {
         if (ctx == null || item == null) {
             return;
@@ -154,7 +136,6 @@ public final class WatchOutput {
         }
     }
 
-    /** Non-Activity context (app context, background thread): NEW_TASK required */
     private static void startActivity(Context ctx, Intent intent) {
         if (!(ctx instanceof Activity)) {
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -162,13 +143,6 @@ public final class WatchOutput {
         ctx.startActivity(intent);
     }
 
-    /**
-     * Post intent: the host router with the web/share url first, then the post page with
-     * link_id. Explicit components keep the tap in-app, while an implicit ACTION_VIEW is
-     * resolved by the system and can land in a browser.
-     *
-     * @return null when neither component exists (caller falls back to the browser)
-     */
     private static Intent buildPostIntent(Context ctx, WatchItem item) {
         if (ctx == null || item == null || item.linkId == null || item.linkId.isEmpty()) {
             return null;
@@ -186,7 +160,6 @@ public final class WatchOutput {
         return null;
     }
 
-    /** Null instead of throwing when the host class is missing */
     private static Class<?> loadHostClass(ClassLoader cl, String name) {
         if (cl != null) {
             try {
@@ -201,13 +174,7 @@ public final class WatchOutput {
         }
     }
 
-    // ---- third-party push ----
 
-    /**
-     * Debug banner: tapping only reports whether the callback fires, no navigation.
-     *
-     * @return true when the banner was shown
-     */
     public static boolean testBanner(final Activity activity, final WatchItem item) {
         if (activity == null || item == null) {
             return false;
@@ -226,7 +193,6 @@ public final class WatchOutput {
         }
     }
 
-    /** Send to every configured channel; returns the success count */
     public static int pushAll(WatchConfig cfg, WatchItem item) {
         if (!cfg.pushEnabled) {
             return 0;
@@ -249,7 +215,6 @@ public final class WatchOutput {
         return ok;
     }
 
-    /** DingTalk bot: access_token or a full webhook url */
     private static boolean sendDingtalk(String cfg, String title, String text) {
         String url = cfg.startsWith("http") ? cfg : ("https://oapi.dingtalk.com/robot/send?access_token=" + cfg);
         try {
@@ -266,7 +231,6 @@ public final class WatchOutput {
         }
     }
 
-    /** WxPusher: appToken|topicId or appToken|uid:UID */
     private static boolean sendWxPusher(String cfg, String title, String text) {
         try {
             String[] parts = cfg.split("\\|");
@@ -295,17 +259,6 @@ public final class WatchOutput {
         }
     }
 
-    /**
-     * AstrBot / OneBot v11 (AstrBot's aiocqhttp adapter, NapCat, Lagrange, ...).
-     *
-     * <p>Config, pipe separated:
-     * <pre>
-     *   http://host:6199|group
-     *   http://host:6199|group|access_token
-     *   http://host:6199|private:QQ|access_token
-     * </pre>
-     * aiocqhttp listens on 6199 by default; the token is sent as Authorization: Bearer.
-     */
     private static boolean sendOneBot(String cfg, WatchItem item) {
         try {
             String[] parts = cfg.split("\\|");
@@ -322,7 +275,6 @@ public final class WatchOutput {
                 o.put("group_id", Long.parseLong(target.isEmpty() ? "0" : target));
             }
             o.put("message", "【小黑盒】" + item.displayTitle() + "\n" + item.webUrl());
-            // keep [CQ:...] in the title from being parsed as CQ codes
             o.put("auto_escape", true);
             Map<String, String> headers = new HashMap<>();
             if (!token.isEmpty()) {
@@ -335,7 +287,6 @@ public final class WatchOutput {
         }
     }
 
-    /** Custom webhook: {title} {author} {link} {desc} placeholders; query allowed */
     private static boolean sendCustom(String cfg, WatchItem item) {
         try {
             String url = cfg
@@ -417,7 +368,6 @@ public final class WatchOutput {
         }
     }
 
-    /** Used by the settings panel "test push" */
     public static Map<String, String> testPayload() {
         Map<String, String> m = new HashMap<>();
         m.put("title", "测试消息");

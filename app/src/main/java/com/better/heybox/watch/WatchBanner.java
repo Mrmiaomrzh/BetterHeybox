@@ -15,16 +15,6 @@ import java.lang.ref.WeakReference;
 import java.util.ArrayDeque;
 import java.util.Deque;
 
-/**
- * 应用内横幅提醒（自绘，不依赖宿主内部组件）。
- *
- * <p>挂在 Activity 的 content 根布局上，顶部滑入、3.5 秒后自动消失，点击可打开帖子。
- * 多条提醒<b>排队依次显示</b>（最多排 3 条），避免同时炸出一堆；显示中的横幅不会被
- * 前一条的定时器误关（定时器与具体 View 绑定）。
- *
- * <p>之所以自绘而不是反射宿主的 {@code InAppNotificationManager}：后者的配置类被混淆
- * （{@code a}/{@code q}），跨版本极易失效；本模块已有大量自绘 UI 先例（液态玻璃等）。
- */
 public final class WatchBanner {
 
     private static final long AUTO_DISMISS_MS = 3500L;
@@ -59,7 +49,6 @@ public final class WatchBanner {
         enqueue(activity, "🔔 " + item.displayTitle(), item.displayText().replace('\n', ' '), onClick);
     }
 
-    /** 汇总横幅（一批多条时用一条横幅代替刷屏） */
     public static void showSummary(Activity activity, String title, String sub, Runnable onClick) {
         if (activity == null) {
             return;
@@ -77,7 +66,6 @@ public final class WatchBanner {
         pump();
     }
 
-    /** 取队首显示（空闲时） */
     private static void pump() {
         Pending next = null;
         synchronized (LOCK) {
@@ -176,8 +164,6 @@ public final class WatchBanner {
         root.addView(card);
         sCurrent = new WeakReference<>(card);
         card.animate().alpha(1f).translationY(0f).setDuration(180L).start();
-        // 定时器与具体 View 绑定：只有它仍是当前横幅时才关闭，避免误关后一条；
-        // 用主线程 Handler 而不是 view.postDelayed —— 页面销毁时后者可能不再执行，会把队列卡死
         new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
             if (sCurrent.get() == card) {
                 dismiss(card);
@@ -187,7 +173,6 @@ public final class WatchBanner {
         }, AUTO_DISMISS_MS);
     }
 
-    /** 关闭指定横幅；关完继续显示队列里的下一条 */
     private static void dismiss(final View v) {
         if (v == null) {
             return;
@@ -217,7 +202,6 @@ public final class WatchBanner {
         }
     }
 
-    /** 立即清空队列并关闭当前横幅（切换页面/手动关闭时用） */
     public static void clear() {
         synchronized (LOCK) {
             QUEUE.clear();

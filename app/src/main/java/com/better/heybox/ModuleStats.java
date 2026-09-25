@@ -7,41 +7,27 @@ import java.util.concurrent.atomic.AtomicLong;
 
 public final class ModuleStats {
 
-    /** copy-helper calls seen (includes non-comment copies: row bindings also hit helpers) */
     public static final AtomicInteger commentCopyHelperCalls = new AtomicInteger();
-    /** helper calls where the long-press record was available (one-view fast path) */
     public static final AtomicInteger commentCopyWithRecord = new AtomicInteger();
-    /** helper calls with no record: window search is required (some builds never record) */
     public static final AtomicInteger commentCopyNoRecord = new AtomicInteger();
-    /** budgeted window DFS runs (one per record-less helper call, only on real copies) */
     public static final AtomicInteger commentDfsRuns = new AtomicInteger();
-    /** DFS runs stopped by the node budget (the target may sit further down) */
     public static final AtomicInteger commentDfsBudgetHits = new AtomicInteger();
-    /** total View nodes visited by the DFS */
     public static final AtomicLong commentDfsNodes = new AtomicLong();
-    /** total DFS time (ms) */
     public static final AtomicLong commentDfsMillis = new AtomicLong();
-    /** text matched a comment view -> sheet shown */
     public static final AtomicInteger commentCopyMatched = new AtomicInteger();
-    /** DFS ran but nothing matched */
     public static final AtomicInteger commentCopyNoMatch = new AtomicInteger();
 
-    /** MainActivity.onResume daily-task checks */
     public static final AtomicInteger dailyTaskResumeChecks = new AtomicInteger();
-    /** "no share link configured" hits (the log line itself is throttled) */
     public static final AtomicInteger dailyTaskNoLink = new AtomicInteger();
 
-    /** module operations slower than {@link #SLOW_MS} */
     public static final AtomicInteger slowOps = new AtomicInteger();
 
-    /** slow-op threshold; below it we count nothing to avoid noise */
     private static final long SLOW_MS = 50L;
     private static final Map<String, AtomicInteger> SLOW_BY_NAME = new ConcurrentHashMap<>();
 
     private ModuleStats() {
     }
 
-    /** Record one slow module op (only when &gt;{@value #SLOW_MS}ms). */
     public static void slow(String name, long ms) {
         if (ms < SLOW_MS || name == null) {
             return;
@@ -54,7 +40,6 @@ public final class ModuleStats {
         counter.incrementAndGet();
     }
 
-    /** One-line summary for the log-export header and crash snapshots. */
     public static String snapshot() {
         StringBuilder sb = new StringBuilder(320);
         sb.append("评论自由复制：助手调用=").append(commentCopyHelperCalls.get())

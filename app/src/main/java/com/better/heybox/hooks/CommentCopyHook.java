@@ -35,13 +35,6 @@ import com.better.heybox.ModuleStats;
 import com.better.heybox.ThemeUtils;
 import com.better.heybox.ViewUtils;
 
-/**
- * Comment free-copy (issue #32): long-press a comment, tap "Copy" in the host menu and
- * a sheet offers Copy all / Free copy / Copy @user / Cancel. "Free copy" opens a centered
- * card with the full comment text, where long-press starts the system text selection.
- * Hooked at the copy exits (host copy helpers + ClipboardManager), so the host menu and
- * every other comment interaction stay untouched.
- */
 public final class CommentCopyHook {
 
     private static final String COMMENT_VIEW_CLASS =
@@ -53,10 +46,7 @@ public final class CommentCopyHook {
     private static final long MENU_DISMISS_DELAY_MS = 200L;
     private static final long SHEET_WINDOW_MS = 1_500L;
     private static final long TOAST_SUPPRESS_MS = 2_500L;
-    /** View-node budget for one lookup (#37). Only real copies reach it, so it stays generous on purpose:
-     *  a missed target costs a broken feature, an oversized scan only costs a few ms once per copy. */
     private static final int MAX_SCAN_NODES = 20_000;
-    /** min interval between "no match" diagnostics (#37) */
     private static final long NO_MATCH_LOG_INTERVAL_MS = 2_000L;
 
     private final MainModule module;
@@ -71,7 +61,6 @@ public final class CommentCopyHook {
     private volatile long lastSheetAt;
     private volatile long suppressToastUntil;
     private volatile long lastNoMatchLogAt;
-    // let clipboard writes through while the card is open
     private volatile boolean freeCopyScreenShowing;
 
     public CommentCopyHook(MainModule module) {
@@ -79,7 +68,6 @@ public final class CommentCopyHook {
         sInstance = this;
     }
 
-    // flag is read on every copy; nothing to refresh
     public static void refresh() {
         CommentCopyHook instance = sInstance;
         if (instance != null) {
@@ -109,25 +97,15 @@ public final class CommentCopyHook {
                 + " / 状态=" + (module.isEnabled(App.KEY_COMMENT_FREE_COPY, true) ? "开启" : "关闭"));
     }
 
-    // ---- (1a) host copy helpers
 
-    /**
-     * #37: only {@code t(Context, CharSequence)} in com.max.xiaoheihe.utils.h writes the clipboard
-     * (same in 1.3.393/394/395/396). A whole-class signature scan matched 21 unrelated methods
-     * (Lv.xx row bindings, medal cards, broadcast helpers...), so every row bind ran a full-tree scan
-     * plus one WARN. Now: hook exactly when found, otherwise warn once and rely on the (1b) clipboard
-     * exit - never fall back to a full-class scan.
-     */
     private boolean hookCopyHelpers(ClassLoader cl) {
         boolean any = false;
         any |= hookNamedCopyHelper(cl, "com.max.xiaoheihe.utils.h", "t");
-        // every static void method below ends in setPrimaryClip -> copy-only classes, scanning is safe
         any |= hookCopyOnlyClass(cl, "com.max.hbutils.utils.y");
         any |= hookCopyOnlyClass(cl, "com.max.accelworld.c");
         return any;
     }
 
-    /** Name-pinned hook: only same-name methods are shape-matched (String/CharSequence tolerant). */
     private boolean hookNamedCopyHelper(ClassLoader cl, String className, String methodName) {
         try {
             Class<?> clazz = Class.forName(className, false, cl);
@@ -160,7 +138,6 @@ public final class CommentCopyHook {
         }
     }
 
-    /** Signature scan for a copy-only class (every static void method writes the clipboard). */
     private boolean hookCopyOnlyClass(ClassLoader cl, String className) {
         try {
             Class<?> clazz = Class.forName(className, false, cl);
@@ -216,9 +193,6 @@ public final class CommentCopyHook {
                             && ((CharSequence) textArg).length() > 0) {
                         CharSequence text = (CharSequence) textArg;
                         ModuleStats.commentCopyHelperCalls.incrementAndGet();
-                        // Do NOT require a long-press record here: on some builds the comment long-press
-                        // never reaches View#performLongClick, so a record-less copy must still be matched
-                        // by text inside the window (that is the only path that ever worked before #37).
                         View recorded = validRecordedView();
                         Activity activity = activityOfArg(chain.getArg(ctxIdx));
                         if (activity == null && recorded != null) {
@@ -253,7 +227,7 @@ public final class CommentCopyHook {
         int found = -1;
         for (int i = 0; i < params.length; i++) {
             if (CharSequence.class.isAssignableFrom(params[i])) {
-                found = i; // last match wins: text comes after label
+                found = i;
             }
         }
         return found;
@@ -279,7 +253,6 @@ public final class CommentCopyHook {
         return null;
     }
 
-    // ---- (1b) clipboard exit
 
     private boolean hookClipboard() {
         try {
@@ -345,16 +318,13 @@ public final class CommentCopyHook {
         }
     }
 
-    // ---- (1c) host "copied" toast
 
-    // host "text copied" toast exit: hbutils.utils.f
     private boolean hookCopyToast(ClassLoader cl) {
         boolean any = hookToastUtil(cl, TOAST_UTIL_CLASS);
         any |= hookToastUtil(cl, "com.max.hbutils.utils.b0");
         return any;
     }
 
-    // host toast utils: swallow anything inside the window
     private boolean hookToastUtil(ClassLoader cl, String className) {
         try {
             Class<?> clazz = Class.forName(className, false, cl);
@@ -392,7 +362,6 @@ public final class CommentCopyHook {
         }
     }
 
-    // backstop: plain Toast#show
     private boolean hookToastSuppress() {
         try {
             Method show = Toast.class.getDeclaredMethod("show");
@@ -425,7 +394,6 @@ public final class CommentCopyHook {
                 && (shown.contains("剪贴板") || shown.contains("剪貼簿"));
     }
 
-    /** Swallow host toasts while the suppression window is open (custom-view toasts included) */
     private boolean shouldSuppressToast(Object toast) {
         if (!(toast instanceof Toast)) {
             return false;
@@ -436,8 +404,6 @@ public final class CommentCopyHook {
             shown = value == null ? null : String.valueOf(value);
         } catch (Throwable ignored) {
         }
-        // inside the window: swallow regardless of text (custom-view toasts included);
-        // outside: only the "copied to clipboard" wording (toast-before-copy order)
         if (!inSuppressWindow() && !isCopyToastText(shown)) {
             return false;
         }
@@ -446,7 +412,6 @@ public final class CommentCopyHook {
         return true;
     }
 
-    // host "copied to clipboard" wording, simplified / traditional
     private boolean isCopyToastText(String shown) {
         if (shown == null || !module.isEnabled(App.KEY_COMMENT_FREE_COPY, true)) {
             return false;
@@ -494,7 +459,6 @@ public final class CommentCopyHook {
         suppressToastUntil = now + TOAST_SUPPRESS_MS;
     }
 
-    // ---- (2) long-press target
 
     private boolean hookPerformLongClick() {
         try {
@@ -538,7 +502,6 @@ public final class CommentCopyHook {
         return target;
     }
 
-    // nearest comment view: self -> subtree -> up to 4 ancestors (single match only)
     private View findCommentViewNear(View start) {
         if (start == null) {
             return null;
@@ -585,7 +548,6 @@ public final class CommentCopyHook {
         }
     }
 
-    /** Per-traversal node budget (#37): large lists are no longer walked end to end. */
     private static final class Scan {
         int nodes;
     }
@@ -598,7 +560,6 @@ public final class CommentCopyHook {
         return COMMENT_VIEW_CLASS.equals(view.getClass().getName());
     }
 
-    // ---- target lookup
 
     private View findCommentViewFor(CharSequence copied) {
         View recorded = validRecordedView();
@@ -673,7 +634,6 @@ public final class CommentCopyHook {
     private void logNoMatch(int scannedNodes, CharSequence copied, View recorded,
                             boolean budgetExhausted) {
         long now = SystemClock.uptimeMillis();
-        // a budget hit means the target may sit further down: do not let the rate limit hide it
         if (!budgetExhausted && now - lastNoMatchLogAt < NO_MATCH_LOG_INTERVAL_MS) {
             return;
         }
@@ -696,8 +656,6 @@ public final class CommentCopyHook {
         if (viewText.length() >= 6 && copied.contains(viewText)) {
             return true;
         }
-        // collapsed long comment: the view shows truncated text + "expand" while the host
-        // copies the full raw text -> prefix match (first 24 chars of the shorter side)
         int probe = Math.min(Math.min(viewText.length(), copied.length()), 24);
         return probe >= 8 && viewText.regionMatches(0, copied, 0, probe);
     }
@@ -706,7 +664,6 @@ public final class CommentCopyHook {
         return anchor != null ? ViewUtils.findActivity(anchor) : null;
     }
 
-    // ---- module sheet
 
     private void showCopySheet(final TextView commentView, final CharSequence copiedText,
                                final Object clipboard) {
@@ -815,7 +772,6 @@ public final class CommentCopyHook {
         return row;
     }
 
-    /** Bounded rounded pressed highlight (no ripple) */
     private static android.graphics.drawable.Drawable pressedBackground(Context context,
                                                                        int pressedColor) {
         float radius = ThemeUtils.dp(context, 14);
@@ -840,12 +796,7 @@ public final class CommentCopyHook {
         return divider;
     }
 
-    // ---- free copy card
 
-    /**
-     * The "free copy" card: full comment text, centered, system text selection on long-press.
-     * Never call setMovementMethod after setTextIsSelectable (it would break selection).
-     */
     private void showFreeCopyScreen(final Activity activity, final TextView commentView,
                                     final CharSequence interceptedText) {
         final String text = rawCommentText(commentView, interceptedText);
@@ -860,7 +811,6 @@ public final class CommentCopyHook {
         int primary = dark ? 0xE6FFFFFF : 0xDD000000;
         int secondary = dark ? 0x99FFFFFF : 0x99000000;
 
-        // centered card (same as the previous build)
         applyCenteredCardWindow(window, activity, surface, 0.45f);
         dialog.setCanceledOnTouchOutside(true);
 
@@ -872,7 +822,6 @@ public final class CommentCopyHook {
         root.setBackground(bg);
         int pad = ThemeUtils.dp(activity, 18);
         root.setPadding(pad, pad, pad, ThemeUtils.dp(activity, 18));
-        // self-drawn handles follow the module switch 自绘制文本选择 (post body uses the same one)
         final boolean customHandles = module.isEnabled(App.KEY_CUSTOM_TEXT_SELECT, false);
 
         final TextView body = new TextView(activity);
@@ -881,11 +830,9 @@ public final class CommentCopyHook {
         body.setTextColor(primary);
         body.setGravity(Gravity.CENTER);
         body.setLineSpacing(ThemeUtils.dp(activity, 5), 1f);
-        // room for the system handles of the first / last line
         int handlePad = ThemeUtils.dp(activity, 26);
         body.setPadding(0, handlePad, 0, handlePad);
         if (!customHandles) {
-            // system text selection: do not touch MovementMethod
             body.setTextIsSelectable(true);
         }
 
@@ -894,7 +841,6 @@ public final class CommentCopyHook {
         int availWidth = Math.max(0, metrics.widthPixels - pad * 2);
         body.measure(View.MeasureSpec.makeMeasureSpec(availWidth, View.MeasureSpec.AT_MOST),
                 View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
-        // wrap in a ScrollView only when the text does not fit: no scrollable parent, nothing to steal
         final MaxHeightScrollView scroll = body.getMeasuredHeight() > maxHeight
                 ? new MaxHeightScrollView(activity, maxHeight) : null;
         if (scroll != null) {
@@ -905,7 +851,6 @@ public final class CommentCopyHook {
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
             root.addView(scroll, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            // keep the gesture with the TextView while a selection is alive
             body.setOnTouchListener(new View.OnTouchListener() {
                 private boolean downHadSelection;
 
@@ -935,7 +880,6 @@ public final class CommentCopyHook {
         root.addView(hint);
 
         freeCopyScreenShowing = true;
-        // system-toolbar copies must pass through
         suppressToastUntil = 0L;
 
         dialog.setOnDismissListener(new android.content.DialogInterface.OnDismissListener() {
@@ -963,10 +907,8 @@ public final class CommentCopyHook {
                 + text.length() + " 字，" + (selfDrawn ? "自绘手柄" : "系统文本选择") + "）");
     }
 
-    // ---- sheet window / navigation bar
 
 
-    /** Centered card window: WRAP_CONTENT, centered, dim behind; styles the navigation bar */
     private void applyCenteredCardWindow(Window window, Activity activity, int surface, float dim) {
         if (window == null) {
             return;
@@ -981,7 +923,6 @@ public final class CommentCopyHook {
         styleNavigationBar(window, activity, surface);
     }
 
-    // nav bar: same color as the card, dark icons on light backgrounds
     private void styleNavigationBar(Window window, Activity activity, int surface) {
         boolean dark = ThemeUtils.isDarkMode(activity);
         try {
@@ -1026,7 +967,6 @@ public final class CommentCopyHook {
         styleNavigationBar(window, activity, surface);
     }
 
-    // navigation bar height (content avoids it; background does not need to)
     private static int navBarHeight(Window window) {
         if (window == null) {
             return 0;
@@ -1045,7 +985,6 @@ public final class CommentCopyHook {
         }
     }
 
-    // ScrollView capped at a max height; never steals the gesture during a selection drag
     private static final class MaxHeightScrollView extends ScrollView {
         private final int maxHeight;
         private volatile long keepGestureUntil;
@@ -1074,7 +1013,6 @@ public final class CommentCopyHook {
         }
     }
 
-    // prefer the raw BBSCommentObj text from the view tag (keeps [emoji] markers)
     private String rawCommentText(View commentView, CharSequence fallback) {
         try {
             Object tag = commentView.getTag();
@@ -1089,11 +1027,6 @@ public final class CommentCopyHook {
         return fallback == null ? null : sanitizeCardText(fallback.toString());
     }
 
-    /**
-     * Drop everything the host hides inside comment text (zero-width chars, bidi marks,
-     * control chars, odd separators), unify line breaks and collapse blank lines, so
-     * selecting and dragging stays smooth.
-     */
     private static String sanitizeCardText(String text) {
         if (text == null) {
             return "";
@@ -1101,7 +1034,7 @@ public final class CommentCopyHook {
         String normalized = text.replace("\r\n", "\n").replace('\r', '\n')
                 .replace('\u2028', '\n').replace('\u2029', '\n').replace('\u0085', '\n');
         StringBuilder sb = new StringBuilder(normalized.length());
-        boolean lastNewline = true; // also trims leading blank lines
+        boolean lastNewline = true;
         for (int i = 0; i < normalized.length(); i++) {
             char ch = normalized.charAt(i);
             if (isHiddenChar(ch)) {
@@ -1136,25 +1069,23 @@ public final class CommentCopyHook {
         return out.toString();
     }
 
-    /** Invisible characters the host sprinkles into comment text */
     private static boolean isHiddenChar(char ch) {
         if (ch == '\uFEFF' || ch == '\u2060' || ch == '\u180E' || ch == '\u00AD'
                 || ch == '\u061C' || ch == '\uFFFC') {
             return true;
         }
         if (ch >= '\u2000' && ch <= '\u200F') {
-            return true; // en/em/thin spaces + LRM/RLM/ZWNJ/ZWJ
+            return true;
         }
         if (ch >= '\u202A' && ch <= '\u202E') {
-            return true; // bidi embeddings
+            return true;
         }
         if (ch >= '\u2066' && ch <= '\u2069') {
-            return true; // bidi isolates
+            return true;
         }
         return ch == 0x7F || (ch < 0x20 && ch != '\n');
     }
 
-    // ---- utils
 
     private void writeClipboard(Object clipboard, CharSequence text) {
         try {
@@ -1175,7 +1106,6 @@ public final class CommentCopyHook {
 
     private void toast(String text) {
         try {
-            // let our own toast through
             suppressToastUntil = 0L;
             Context context = App.resolveAppContext();
             if (context != null) {

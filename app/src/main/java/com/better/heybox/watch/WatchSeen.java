@@ -9,12 +9,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
-/**
- * 已推送集合 + 上次检查时间。
- *
- * <p>用 betterheybox.xml 里的定长字符串保存（逗号分隔、有界），避免引入新文件；
- * 这样也能被现有的配置备份机制一并带走。
- */
 public final class WatchSeen {
 
     private static final Object LOCK = new Object();
@@ -118,7 +112,6 @@ public final class WatchSeen {
         flushNow();
     }
 
-    // ------------------------------------------------------------ 首轮基线
 
     private static Set<String> sBaselined;
 
@@ -155,7 +148,7 @@ public final class WatchSeen {
             set.add(userId);
             joined = String.join(",", set);
         }
-        HeyboxPrefs.setString(App.KEY_WATCH_BASELINED, joined);   // 锁外写盘
+        HeyboxPrefs.setString(App.KEY_WATCH_BASELINED, joined);
     }
 
     public static void clearBaselines() {

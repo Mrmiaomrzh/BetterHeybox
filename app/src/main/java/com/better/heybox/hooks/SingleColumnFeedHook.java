@@ -11,20 +11,6 @@ import java.lang.reflect.Method;
 import com.better.heybox.App;
 import com.better.heybox.MainModule;
 
-/**
- * 屏蔽双列样式，恢复单列信息流。两条独立路径：
- *
- * <p>1. 旧版双列瀑布流：bbs/utils/b 的静态方法 X(Context, RecyclerView, int, int, int)
- * 设置的 StaggeredGridLayoutManager(2, 1) 替换为单列 LinearLayoutManager。
- * 覆盖页面：话题详情（HashtagDetailContentFragment，layout_type == 3 时）、
- * 概念链/百科（ConceptLinksFragment，无条件）。</p>
- *
- * <p>2. 首页推荐流双列（394-1127 新增，云端灰控 content_type=106）：Epoxy 渲染链
- * DiscoveryFragmentV2 → RecommendFeedsFlowFragmentV2 → RecommendFlowRVController
- * 把相邻两张 WaterfallLinkFeedsFlowItemModel 配成一对，塞进横向的
- * WaterfallPairGroupContainer（子项 width=0/weight=1 等分、onMeasure 强制等高）。
- * 布局管理器本身是 LinearLayoutManager，替换无效，只能动容器与子视图。</p>
- */
 public final class SingleColumnFeedHook {
 
     private static final String CONTAINER_CLASS =
@@ -32,7 +18,6 @@ public final class SingleColumnFeedHook {
     private static final String CARD_CLASS =
             "com.max.feature.feeds.view.itemview.WaterfallFeedsFlowItemViewV2";
 
-    /** 封面宽高比：宿主瀑布流卡封面固定 1:1，全宽下过高，改回旧单列卡占位图 375x210 的比例 */
     private static final float COVER_RATIO = 210f / 375f;
 
     private final MainModule module;
@@ -106,11 +91,6 @@ public final class SingleColumnFeedHook {
         }
     }
 
-    /**
-     * 首页推荐流：把配对容器改为纵向全宽单列。
-     * 宿主在卡片 onAttachedToWindow 里会把自身重新强制回 width=0/weight=1（纵向排列下宽 0
-     * 会直接消失），必须再次纠正；封面 1:1 方图在全宽下过高，一并修正比例。
-     */
     private void installEpoxyPairHook(ClassLoader cl) {
         try {
             Class<?> container = Class.forName(CONTAINER_CLASS, false, cl);
@@ -118,7 +98,6 @@ public final class SingleColumnFeedHook {
             try {
                 coverClass = Class.forName(CARD_CLASS + "$RoundedCoverContainer", false, cl);
             } catch (Throwable t) {
-                // 找不到封面容器时只影响比例修正（保持 1:1 方图），单列本身不受影响
                 module.logd(Log.WARN, module.TAG, "未找到 RoundedCoverContainer，封面比例修正不可用");
             }
             int installed = 0;

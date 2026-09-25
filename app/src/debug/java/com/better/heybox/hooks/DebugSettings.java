@@ -2,7 +2,6 @@ package com.better.heybox.hooks;
 
 import com.better.heybox.App;
 
-/** Debug-only settings rows. */
 public final class DebugSettings {
 
     private DebugSettings() {

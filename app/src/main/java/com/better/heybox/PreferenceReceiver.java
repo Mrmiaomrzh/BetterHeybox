@@ -12,10 +12,6 @@ import java.util.Set;
 
 import io.github.libxposed.service.XposedService;
 
-/**
- * 接收小黑盒进程（内嵌设置面板）的开关写请求，写入模块进程 RemotePreferences。
- * 修复「模块进程未运行时切换无效」：广播带 FLAG_INCLUDE_STOPPED_PACKAGES 唤醒进程；goAsync() 等待服务绑定（最多 6 秒）后补交；待提交缓存 commit() 同步落盘
- */
 public class PreferenceReceiver extends BroadcastReceiver {
 
     public static final String ACTION_SET_BOOLEAN = "com.better.heybox.SET_BOOLEAN";
@@ -24,7 +20,6 @@ public class PreferenceReceiver extends BroadcastReceiver {
     private static final String PENDING_PREFS = App.PENDING_PREFS;
     private static final long WAIT_SERVICE_BIND_MS = 6000;
 
-    /** 派生自 {@link App#BOOLEAN_DEFAULTS} */
     private static final Set<String> ALLOWED_KEYS = new HashSet<>(App.BOOLEAN_DEFAULTS.keySet());
 
     @Override
@@ -60,7 +55,6 @@ public class PreferenceReceiver extends BroadcastReceiver {
                             + ", pendingCount=" + pending.getAll().size());
                     LogRecorder.recordEvent("开关变更已写入待提交缓存: key=" + key + ", value=" + value);
 
-                    // 冷启动时框架服务绑定是异步的：等待绑定后立即补交，确保设置不丢
                     XposedService service = App.getService();
                     long deadline = System.currentTimeMillis() + WAIT_SERVICE_BIND_MS;
                     while (service == null && System.currentTimeMillis() < deadline) {
