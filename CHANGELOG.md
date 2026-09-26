@@ -1,6 +1,6 @@
 # Changelog
 
-本项目版本号采用 `v主版本.次版本.修订版本` 格式。推送代码时，CI 会构建带日期和当日序号的版本并将 APK 保存在 Action 成品中；Release 工作流手动输入版本号后创建正式 Release，并在说明中列出 commit 更新内容。
+本项目版本号采用 `v主版本.次版本.修订版本` 格式。推送代码时，CI 会构建带日期和当日序号的版本并将 APK 保存在 Action 成品中；Release 工作流手动输入版本号后创建正式 Release，并在说明中列出下面的更新日志与带链接的提交记录。CI（仅 `main`）与 Release 都会把版本信息、更新日志、commit 链接和构建产物同步到 Telegram，配置见 [`.github/TELEGRAM.md`](.github/TELEGRAM.md)。
 
 ## 0.8.4
 

@@ -7,6 +7,11 @@ on:
         description: "版本号"
         required: true
         type: string
+      notify_telegram:
+        description: "发布后同步到 Telegram"
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: write
@@ -72,13 +77,37 @@ jobs:
           fi
 
           previous_tag="$(git tag --list 'v*' --sort=-version:refname | head -n 1)"
+          if [ -n "$previous_tag" ]; then
+            range="${previous_tag}..HEAD"
+          else
+            range="HEAD"
+          fi
+          repo_url="https://github.com/${GITHUB_REPOSITORY}"
+
+          changelog="$(awk -v v="$version" '
+            $0 ~ "^##[[:space:]]+" v "[[:space:]]*$" { found = 1; next }
+            found && $0 ~ "^##[[:space:]]" { exit }
+            found { print }
+          ' CHANGELOG.md | awk 'NF { started = 1 } started')"
+          if [ -n "$changelog" ]; then
+            has_changelog=true
+          else
+            has_changelog=false
+          fi
+
           {
             echo "## 更新内容"
-            if [ -n "$previous_tag" ]; then
-              git log "${previous_tag}..HEAD" --pretty=format:'- %h %s'
+            echo
+            if [ "$has_changelog" = "true" ]; then
+              printf '%s\n' "$changelog"
             else
-              git log -n 50 --pretty=format:'- %h %s'
+              git log "$range" -n 50 --pretty=format:'- %h %s'
+              echo
             fi
+            echo
+            echo "## 提交记录"
+            echo
+            git log "$range" -n 50 --pretty=format:"- [%h](${repo_url}/commit/%H) %s"
             echo
           } > release-notes.md
 
@@ -89,6 +118,8 @@ jobs:
           echo "version_name=v${version}" >> "$GITHUB_OUTPUT"
           echo "version_code=${version_code}" >> "$GITHUB_OUTPUT"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "previous_tag=${previous_tag}" >> "$GITHUB_OUTPUT"
+          echo "has_changelog=${has_changelog}" >> "$GITHUB_OUTPUT"
 
       - name: Build release APK
         run: |
@@ -103,6 +134,7 @@ jobs:
         run: |
           mkdir -p dist
           cp app/build/outputs/apk/release/*.apk "dist/BetterHeybox-${RELEASE_VERSION}.apk"
+          sha256sum dist/*.apk
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v7
@@ -120,3 +152,93 @@ jobs:
           files: dist/*.apk
           draft: false
           prerelease: false
+
+      - name: Build Telegram message
+        env:
+          RELEASE_VERSION: ${{ steps.release_meta.outputs.version }}
+          RELEASE_TAG: ${{ steps.release_meta.outputs.tag }}
+          PREVIOUS_TAG: ${{ steps.release_meta.outputs.previous_tag }}
+          HAS_CHANGELOG: ${{ steps.release_meta.outputs.has_changelog }}
+        run: |
+          set -euo pipefail
+
+          escape_html() {
+            sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+          }
+
+          repo_url="https://github.com/${GITHUB_REPOSITORY}"
+          release_url="${repo_url}/releases/tag/${RELEASE_TAG}"
+          apk="dist/BetterHeybox-${RELEASE_VERSION}.apk"
+          size_bytes="$(wc -c < "$apk" | tr -d '[:space:]')"
+          size_human="$(awk -v b="$size_bytes" 'BEGIN { printf "%.2f MB", b / 1048576 }')"
+          sha256="$(sha256sum "$apk" | cut -d' ' -f1)"
+
+          if [ -n "$PREVIOUS_TAG" ]; then
+            range="${PREVIOUS_TAG}..HEAD"
+          else
+            range="HEAD"
+          fi
+          commit_total="$(git rev-list --count "$range")"
+
+          changelog=""
+          if [ "$HAS_CHANGELOG" = "true" ]; then
+            changelog="$(awk -v v="${RELEASE_VERSION#v}" '
+              $0 ~ "^##[[:space:]]+" v "[[:space:]]*$" { found = 1; next }
+              found && $0 ~ "^##[[:space:]]" { exit }
+              found { print }
+            ' CHANGELOG.md \
+              | awk 'NF { started = 1 } started' \
+              | escape_html \
+              | sed -e 's/\*\*//g' -e 's|^###[[:space:]]*\(.*\)$|▪ <b>\1</b>|')"
+          fi
+
+          {
+            printf ' <b>BetterHeybox %s</b>\n\n' "$RELEASE_VERSION"
+            printf '<b> 更新日志</b>\n'
+            if [ -n "$changelog" ]; then
+              printf '%s\n\n' "$changelog"
+            else
+              printf '本次共 %s 个提交，详见下方提交记录。\n\n' "$commit_total"
+            fi
+            printf '<b>🔗 提交记录</b>\n'
+            if [ "$commit_total" -gt 0 ]; then
+              git log "$range" -n 10 --pretty=format:'%H|%s' | while IFS='|' read -r sha subject; do
+                printf '• <a href="%s/commit/%s">%s</a> %s\n' \
+                  "$repo_url" "$sha" "${sha:0:7}" "$(printf '%s' "$subject" | escape_html)"
+              done
+              printf '\n'
+              if [ "$commit_total" -gt 10 ]; then
+                printf '…另有 %s 条提交，见 <a href="%s">Release 说明</a>\n' "$((commit_total - 10))" "$release_url"
+              fi
+            else
+              printf '（没有可列出的提交）\n'
+            fi
+            printf '\n<b>⬇️ 下载</b>\n'
+            printf '• Release: <a href="%s">%s</a>\n' "$release_url" "$RELEASE_TAG"
+            printf '• 文件: %s（%s）\n' "$(basename "$apk")" "$size_human"
+            printf '• SHA-256: <code>%s</code>\n\n' "$sha256"
+            printf '<a href="https://t.me/Betterheybox">Telegram 频道</a>\n'
+          } > telegram-message.html
+
+          {
+            printf ' <b>BetterHeybox %s</b>\n' "$RELEASE_VERSION"
+            printf '文件: %s（%s）\n' "$(basename "$apk")" "$size_human"
+            printf 'SHA-256: <code>%s</code>\n' "$sha256"
+            printf 'Release: <a href="%s">%s</a>\n' "$release_url" "$RELEASE_TAG"
+          } > telegram-caption.html
+
+      - name: Notify Telegram
+        continue-on-error: true
+        env:
+          NOTIFY_TELEGRAM: ${{ inputs.notify_telegram }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ "$NOTIFY_TELEGRAM" = "false" ]; then
+            echo "::notice::notify_telegram=false，跳过 Telegram 通知"
+            exit 0
+          fi
+          bash .github/scripts/telegram-notify.sh \
+            --message telegram-message.html \
+            --document "dist/BetterHeybox-${{ steps.release_meta.outputs.version }}.apk" \
+            --caption telegram-caption.html

@@ -1,0 +1,75 @@
+name: Telegram test
+
+# 冒烟测试：不构建、不发版，只验证 Telegram 凭证、目标会话与发帖权限。
+# 用法：Actions → Telegram test → Run workflow → 选 target（ci / release）与 dry_run。
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "推送目标"
+        required: true
+        default: "ci"
+        type: choice
+        options:
+          - ci
+          - release
+      dry_run:
+        description: "只打印摘要，不真的发送"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    name: Send test notification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Build test message
+        env:
+          TEST_TARGET: ${{ inputs.target }}
+        run: |
+          set -euo pipefail
+
+          escape_html() {
+            sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+          }
+
+          repo_url="https://github.com/${GITHUB_REPOSITORY}"
+          run_url="${repo_url}/actions/runs/${GITHUB_RUN_ID}"
+          full_sha="$(git rev-parse HEAD)"
+          short_sha="$(git rev-parse --short=7 HEAD)"
+          subject="$(git log -1 --pretty=%s | escape_html)"
+
+          {
+            printf '🧪 <b>Telegram 通知测试</b>（target=<code>%s</code>）\n' "$TEST_TARGET"
+            printf '提交: <a href="%s/commit/%s">%s</a> %s\n' "$repo_url" "$full_sha" "$short_sha" "$subject"
+            printf '运行: <a href="%s">#%s</a>\n' "$run_url" "${GITHUB_RUN_NUMBER}"
+            printf '收到本消息与下方测试附件，即表示凭证、目标会话与发帖权限正常。\n'
+          } > telegram-message.html
+
+          {
+            printf '<b>BetterHeybox Telegram 冒烟测试</b>\n'
+            printf 'target: <code>%s</code>\n' "$TEST_TARGET"
+            printf '运行: <a href="%s">#%s</a>\n' "$run_url" "${GITHUB_RUN_NUMBER}"
+          } > telegram-caption.html
+
+          printf 'BetterHeybox Telegram smoke test\ntarget: %s\nrun: %s\n' "$TEST_TARGET" "$run_url" > telegram-test.txt
+
+      - name: Send test notification
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ inputs.target == 'release' && secrets.TELEGRAM_CHAT_ID || secrets.TELEGRAM_CI_CHAT_ID }}
+          TELEGRAM_MESSAGE_THREAD_ID: ${{ secrets.TELEGRAM_MESSAGE_THREAD_ID }}
+          TELEGRAM_DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          bash .github/scripts/telegram-notify.sh \
+            --message telegram-message.html \
+            --document telegram-test.txt \
+            --caption telegram-caption.html

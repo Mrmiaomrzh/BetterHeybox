@@ -87,3 +87,68 @@ jobs:
           name: BetterHeybox-${{ steps.version.outputs.version }}
           path: dist/
           retention-days: 14
+
+      - name: Build Telegram message
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          CI_VERSION: ${{ steps.version.outputs.version }}
+          BEFORE_SHA: ${{ github.event.before }}
+          TRIGGER_ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+
+          escape_html() {
+            sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+          }
+
+          repo_url="https://github.com/${GITHUB_REPOSITORY}"
+          run_url="${repo_url}/actions/runs/${GITHUB_RUN_ID}"
+          full_sha="$(git rev-parse HEAD)"
+          short_sha="$(git rev-parse --short=7 HEAD)"
+          subject="$(git log -1 --pretty=%s | escape_html)"
+          actor="$(printf '%s' "$TRIGGER_ACTOR" | escape_html)"
+          branch="$(printf '%s' "${GITHUB_REF_NAME}" | escape_html)"
+
+          apk="dist/BetterHeybox-${CI_VERSION}.apk"
+          size_bytes="$(wc -c < "$apk" | tr -d '[:space:]')"
+          size_human="$(awk -v b="$size_bytes" 'BEGIN { printf "%.2f MB", b / 1048576 }')"
+          sha256="$(sha256sum "$apk" | cut -d' ' -f1)"
+
+          compare_line=""
+          if [ -n "$BEFORE_SHA" ] && ! printf '%s' "$BEFORE_SHA" | grep -qE '^0+$'; then
+            compare_line="$(printf '对比: <a href="%s/compare/%s...%s">%s...%s</a>' \
+              "$repo_url" "$BEFORE_SHA" "$full_sha" "${BEFORE_SHA:0:7}" "$short_sha")"
+          fi
+
+          {
+            printf ' <b>CI 构建成功</b> · <code>%s</code>\n' "$CI_VERSION"
+            printf '分支: <code>%s</code>\n' "$branch"
+            printf '提交: <a href="%s/commit/%s">%s</a> %s\n' "$repo_url" "$full_sha" "$short_sha" "$subject"
+            if [ -n "$compare_line" ]; then
+              printf '%s\n' "$compare_line"
+            fi
+            printf '作者: %s\n' "$actor"
+            printf '运行: <a href="%s">#%s</a>（Actions 产物保留 14 天）\n' "$run_url" "${GITHUB_RUN_NUMBER}"
+            printf '文件: %s（%s）\n' "$(basename "$apk")" "$size_human"
+            printf 'SHA-256: <code>%s</code>\n' "$sha256"
+          } > telegram-message.html
+
+          {
+            printf '<b>BetterHeybox %s</b>（debug）\n' "$CI_VERSION"
+            printf '运行: <a href="%s">#%s</a>\n' "$run_url" "${GITHUB_RUN_NUMBER}"
+            printf 'SHA-256: <code>%s</code>\n' "$sha256"
+          } > telegram-caption.html
+
+      - name: Notify Telegram
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CI_CHAT_ID }}
+          TELEGRAM_MESSAGE_THREAD_ID: ${{ secrets.TELEGRAM_MESSAGE_THREAD_ID }}
+          TELEGRAM_SILENT: ${{ vars.TELEGRAM_CI_SILENT }}
+        run: |
+          bash .github/scripts/telegram-notify.sh \
+            --message telegram-message.html \
+            --document "dist/BetterHeybox-${{ steps.version.outputs.version }}.apk" \
+            --caption telegram-caption.html
