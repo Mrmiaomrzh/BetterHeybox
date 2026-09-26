@@ -45,3 +45,6 @@ dist/
 scripts/
 
 .poc/
+
+.ktcheck/
+.kprobe/

@@ -1,0 +1,33 @@
+* text=auto eol=lf
+
+gradlew text eol=lf
+gradlew.bat text eol=crlf
+
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+*.jar binary
+*.aar binary
+*.apk binary
+*.keystore binary
+*.jks binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
+*.ico binary
+*.ttf binary
+*.otf binary
+*.so binary
+*.zip binary
+
+*.asc binary
+*.md5 text eol=lf
+*.sha1 text eol=lf
+*.sha256 text eol=lf
+*.sha512 text eol=lf
+
+*.kt linguist-language=Kotlin
+*.kts linguist-language=Kotlin
