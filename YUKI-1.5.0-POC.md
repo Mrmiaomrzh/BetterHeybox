@@ -502,7 +502,29 @@ override fun onHotReloading(param: XposedModuleInterface.HotReloadingParam) = tr
 加上 `module.prop` 的 `autoHotReload=true`，共 **2 处**。两处产物都在
 `build/generated/ksp/` 下，可由 Gradle 任务后处理，**无需 fork**。
 
-### 11.4 依赖膨胀实测（以真实 APK 为准）
+### 11.4 全局 DSL 降级对 :app 的影响（clean A/B 实测）
+
+`android.newDsl=false` / `android.builtInKotlin=false` 是全局属性，会同时作用于 `:app`。
+两侧均 **clean 构建**后对比，排除增量产物污染：
+
+| 配置 | classes | methods | APK |
+|---|---:|---:|---:|
+| `newDsl=true`（AGP 内置 Kotlin 2.2.0） | 5392 | 42537 | 4499.7 KB |
+| `newDsl=false` + 外部 Kotlin 2.4.10 | 5320 | 42019 | 4403.7 KB |
+| 差值 | **−72** | **−518** | **−96 KB** |
+
+结论：
+
+- `:app:assembleDebug` **不受影响**，`:app:assembleDebug` 与根 `assembleDebug`（含 `:yuki-probe`）均通过
+- 产物元数据**逐字节一致**：
+  `java_init.list=com.better.heybox.MainModule`、`autoHotReload=true`、`scope.list=com.max.xiaoheihe`
+- 唯一差异 −72 class / −96 KB，来源是 Kotlin 编译器/stdlib 解析不同，
+  `:app` 无 Kotlin 源码，量级可接受
+
+> 教训：混用 DSL 模式做增量构建会残留旧产物（曾观测到 6782 KB 的假差异），
+> 任何 A/B 对照都必须先 `clean`。
+
+### 11.5 依赖膨胀实测（以真实 APK 为准）
 
 | APK | classes | methods | dex 未压缩 | native | 条目数 |
 |---|---:|---:|---:|---:|---:|
