@@ -5,7 +5,7 @@ import android.util.Log
 import com.better.heybox.App
 import com.better.heybox.MainModule
 
-class ShareLinkPurifyHook(private val module: MainModule) {
+class ShareLinkPurifyHook(private val module: MainModule?) {
 
     fun install(cl: ClassLoader) {
         var installed = 0
@@ -43,12 +43,12 @@ class ShareLinkPurifyHook(private val module: MainModule) {
             }
         }
         if (installed > 0) {
-            module.logd(
+            module?.logd(
                 Log.INFO, MainModule.TAG,
                 "✔ 分享链接净化 Hook 已安装: $installed 个出口 [$names]"
             )
         } else {
-            module.logd(Log.WARN, MainModule.TAG, "✘ 分享链接净化 Hook 未命中任何分享出口")
+            module?.logd(Log.WARN, MainModule.TAG, "✘ 分享链接净化 Hook 未命中任何分享出口")
         }
     }
 
@@ -107,7 +107,7 @@ class ShareLinkPurifyHook(private val module: MainModule) {
         if (fragmentStart >= 0) {
             out.append(url, fragmentStart, url.length)
         }
-        module.logd(Log.INFO, MainModule.TAG, "净化分享链接: 已去除 $removed ← $url")
+        module?.logd(Log.INFO, MainModule.TAG, "净化分享链接: 已去除 $removed ← $url")
         return out.toString()
     }
 

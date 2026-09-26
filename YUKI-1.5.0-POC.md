@@ -957,5 +957,73 @@ m.hook(executable).intercept(chain -> {
 
 ---
 
+## 17. 全量迁移执行记录
+
+§16 的结论是「不建议全量迁移」，但项目所有者决定推进——理由是
+**统一技术栈、避免长期维护两门语言**。该决定已接受，下面的执行记录说明
+如何在承认 §16 全部风险的前提下把它做可控。
+
+### 17.1 分阶段与已完成的验证
+
+| 阶段 | 内容 | 验证 |
+|---|---|---|
+| Phase 0 | 安全网：`HeyboxTargets` 匹配器 + 下载状态机 | 30 个用例 |
+| Phase 1 | 9 个叶子类 | 每批装机 |
+| Phase 2 | `MainModule`（650 行，20 个 Java Hook 类零改动） | 全链路装机 |
+| Phase 3 | 6 个小 Hook | 装机 + 回归计数 |
+| Phase 4 | 5 个中等 Hook | 装机 + **延迟安装路径正向对照** |
+| Phase 5 | `BottomTabHook` + 语义敏感重 Hook | 进行中 |
+
+### 17.2 实际抓到的两个回归
+
+**1. 包装类 vs 基本类型（静默功能失效）**
+
+`GeneralHook` 匹配宿主 `AppUpdateManager.P(Boolean)`，原 Java 版用 `Boolean.class`（包装类），
+迁移时误写成 `java.lang.Boolean.TYPE`（基本类型 `boolean`），**永不匹配**。
+编译通过、构建绿灯、模块正常启动、其余 175 个 Hook 照常工作——
+**只有统计 logcat 里 `✘` 的数量（0 → 4）才发现**。
+
+反向案例同时存在：`SingleColumnFeedHook` 匹配的 `int` 确实是**基本类型**。
+两者方向相反，是同类陷阱。
+
+**2. 延迟安装路径此前从未被验证**
+
+装机后发现 Hook 数从 176 掉到 52，追查发现宿主 `shared_prefs` 只存了 7 个键，
+其余模块走默认值 false 被延迟安装。**这暴露了一个盲区**：
+`onSettingChanged` / `isAnySwitchOn` / `installIfEnabled` 这条链路
+（正是刚迁的 Kotlin 代码）**在普通冷启动下根本走不到**。
+
+正向对照：注入 `single_column_feed` / `game_lib_hide_banner` / `search_hide_banner`
+三个开关后，三个模块均正常安装，延迟计数 9 → 7 → 6，
+底栏的 `隐藏 首页: 8`（8 = `View.GONE`）证明隐藏逻辑真实执行。
+
+### 17.3 转换中反复出现的 Kotlin 陷阱
+
+| 陷阱 | 表现 | 处理 |
+|---|---|---|
+| 十六进制字面量 | `0xFF1677FF` 超出 Int 范围被推断为 **Long**（Java 不会） | 全部补 `.toInt()` |
+| 公开字段 | `val` 生成 getter，Java 侧 `it.linkId` 全线编译失败 | `@JvmField` |
+| 自引用泛型 | `findViewById` / `findViewWithTag` 推断不出 `T` | 显式 `<View>` |
+| 成员扩展 | `PackageParam.intercept` 需词法接收者 | `with(param) { }` |
+| 方法引用 | 无法隐式转成 `value class` | 改回 `fun interface` |
+| 平台类型 smart cast | `PackageInfo.versionName` 是 Java 可变字段 | 用局部变量 |
+| 伴生静态字段 | `module.TAG` 在 Kotlin 侧非法 | `MainModule.TAG` |
+| 构造器非空检查 | 即使从 Java 传 null 也会被拦 | 需要可测时显式声明可空 |
+| 非短路运算 | `\|=` 写成 `\|\|` 会跳过调用 | 用 `or` |
+
+### 17.4 验证纪律
+
+每个批次必须同时满足：
+
+1. `:app:testDebugUnitTest` 全绿
+2. debug + release 均构建通过
+3. 装机后统计 `✔ Hook 安装` 与 `✘` 数量
+4. 扫描 `NoSuchMethodError` / `VerifyError` / `LinkageError` / `FATAL EXCEPTION`
+5. 对**默认关闭**的开关功能，额外做注入开关的正向对照
+
+第 5 条是本轮新增的——前几轮只做冷启动，而冷启动走不到大部分分支。
+
+---
+
 本地依赖与解包产物位于 `.poc/`（已 gitignore）。
 所有结论均来自包内源码与字节码，**未使用官网文档**。
