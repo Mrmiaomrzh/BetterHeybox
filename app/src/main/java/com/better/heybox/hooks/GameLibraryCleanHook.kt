@@ -1284,6 +1284,7 @@ class GameLibraryCleanHook(private val module: MainModule) {
         }
 
         @JvmStatic
+        @JvmName("touchState")
         internal fun touchState(): String {
             val target = sTouchTarget
             return "down=" + sTouchDownAt + " fired=" + sTouchFired + " target=" +
