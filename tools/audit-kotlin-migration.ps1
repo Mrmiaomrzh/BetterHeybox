@@ -19,6 +19,7 @@ $files = Get-ChildItem $Root -Recurse -Filter *.kt | Sort-Object FullName
 $rows = @()
 $violations = @()
 $duplicates = @()
+$partials = @()
 
 foreach ($kt in $files) {
     $rel = $kt.FullName.Substring($Root.Length + 1)
@@ -40,7 +41,9 @@ foreach ($kt in $files) {
         $j = Get-Content $javaPath -Raw
         $row.CatchJv = Get-Count $j $catchJavaPattern
         $row.InterJv = Get-Count $j '\.intercept\s*\('
+        $row.JavaLines = (Get-Content $javaPath).Count
         $duplicates += $rel
+        $row.Partial = $row.JavaLines -gt 0 -and $row.Lines -lt ($row.JavaLines * 0.8)
     }
 
     $row['ProceedArr'] = Get-Count $k '\.proceed\s*\('
@@ -54,7 +57,11 @@ foreach ($kt in $files) {
         $violations += "$rel : $($row.ViaInst) 处形如 a.b.TAG 的经实例静态访问 —— Kotlin 应写 Class.TAG"
     }
     if ($null -ne $row.CatchJv -and $row.CatchKt -lt $row.CatchJv) {
-        $violations += "$rel : catch(Throwable) 由 $($row.CatchJv) 减为 $($row.CatchKt) —— 有防御被删"
+        if ($row.Partial) {
+            $partials += "$rel : catch $($row.CatchKt)/$($row.CatchJv)（.kt $($row.Lines) 行 vs .java $($row.JavaLines) 行，仍在转换中）"
+        } else {
+            $violations += "$rel : catch(Throwable) 由 $($row.CatchJv) 减为 $($row.CatchKt) —— 有防御被删"
+        }
     }
     if ($row.KClass -gt 0) {
         $violations += "$rel : 出现 $($row.KClass) 处 KClass 反射 —— 会丢 isBridge/isSynthetic"
@@ -91,6 +98,12 @@ if ($duplicates.Count -gt 0) {
     "=== 同名共存（$($duplicates.Count) 对，会导致 Redeclaration 编译失败）==="
     $duplicates | ForEach-Object { "  ⚠ $_" }
     '  转换中的中间状态属正常；若是提交状态则必须先删掉 .java。'
+}
+
+if ($partials.Count -gt 0) {
+    ''
+    "=== 仍在转换中（计数偏少属正常，不计为违规）==="
+    $partials | ForEach-Object { "  … $_" }
 }
 
 if ($violations.Count -gt 0) {
