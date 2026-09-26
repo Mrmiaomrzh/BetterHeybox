@@ -50,6 +50,7 @@ scripts/
 
 # TG Notify
 !.github/scripts/
+.github/TELEGRAM.md
 
 # IDE
 .poc/
