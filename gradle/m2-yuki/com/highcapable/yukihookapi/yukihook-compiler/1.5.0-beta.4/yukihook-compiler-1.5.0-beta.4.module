@@ -1,0 +1,123 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "com.highcapable.yukihookapi",
+    "module": "yukihook-compiler",
+    "version": "1.5.0-beta.4",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.7.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "yukihook-compiler-1.5.0-beta.4.jar",
+          "url": "yukihook-compiler-1.5.0-beta.4.jar",
+          "size": 45441,
+          "sha512": "18fdd16a06847f8d5058c3dddb300d94026f3618599d990198ce76b12b5aa7a66f4e7775b2dfec9c2252d3ae073ddfcd925dc72f77e4b597bfb9a02ad8460a82",
+          "sha256": "56deb65e5a945a022712f1dabfbf556e9ab766ea68e57254514c148a0ebab399",
+          "sha1": "fc6de4c093d6eb3d389aa580c1f1dd94a5c8d942",
+          "md5": "f90d4d45edeee3fc82d23045e5558a06"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "com.google.auto.service",
+          "module": "auto-service-annotations",
+          "version": {
+            "requires": "1.1.1"
+          }
+        },
+        {
+          "group": "com.squareup",
+          "module": "kotlinpoet",
+          "version": {
+            "requires": "2.3.0"
+          }
+        },
+        {
+          "group": "com.squareup",
+          "module": "kotlinpoet-ksp",
+          "version": {
+            "requires": "2.3.0"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "yukihook-compiler-1.5.0-beta.4.jar",
+          "url": "yukihook-compiler-1.5.0-beta.4.jar",
+          "size": 45441,
+          "sha512": "18fdd16a06847f8d5058c3dddb300d94026f3618599d990198ce76b12b5aa7a66f4e7775b2dfec9c2252d3ae073ddfcd925dc72f77e4b597bfb9a02ad8460a82",
+          "sha256": "56deb65e5a945a022712f1dabfbf556e9ab766ea68e57254514c148a0ebab399",
+          "sha1": "fc6de4c093d6eb3d389aa580c1f1dd94a5c8d942",
+          "md5": "f90d4d45edeee3fc82d23045e5558a06"
+        }
+      ]
+    },
+    {
+      "name": "sourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "yukihook-compiler-1.5.0-beta.4-sources.jar",
+          "url": "yukihook-compiler-1.5.0-beta.4-sources.jar",
+          "size": 29491,
+          "sha512": "2d3915ea5cf3da02e0423355b7f01a4c6abae35c953b93701c45fb2c4e4e0f1cafadd04714e418b97dab03b72103545eda907e5281a8ff84b717fc0b39ddec0c",
+          "sha256": "d142bb282e5c03456e5707a8006055fcf0bc5b101b13eaae40f8579cd2a479a4",
+          "sha1": "701b17aa0ab6befe6d8a2d81cba7a936b481fbe2",
+          "md5": "5c8ffa941d21b28ff070bec89bca6b72"
+        }
+      ]
+    }
+  ]
+}

@@ -18,6 +18,7 @@ $catchJavaPattern = 'catch\s*\(\s*Throwable'
 $files = Get-ChildItem $Root -Recurse -Filter *.kt | Sort-Object FullName
 $rows = @()
 $violations = @()
+$duplicates = @()
 
 foreach ($kt in $files) {
     $rel = $kt.FullName.Substring($Root.Length + 1)
@@ -39,6 +40,7 @@ foreach ($kt in $files) {
         $j = Get-Content $javaPath -Raw
         $row.CatchJv = Get-Count $j $catchJavaPattern
         $row.InterJv = Get-Count $j '\.intercept\s*\('
+        $duplicates += $rel
     }
 
     $row['ProceedArr'] = Get-Count $k '\.proceed\s*\('
@@ -73,7 +75,22 @@ if (-not $Quiet) {
             $r.ProceedArr, $(if ($null -eq $r.InterJv) { '-' } else { $r.InterJv })
     }
     ''
-    "共 $($rows.Count) 个 Kotlin 文件。"
+
+    $javaAll = Get-ChildItem $Root -Recurse -Filter *.java
+    $javaLines = 0
+    foreach ($jf in $javaAll) { $javaLines += (Get-Content $jf.FullName).Count }
+    $ktLines = 0
+    foreach ($r in $rows) { $ktLines += $r.Lines }
+    "Kotlin: $($rows.Count) 个文件 / $ktLines 行"
+    "Java  : $($javaAll.Count) 个文件 / $javaLines 行"
+    ''
+}
+
+if ($duplicates.Count -gt 0) {
+    ''
+    "=== 同名共存（$($duplicates.Count) 对，会导致 Redeclaration 编译失败）==="
+    $duplicates | ForEach-Object { "  ⚠ $_" }
+    '  转换中的中间状态属正常；若是提交状态则必须先删掉 .java。'
 }
 
 if ($violations.Count -gt 0) {

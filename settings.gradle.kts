@@ -14,7 +14,7 @@ dependencyResolutionManagement {
         maven { url = uri("https://jitpack.io") }
         maven {
             name = "yukiLocal"
-            url = uri("${rootDir}/.poc/m2-yuki")
+            url = uri("${rootDir}/gradle/m2-yuki")
         }
     }
 }

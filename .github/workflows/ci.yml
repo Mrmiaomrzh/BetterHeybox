@@ -65,10 +65,26 @@ jobs:
           echo "version_code=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
           echo "CI version: ${ci_version}"
 
+      - name: Run unit tests
+        run: |
+          chmod +x gradlew
+          ./gradlew testDebugUnitTest
+
+      - name: Check migration discipline
+        if: hashFiles('tools/audit-kotlin-migration.ps1') != ''
+        shell: pwsh
+        run: ./tools/audit-kotlin-migration.ps1
+
       - name: Build debug APK
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug \
+            --project-prop VERSION_NAME="${{ steps.version.outputs.version_name }}" \
+            --project-prop VERSION_CODE="${{ steps.version.outputs.version_code }}"
+
+      - name: Build release APK
+        run: |
+          ./gradlew assembleRelease \
             --project-prop VERSION_NAME="${{ steps.version.outputs.version_name }}" \
             --project-prop VERSION_CODE="${{ steps.version.outputs.version_code }}"
 

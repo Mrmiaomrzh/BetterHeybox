@@ -1,0 +1,117 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "com.highcapable.yukihookapi",
+    "module": "yukihook-runtime-libxposed",
+    "version": "1.5.0-beta.4",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.7.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "releaseVariantReleaseApiPublication",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.libraryelements": "aar",
+        "org.gradle.usage": "java-api"
+      },
+      "dependencies": [
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "yukihook-runtime-libxposed-1.5.0-beta.4.aar",
+          "url": "yukihook-runtime-libxposed-1.5.0-beta.4.aar",
+          "size": 54430,
+          "sha512": "478932ca93cddc15e3a9d30acc667766e1a76619dd8009b17c53d54bf7da33f32ec8af24e3bf97be98b9522391cf73705154e7580355b4ebd2654f264d6de50b",
+          "sha256": "b878f157534944564eb991e5dada7e38cbb07e9e65eb9db37ccdd8ce3dc2d1b9",
+          "sha1": "96cc18d56919618f3bb3d15714a0cfa4a3665182",
+          "md5": "9649af7f702b05e62627605473ff03b7"
+        }
+      ]
+    },
+    {
+      "name": "releaseVariantReleaseRuntimePublication",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.libraryelements": "aar",
+        "org.gradle.usage": "java-runtime"
+      },
+      "dependencies": [
+        {
+          "group": "io.github.libxposed",
+          "module": "service",
+          "version": {
+            "requires": "102.0.0"
+          }
+        },
+        {
+          "group": "com.highcapable.yukihookapi",
+          "module": "yukihook-core",
+          "version": {
+            "requires": "1.5.0-beta.4"
+          }
+        },
+        {
+          "group": "androidx.annotation",
+          "module": "annotation",
+          "version": {
+            "requires": "1.10.0"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "yukihook-runtime-libxposed-1.5.0-beta.4.aar",
+          "url": "yukihook-runtime-libxposed-1.5.0-beta.4.aar",
+          "size": 54430,
+          "sha512": "478932ca93cddc15e3a9d30acc667766e1a76619dd8009b17c53d54bf7da33f32ec8af24e3bf97be98b9522391cf73705154e7580355b4ebd2654f264d6de50b",
+          "sha256": "b878f157534944564eb991e5dada7e38cbb07e9e65eb9db37ccdd8ce3dc2d1b9",
+          "sha1": "96cc18d56919618f3bb3d15714a0cfa4a3665182",
+          "md5": "9649af7f702b05e62627605473ff03b7"
+        }
+      ]
+    },
+    {
+      "name": "releaseVariantReleaseSourcePublication",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "yukihook-runtime-libxposed-1.5.0-beta.4-sources.jar",
+          "url": "yukihook-runtime-libxposed-1.5.0-beta.4-sources.jar",
+          "size": 18797,
+          "sha512": "6c51eb794bd9c16cc795bcd264e759c428a3f81b039310b27f070c7c9dec49d4a2c7bc51fc7c737aab227e97c6fa9068f49f332ee23e8960aee1b03826265c17",
+          "sha256": "fc271817309af598b49200306a63c019c43a4afbad4695238e1455bd3e8f70c7",
+          "sha1": "95764f7e3ca9e719a9764dc00baca596ac1cfad8",
+          "md5": "8bb498b8d1006ee1b94dc02e350043f9"
+        }
+      ]
+    }
+  ]
+}

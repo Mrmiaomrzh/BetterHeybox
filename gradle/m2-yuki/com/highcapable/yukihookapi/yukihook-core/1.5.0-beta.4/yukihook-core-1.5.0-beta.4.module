@@ -1,0 +1,178 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "com.highcapable.yukihookapi",
+    "module": "yukihook-core",
+    "version": "1.5.0-beta.4",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.7.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "releaseVariantReleaseApiPublication",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.libraryelements": "aar",
+        "org.gradle.usage": "java-api"
+      },
+      "dependencies": [
+        {
+          "group": "androidx.lifecycle",
+          "module": "lifecycle-common",
+          "version": {
+            "requires": "2.9.0"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "yukihook-core-1.5.0-beta.4.aar",
+          "url": "yukihook-core-1.5.0-beta.4.aar",
+          "size": 344282,
+          "sha512": "d899ca34f82201726adc5172e63ad38995b8cfb9cfe45d54d55020a1105a635948b0059f96880c96fe7819e8cd12389a7deddd659cd22f4848249092d7fe1022",
+          "sha256": "55456106cd46203982342750f3dca998e4887e8a4be03821f3ac0f30f7c6d2bc",
+          "sha1": "c89cd99599790c4c6870acc61cfe6d5997588413",
+          "md5": "90a7f473a1c5d7d2b220e40571d1b318"
+        }
+      ]
+    },
+    {
+      "name": "releaseVariantReleaseRuntimePublication",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.libraryelements": "aar",
+        "org.gradle.usage": "java-runtime"
+      },
+      "dependencies": [
+        {
+          "group": "org.lsposed.hiddenapibypass",
+          "module": "hiddenapibypass",
+          "version": {
+            "requires": "6.1"
+          }
+        },
+        {
+          "group": "com.highcapable.kavaref",
+          "module": "kavaref-bom",
+          "version": {
+            "requires": "1.1.0"
+          },
+          "attributes": {
+            "org.gradle.category": "platform"
+          }
+        },
+        {
+          "group": "com.highcapable.kavaref",
+          "module": "kavaref-core"
+        },
+        {
+          "group": "com.highcapable.kavaref",
+          "module": "kavaref-android"
+        },
+        {
+          "group": "com.highcapable.kavaref",
+          "module": "kavaref-extension"
+        },
+        {
+          "group": "com.highcapable.betterandroid",
+          "module": "android-bom",
+          "version": {
+            "requires": "1.1.6"
+          },
+          "attributes": {
+            "org.gradle.category": "platform"
+          }
+        },
+        {
+          "group": "com.highcapable.betterandroid",
+          "module": "ui-extension"
+        },
+        {
+          "group": "com.highcapable.betterandroid",
+          "module": "system-extension"
+        },
+        {
+          "group": "androidx.core",
+          "module": "core-ktx",
+          "version": {
+            "requires": "1.17.0"
+          }
+        },
+        {
+          "group": "androidx.appcompat",
+          "module": "appcompat",
+          "version": {
+            "requires": "1.7.1"
+          }
+        },
+        {
+          "group": "androidx.preference",
+          "module": "preference-ktx",
+          "version": {
+            "requires": "1.2.1"
+          }
+        },
+        {
+          "group": "androidx.lifecycle",
+          "module": "lifecycle-common",
+          "version": {
+            "requires": "2.9.0"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "yukihook-core-1.5.0-beta.4.aar",
+          "url": "yukihook-core-1.5.0-beta.4.aar",
+          "size": 344282,
+          "sha512": "d899ca34f82201726adc5172e63ad38995b8cfb9cfe45d54d55020a1105a635948b0059f96880c96fe7819e8cd12389a7deddd659cd22f4848249092d7fe1022",
+          "sha256": "55456106cd46203982342750f3dca998e4887e8a4be03821f3ac0f30f7c6d2bc",
+          "sha1": "c89cd99599790c4c6870acc61cfe6d5997588413",
+          "md5": "90a7f473a1c5d7d2b220e40571d1b318"
+        }
+      ]
+    },
+    {
+      "name": "releaseVariantReleaseSourcePublication",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "yukihook-core-1.5.0-beta.4-sources.jar",
+          "url": "yukihook-core-1.5.0-beta.4-sources.jar",
+          "size": 128557,
+          "sha512": "b1d0acfd05211cea63699b118946ea525c5c213e7ed11a705eb29a562a5cf473733b279d5c21a0bbb74e327d3455a58426358da23a31367e06d57ae9d0c79151",
+          "sha256": "597382414473424f4f50016bebf454a4684c5eeb6f3e3af35a8059e6390b98ca",
+          "sha1": "d6e2df217fd78765dc305e5129cbbe91f9f8bbb0",
+          "md5": "1342e7d1002a7b67a595ba6b97c9383e"
+        }
+      ]
+    }
+  ]
+}
