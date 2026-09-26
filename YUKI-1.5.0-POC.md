@@ -876,6 +876,85 @@ Kotlin 的 `::class` / 属性引用在跨进程反射场景下需要 `KClass` �
 
 这与 §15.1 的桥接层设计一致——抽象边界已经切好了。
 
+### 16.5 三个已核实的风险事实
+
+**1. `KClass` 化会丢失 `isBridge()` / `isSynthetic()`**
+
+`HeyboxTargets` 的方法匹配**显式依赖**这两个标记：
+
+```java
+// HeyboxTargets.java:612-614  isBbsLinkBinder
+if (method.isBridge() || method.isSynthetic()) { return false; }
+// HeyboxTargets.java:682     isLinksGetter
+return !method.isBridge() && method.getParameterCount() == 0 && ...
+```
+
+若把 `Class<?>` 换成 `KClass<?>`（`cls.kotlin.declaredFunctions`），
+`KFunction` **不暴露 bridge / synthetic**，过滤条件会静默失效 →
+**误挂宿主方法**。无测试可捕获。
+
+**2. `LiquidGlassHookBridge` 的异常语义与其余 96 处相反**
+
+```java
+// LiquidGlassHookBridge.java:14-17
+m.hook(executable).intercept(chain -> {
+    try { return function.apply(chain); }
+    catch (Throwable t) { return chain.proceed(); }   // ← 吞异常，回退原方法
+});
+```
+
+其余 96 处走 `YukiChainFunction`，异常**上抛给宿主**。
+这正是 classic 与 chain 风格的差别。`LiquidGlassInstaller` 的 3 处挂点
+依赖这一"吞异常"语义，**删掉桥接层会静默改变它，且编译期无任何提示**。
+
+**3. 零自动化测试**
+
+- 无 `app/src/test/`、无 `app/src/androidTest/`
+- 无 `junit` / `robolectric` / `mockito` 依赖
+- CI 仅 `./gradlew assembleDebug`（`.github/workflows/ci.yml`）
+- **CI 只能捕获"编译不过"**
+
+且 release 开 R8 而 debug 不开，
+**debug APK 过 CI ≠ release 行为正确**。
+
+人工回归规模：46 个检查点 × 4 个宿主版本 = **184 次验证动作**。
+
+### 16.6 结论
+
+| 方案 | 净行数变化 | 行为风险 | 建议 |
+|---|---:|---|---|
+| 全量转 Kotlin | −10% ~ −15% | **高**（96 处语义 + 700 处 `catch` + 静态成员 + 零测试） | ❌ |
+| 只抽「Kotlin 挂载器」 | **+390 行** | 极低（逻辑逐字不动） | ⚠️ 收益也仅是风格统一 |
+| 只迁纯逻辑叶子类（~1,200 行，3.5%） | −5% | 低 | ⚠️ 收益有限 |
+| **维持现状** | 0 | 0 | ✅ **推荐** |
+
+**不建议全面迁移。** 理由：
+
+1. **收益面窄**：仅约 12% 的框架耦合可改善；`logd`（503 次）语言无关
+2. **主流模式收益≈0**：「先 proceed → 后处理 → catch 放行」三段式占 39% 的调用点，
+   Kotlin 与 Java 结构完全一致
+3. **反射无收益且有净损失**：633 处反射目标是宿主混淆成员，`::class` 用不上；
+   `KClass` 化还会丢 `isBridge()`（§16.5-1）
+4. **并发模型刻意且完整**：`VideoDownloadManager` 的 `runLock` + `runGeneration`
+   + 主线程 Handler 通知串行化是手写的结构化并发，换协程属**重写**且净风险为负
+5. **零测试兜底**：失败模式多为静默失效（Hook 没挂上、匹配放宽、崩溃被 `CrashGuard` 吞）
+
+### 16.7 真正值得做的事
+
+风险最高的**不是** Kotlin，是**可观测性**。以下两处是纯逻辑、不依赖 Android，
+可直接上 JVM 单元测试：
+
+- `HeyboxTargets` 的 method matcher（`:276-305`、`:571-678`）——
+  纯函数，输入 `Method` 描述符输出布尔
+- `VideoDownloadManager` 的 `transition` / `isTerminal`（`:514-523`）——
+  6 态状态机的转移规则
+
+补上这两处，能把「96 处 Hook 静默失效」从不可观测变成可观测。
+**这比迁移语言有价值一个数量级，且与 Java/Kotlin 无关。**
+
+其次，`android.newDsl=false` 必须**单独立项排期**——它是 AGP 10 前必修的技术债，
+与是否迁 Kotlin **正交**，不应混淆归因。
+
 ---
 
 本地依赖与解包产物位于 `.poc/`（已 gitignore）。
