@@ -537,8 +537,56 @@ override fun onHotReloading(param: XposedModuleInterface.HotReloadingParam) = tr
 
 APK 文件体积只差 +171 KB，是 ZIP 压缩造成的错觉；**dex 实际增长 4.0 MB（+54%）**。
 
-仍未验证、且离线无法验证的风险：**宿主自带 androidx 会被模块类加载器部分遮蔽**，
-可能触发 `NoSuchMethodError`。需装机实测。
+---
+
+## 12. 真机验证（MuMu 15 / Android 15 / LSPosed IT 2.1.1）
+
+环境：MuMu Player 15（Android 15 / SDK 35 / x86_64）、KernelSU + ZygiskSU、
+LSPosed IT v2.1.1（W5MMT 分支，API 102）、宿主 **小黑盒 1.3.396 (versionCode 1134)**。
+
+### 12.1 Yuki 骨架端到端跑通
+
+```text
+D/YukiHook     Welcome to YukiHook 1.5.0-beta.4! Running on LSPosed API 102
+I/YukiProbe    probe: hooked protected void android.app.Activity.onResume()
+D/YukiHook     Executing hooker [intercept] (1) for ...Activity.onResume()
+I/YukiProbe    probe: onResume on com.max.xiaoheihe.MainActivity
+```
+
+- `Member.intercept` chain 风格挂载成功
+- 拦截器实际触发，`instanceOrNull` 正确解析到宿主 `MainActivity`
+- **子进程同样加载**（`com.max.xiaoheihe:pushservice`，PID 3870）
+
+### 12.2 类冲突：未发现（关键结论）
+
+§11.5 的 +2012 class 全部经模块类加载器进入宿主进程。全量扫描
+`NoSuchMethodError` / `NoClassDefFoundError` / `ClassNotFoundException` /
+`VerifyError` / `LinkageError` / `Duplicate class`，**唯一命中项与 Yuki 无关**：
+
+```text
+W System.err: java.lang.NoClassDefFoundError: com.bun.miitmdid.core.MdidSdkHelper
+```
+
+MIIT OAID 设备标识 SDK，模拟器上普遍缺失，经 `System.err` 告警、非致命，宿主继续运行。
+**未出现任何指向 androidx / hiddenapibypass / coroutines / betterandroid / kavaref
+的加载或链接错误。**
+
+### 12.3 与现有模块共存
+
+同进程（PID 4502）内两个模块同时加载成功：
+
+| 模块 | 框架 | 结果 |
+|---|---|---|
+| `com.better.heybox` v0.8.4 | LibXposed API 102 | 全部 Hook 正常安装（版本检测 / 更新屏蔽 / 广告过滤 / onActivityResult…） |
+| `com.better.heybox.yukiprobe` | YukiHook 1.5.0-beta.4 | `Welcome to YukiHook 1.5.0-beta.4!` |
+
+宿主进程存活、无崩溃。**Yuki 依赖膨胀未与宿主或既有模块产生冲突。**
+
+### 12.4 遗留观察
+
+- 探针仅验证 chain 拦截与类加载；`AppLifecycle`、DexKit 延迟补挂、
+  跨进程 preferences、同优先级多 Hook 顺序等仍需完整迁移后验证。
+- 模拟器为 x86_64，宿主 `primaryCpuAbi=arm64-v8a`，**真机 ARM 环境需复测**。
 
 ---
 
