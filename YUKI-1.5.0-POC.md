@@ -590,7 +590,7 @@ MIIT OAID 设备标识 SDK，模拟器上普遍缺失，经 `System.err` 告警�
 
 ---
 
-## 13. 热重载补丁（已落地，待 UI 触发验证）
+## 13. 热重载补丁（已验证可行，现已放弃）
 
 ### 13.1 方案
 
@@ -635,21 +635,66 @@ public final class ProbeEntry_YukiHookXposedInit extends LibXposedEntry {
 
 - APK 内 `module.prop` 为 `autoHotReload=true`
 - 补丁版装机后模块正常加载，与既有 `com.better.heybox` 共存，无崩溃/链接错误
+### 13.4 已放弃热重载，改用「模块更新时提示并重启」
 
-### 13.4 未验证（需 LSPosed Manager UI）
+补丁本身验证可行（编译产物含 `onHotReloading`、APK 携带 `autoHotReload=true`、装机正常），
+但**决定放弃**，原因三条：
 
-热重载经 `ILSPManagerService` binder 触发，只能由 Manager 应用发起，
-adb shell 无法脚本化。daemon 侧能力确认存在：
+1. 补丁依赖 `build/generated/ksp/` 目录结构与任务顺序，
+   `kspDebugKotlin → patchHotReload → compileDebugKotlin` 一旦被打乱，
+   补丁会被静默丢弃而**构建仍报成功**（§13.2 坑 1）
+2. 深层风险未闭环：旧 hook 由框架按 `HotReloadedParam.getOldHookHandles()` 摘除，
+   而 Yuki 把 handle 包在私有 `RegistrationHandle` 里从不外抛，重载后是否正确清理存疑
+3. 实际触发走 `ILSPManagerService` binder，只能由 LSPosed Manager UI 发起，无法脚本化验证
+
+已回退到 KSP 默认 `autoHotReload=false`，`yuki-probe` 构建脚本中仅保留决策注释。
+
+---
+
+## 14. 替代方案：模块更新时提示并重启宿主
+
+复用项目**已有**的基础设施，无需新增机制。
+
+### 14.1 现有可复用件
+
+| 位置 | 能力 |
+|---|---|
+| `MainModule.activateIfNotDowngraded`（`MainModule.java:118-173`） | 读 `KEY_MODULE_VERSION_FLOOR`，`own > floor` 时抬升 floor —— **这正是「模块刚更新」的信号** |
+| `GeneralHook.notifyDowngraded(Object app)`（`GeneralHook.java:113-...`） | 注册 `ActivityLifecycleCallbacks`，首次 `onResume` 弹提示；已用宿主 toast 工具，失败回退系统 Toast |
+| `SettingsEntryHook.showRestartAppDialog(Activity, ClassLoader)`（`:3354-3372`） | 复用宿主 `AccelWorldWebkitKt.x` 重启弹窗，失败回退系统 AlertDialog |
+| `AndroidManifest` `KILL_BACKGROUND_PROCESSES` | 免 root 杀宿主后台进程 |
+
+`HeyboxPrefs` 存在**宿主目录**，跨模块更新与宿主重启持久，因此 floor 天然可作版本哨兵。
+
+### 14.2 接入点
 
 ```text
-.io.github.libxposed.service.IHotReloadCallback
-%d process hot reloaded / hot reload failed
+activateIfNotDowngraded
+  └─ own > floor  →  moduleUpdated = true
+       └─ installHooks(...) 传入该标志
+            └─ GeneralHook.notifyModuleUpdated(app)   // 复用 notifyDowngraded 的回调模式
+                 └─ 首次 onResume → showRestartAppDialog(activity, cl, "模块已更新，请重启小黑盒")
 ```
 
-**需人工验证**：在 LSPosed Manager 中改动探针模块的开关/作用域并保存，
-观察运行中的宿主进程是否热重载成功（日志出现 `process hot reloaded`），
-以及 Yuki 管理的 hook 是否被正确摘除——后者是 §3 提到的第三层隐患，
-重新启用作者刻意关闭的功能时最需要盯的失败模式。
+`showRestartAppDialog` 当前消息硬编码为「底栏改动需重启小黑盒后生效」，
+需改为接收 message 参数（底栏调用方传入原字符串即可，行为不变）。
+
+### 14.3 语义澄清（重要）
+
+「模块更新后新代码才运行」意味着：**新代码能提示时，它本身已经生效了**。
+因此该提示的价值不是唤醒旧代码，而是：
+
+- 显式确认更新已加载
+- 提供一键重启，保证所有 hook 在干净的进程里重新安装，
+  消除「旧 hook 残留 + 新 hook 叠加」的混合状态
+
+这一点在 LSPosed 某些分支会热替换模块作用域时会变成刚需——
+混合状态会导致 hook 重复安装，而重复安装不会报错。
+
+### 14.4 状态
+
+方案已定，尚未实现：`:app` 尚未迁移到 Yuki，入口与生命周期还是 LibXposed 原生形态。
+待正式迁移时按 §14.2 接入。
 
 ---
 
