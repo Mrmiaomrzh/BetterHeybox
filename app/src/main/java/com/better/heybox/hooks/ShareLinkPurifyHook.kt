@@ -8,6 +8,7 @@ import com.better.heybox.MainModule
 class ShareLinkPurifyHook(private val module: MainModule?) {
 
     fun install(cl: ClassLoader) {
+        val m = module ?: return
         var installed = 0
         val names = StringBuilder()
         for (className in TARGET_CLASSES) {
@@ -23,9 +24,9 @@ class ShareLinkPurifyHook(private val module: MainModule?) {
                     if (method.returnType != String::class.java) {
                         continue
                     }
-                    module.hook(method).intercept { chain ->
+                    m.hook(method).intercept { chain ->
                         val result = chain.proceed()
-                        if (module.isEnabled(App.KEY_PURIFY_SHARE_LINK, true) && result is String) {
+                        if (m.isEnabled(App.KEY_PURIFY_SHARE_LINK, true) && result is String) {
                             return@intercept purify(result)
                         }
                         result
