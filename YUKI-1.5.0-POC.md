@@ -590,5 +590,68 @@ MIIT OAID 设备标识 SDK，模拟器上普遍缺失，经 `System.err` 告警�
 
 ---
 
+## 13. 热重载补丁（已落地，待 UI 触发验证）
+
+### 13.1 方案
+
+两处补丁都落在 `build/generated/ksp/` 产物上，
+而 `checkSourceEntryFiles`（`YukiHookXposedGenerator.kt:499-530`）只扫描源码目录
+且显式排除 `build/`，因此**无需 fork YukiHook**：
+
+| 补丁 | 目标产物 | 内容 |
+|---|---|---|
+| 1 | `META-INF/xposed/module.prop` | `autoHotReload=false` → `true` |
+| 2 | `<pkg>.<Entry>_YukiHookXposedInit.kt` | 追加 `onHotReloading` override 返回 `true` |
+
+### 13.2 任务接线（顺序是硬要求）
+
+```text
+kspDebugKotlin -> patchHotReload -> compileDebugKotlin
+```
+
+踩过三个坑，均已修正：
+
+1. **仅用 `finalizedBy` 不可靠**——它只保证补丁在 KSP 之后执行，
+   下游 `compileDebugKotlin` 可能在补丁前完成编译；构建仍成功，只是热重载静默失效。
+2. **在 `configureEach` 内再 `provider.configure {}` 非法**——
+   `DefaultTaskContainer#NamedDomainObjectProvider.configure ... cannot be executed
+   in the current context`。接线改到 `gradle.projectsEvaluated`。
+3. **谓词误匹配测试任务形成循环依赖**——
+   `kspDebugUnitTestKotlin` 依赖 `bundleDebugClassesToCompileJar`，
+   而该 jar 依赖主编译任务。需排除名字含 `Test` 的任务。
+
+### 13.3 已验证
+
+- clean 构建后任务顺序正确：`kspDebugKotlin` → `patchHotReload` → `compileDebugKotlin`
+- debug / release 两个变体均被打补丁
+- 编译产物校验（`javap`）：
+
+```text
+public final class ProbeEntry_YukiHookXposedInit extends LibXposedEntry {
+  protected YukiHookXposedModule createHookEntry();
+  public boolean onHotReloading(XposedModuleInterface$HotReloadingParam);   // ← 补丁生效
+}
+```
+
+- APK 内 `module.prop` 为 `autoHotReload=true`
+- 补丁版装机后模块正常加载，与既有 `com.better.heybox` 共存，无崩溃/链接错误
+
+### 13.4 未验证（需 LSPosed Manager UI）
+
+热重载经 `ILSPManagerService` binder 触发，只能由 Manager 应用发起，
+adb shell 无法脚本化。daemon 侧能力确认存在：
+
+```text
+.io.github.libxposed.service.IHotReloadCallback
+%d process hot reloaded / hot reload failed
+```
+
+**需人工验证**：在 LSPosed Manager 中改动探针模块的开关/作用域并保存，
+观察运行中的宿主进程是否热重载成功（日志出现 `process hot reloaded`），
+以及 Yuki 管理的 hook 是否被正确摘除——后者是 §3 提到的第三层隐患，
+重新启用作者刻意关闭的功能时最需要盯的失败模式。
+
+---
+
 本地依赖与解包产物位于 `.poc/`（已 gitignore）。
 所有结论均来自包内源码与字节码，**未使用官网文档**。
