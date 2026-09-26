@@ -1081,7 +1081,84 @@ KSP **只处理 Kotlin 源集**，`@YukiHookLibXposedEntry` 入口无法用 Java
 与 [docs/kotlin-migration-traps.md](docs/kotlin-migration-traps.md)——它们的作用不是加速迁移，
 而是**让"看起来过了"与"真的过了"可区分**。
 
-### 18.5 未做的事（诚实记录）
+### 18.5 APK 体积实测（含归因）
+
+**先说结论：迁移没有压缩包体，反而增大了。发布包变小完全来自 ABI 裁剪。**
+
+所有数字均为**同工具链、clean 重建**后实测（`main` 与 `Poc探索` 两个工作树）。
+
+#### 同 ABI 口径对比（3 ABI，release）
+
+| | 迁移前（Java） | 迁移后（Kotlin） | 增量 |
+|---|---:|---:|---:|
+| **APK 总体** | **1,880.6 KB** | **1,989.0 KB** | **+108.4 KB（+5.8%）** |
+| dex（压缩） | 361.2 KB | 451.6 KB | +90.4 KB |
+| dex（原始） | 798.2 KB | 1,013.0 KB | +214.8 KB（+26.9%） |
+| native | 1,445.3 KB | 1,445.3 KB | ±0 |
+| res + 其他 | 73.3 KB | 89.8 KB | +16.5 KB |
+
+> Kotlin 3-ABI release 值为**计算得出**：`armeabi-v7a` 的两个 `.so` 是 STORED 条目
+> （247.0 + 161.1 = 408.1 KB），与 2-ABI 包相加即得。Gradle 增量缓存阻止了直接重建。
+
+#### 实际发布包（2 ABI）
+
+| | 迁移前（Java, 3 ABI） | 迁移后（Kotlin, 2 ABI） | 增量 |
+|---|---:|---:|---:|
+| **发布 APK** | **1,880.6 KB** | **1,580.9 KB** | **−299.7 KB（−15.9%）** |
+
+**归因**：
+
+```
+−408.1 KB   去掉 armeabi-v7a（纯 ABI 配置变更，与语言无关）
++108.4 KB   Java→Kotlin + libxposed→YukiHookAPI 的代码增长
+─────────
+−299.7 KB   净效果
+```
+
+**即：这次体积优化 100% 来自 ABI 裁剪；语言与框架迁移本身是 +108 KB 的负担，
+只是被 ABI 裁剪的 −408 KB 盖过去了。**
+
+#### debug（3 ABI，无 R8）
+
+| | Java | Kotlin | 增量 |
+|---|---:|---:|---:|
+| APK | 4,435.7 KB | 7,532.6 KB | **+3,096.9 KB（+69.8%）** |
+| dex（原始） | 7,399.7 KB | 13,762.0 KB | +6,362.3 KB（+86.0%） |
+| res | 86.6 KB | 444.8 KB | +358.2 KB |
+
+debug 增幅远大于 release，说明 **R8 吸收了大部分增长**：
+未压缩时 dex 涨 86%，经 R8 后只涨 26.9%。
+
+#### 增长来源
+
+新增依赖（`app/build.gradle.kts` 对比 `main`）：
+
+| 新增 | 说明 |
+|---|---|
+| Kotlin stdlib + 编译器产物 | 语言迁移固有成本，debug 下无法裁剪 |
+| `yukihook-core` | 336 KB AAR |
+| `yukihook-runtime-libxposed` | 53 KB AAR |
+| `kavaref-core` | Yuki 1.5 的反射封装 |
+| `ksp(yukihook-compiler)` | 仅编译期，不进包 |
+
+`libxposed.service` 由 `implementation` 改为 `compileOnly`，是唯一的**减法**。
+
+依赖带来的资源也是增量：两分支 `app/src/main/res` 源文件都是 6 个，
+但 APK 内 `res/` 条目 75 → 361、`resources.arsc` 55.7 → 297.5 KB——**全部来自依赖的资源**。
+
+#### 对 §15.6 的修正
+
+§15.6 记录的「迁移前 1876.6 → 迁移后 1989.0 KB（+6.0%）」测的是
+**框架替换**（libxposed → Yuki，代码仍为 Java）的成本，结论仍然成立。
+
+但 §15.6 里"迁移前"的 release 数字来自**当时工作区的构建产物**，
+本轮 clean 重建后发现该产物含陈旧数据（debug 侧尤为严重：旧产物 9,168.8 KB
+vs clean 重建 4,435.7 KB，虚高 **4.7 MB**）。**现已全部替换为 clean 实测值。**
+
+教训：**APK 体积对比必须在 clean 重建后进行**。Gradle 增量打包会留下
+不被中央目录引用的孤立条目，让文件虚高且毫无提示。
+
+### 18.6 未做的事（诚实记录）
 
 - **目标提到的「46 个检查点 × 4 个宿主版本」人工回归没有做**。
   实际验证手段是自动化的：42 个 Hook 安装计数、`✘ 失败` 计数、
@@ -1091,6 +1168,7 @@ KSP **只处理 Kotlin 源集**，`@YukiHookLibXposedEntry` 入口无法用 Java
 - **只在 MuMu 15（Android 15 / x86_64）上验证过**，未做 arm64 真机。
 - Yuki 仍是 `1.5.0-beta.4`：作者声明 GA 前坐标与 API 可能变。
 - `android.newDsl=false` 是 AGP 10 前的技术债，与本次迁移正交，需单独立项。
+- **包体目标未达成**：见 §18.5，迁移使代码增大 108 KB。
 
 ---
 
