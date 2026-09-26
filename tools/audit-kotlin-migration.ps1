@@ -42,6 +42,7 @@ foreach ($kt in $files) {
     }
 
     $row['ProceedArr'] = Get-Count $k '\.proceed\s*\('
+    $row['BadImport'] = Get-Count $k 'import\s+com\.better\.heybox[A-Z]'
     $rows += [pscustomobject]$row
 
     if ($row.Classic -gt 0) {
@@ -54,7 +55,10 @@ foreach ($kt in $files) {
         $violations += "$rel : catch(Throwable) 由 $($row.CatchJv) 减为 $($row.CatchKt) —— 有防御被删"
     }
     if ($row.KClass -gt 0) {
-        $violations += "$rel : 出现 $($row.KClass) 处 KClass/::class.java —— 反射场景会丢 isBridge/isSynthetic"
+        $violations += "$rel : 出现 $($row.KClass) 处 KClass 反射 —— 会丢 isBridge/isSynthetic"
+    }
+    if ($row.BadImport -gt 0) {
+        $violations += "$rel : $($row.BadImport) 处 import 少写一个点（com.better.heyboxXxx）"
     }
 }
 
