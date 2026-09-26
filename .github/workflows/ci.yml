@@ -114,30 +114,27 @@ jobs:
           size_human="$(awk -v b="$size_bytes" 'BEGIN { printf "%.2f MB", b / 1048576 }')"
           sha256="$(sha256sum "$apk" | cut -d' ' -f1)"
 
+          # before 为全零说明是新分支 / 强推，没有可对比的基线
           compare_line=""
           if [ -n "$BEFORE_SHA" ] && ! printf '%s' "$BEFORE_SHA" | grep -qE '^0+$'; then
             compare_line="$(printf '对比: <a href="%s/compare/%s...%s">%s...%s</a>' \
               "$repo_url" "$BEFORE_SHA" "$full_sha" "${BEFORE_SHA:0:7}" "$short_sha")"
           fi
 
+          # 只发一条消息：这段正文就是 APK 的 caption（上限 1024），
+          # 所以文件 / 校验 / 运行链接这类关键信息放前面，被截断时先丢末尾的解释性内容
           {
-            printf ' <b>CI 构建成功</b> · <code>%s</code>\n' "$CI_VERSION"
-            printf '分支: <code>%s</code>\n' "$branch"
+            printf '🔧 <b>CI 构建成功</b> · <code>%s</code>\n' "$CI_VERSION"
+            printf '文件: %s（%s）\n' "$(basename "$apk")" "$size_human"
+            printf 'SHA-256: <code>%s</code>\n' "$sha256"
+            printf '运行: <a href="%s">#%s</a>（Actions 产物保留 14 天）\n' "$run_url" "${GITHUB_RUN_NUMBER}"
+            printf '\n分支: <code>%s</code>\n' "$branch"
             printf '提交: <a href="%s/commit/%s">%s</a> %s\n' "$repo_url" "$full_sha" "$short_sha" "$subject"
             if [ -n "$compare_line" ]; then
               printf '%s\n' "$compare_line"
             fi
             printf '作者: %s\n' "$actor"
-            printf '运行: <a href="%s">#%s</a>（Actions 产物保留 14 天）\n' "$run_url" "${GITHUB_RUN_NUMBER}"
-            printf '文件: %s（%s）\n' "$(basename "$apk")" "$size_human"
-            printf 'SHA-256: <code>%s</code>\n' "$sha256"
           } > telegram-message.html
-
-          {
-            printf '<b>BetterHeybox %s</b>（debug）\n' "$CI_VERSION"
-            printf '运行: <a href="%s">#%s</a>\n' "$run_url" "${GITHUB_RUN_NUMBER}"
-            printf 'SHA-256: <code>%s</code>\n' "$sha256"
-          } > telegram-caption.html
 
       - name: Notify Telegram
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -150,5 +147,4 @@ jobs:
         run: |
           bash .github/scripts/telegram-notify.sh \
             --message telegram-message.html \
-            --document "dist/BetterHeybox-${{ steps.version.outputs.version }}.apk" \
-            --caption telegram-caption.html
+            --document "dist/BetterHeybox-${{ steps.version.outputs.version }}.apk"

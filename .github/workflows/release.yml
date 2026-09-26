@@ -161,6 +161,7 @@ jobs:
           HAS_CHANGELOG: ${{ steps.release_meta.outputs.has_changelog }}
         run: |
           set -euo pipefail
+          export LC_ALL="${LC_ALL:-C.UTF-8}"
 
           escape_html() {
             sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
@@ -180,6 +181,7 @@ jobs:
           fi
           commit_total="$(git rev-list --count "$range")"
 
+          # CHANGELOG 小节转成 Telegram HTML：转义 → 去掉 ** → ### 小标题加粗
           changelog=""
           if [ "$HAS_CHANGELOG" = "true" ]; then
             changelog="$(awk -v v="${RELEASE_VERSION#v}" '
@@ -192,40 +194,42 @@ jobs:
               | sed -e 's/\*\*//g' -e 's|^###[[:space:]]*\(.*\)$|▪ <b>\1</b>|')"
           fi
 
+          # 只发一条消息：正文即 APK 的 caption（可见字符上限约 1000），
+          # 给更新日志留固定预算，保证提交记录也能露出来；两者都可能被脚本按行截断
+          changelog_budget=420
+          if [ -n "$changelog" ] && [ "${#changelog}" -gt "$changelog_budget" ]; then
+            changelog="${changelog:0:$changelog_budget}"
+            changelog="${changelog%$'\n'*}"
+            changelog="${changelog}"$'\n'"…（完整更新日志见 Release 说明）"
+          fi
+
           {
-            printf ' <b>BetterHeybox %s</b>\n\n' "$RELEASE_VERSION"
-            printf '<b> 更新日志</b>\n'
+            printf '🚀 <b>BetterHeybox %s</b> · %s\n' "$RELEASE_VERSION" "$size_human"
+            printf 'SHA-256: <code>%s</code>\n' "$sha256"
+            printf 'Release: <a href="%s">%s</a>\n' "$release_url" "$RELEASE_TAG"
+            printf '\n📋 <b>更新日志</b>\n'
             if [ -n "$changelog" ]; then
-              printf '%s\n\n' "$changelog"
+              printf '%s\n' "$changelog"
             else
-              printf '本次共 %s 个提交，详见下方提交记录。\n\n' "$commit_total"
+              printf '本次共 %s 个提交，详见下方提交记录。\n' "$commit_total"
             fi
-            printf '<b>🔗 提交记录</b>\n'
+            printf '\n🔗 <b>提交记录</b>\n'
             if [ "$commit_total" -gt 0 ]; then
-              git log "$range" -n 10 --pretty=format:'%H|%s' | while IFS='|' read -r sha subject; do
+              git log "$range" -n 3 --pretty=format:'%H|%s' | while IFS='|' read -r sha subject; do
+                if [ "${#subject}" -gt 60 ]; then
+                  subject="${subject:0:60}…"
+                fi
                 printf '• <a href="%s/commit/%s">%s</a> %s\n' \
                   "$repo_url" "$sha" "${sha:0:7}" "$(printf '%s' "$subject" | escape_html)"
               done
               printf '\n'
-              if [ "$commit_total" -gt 10 ]; then
-                printf '…另有 %s 条提交，见 <a href="%s">Release 说明</a>\n' "$((commit_total - 10))" "$release_url"
+              if [ "$commit_total" -gt 3 ]; then
+                printf '…另有 %s 条提交，见 <a href="%s">Release 说明</a>\n' "$((commit_total - 3))" "$release_url"
               fi
             else
               printf '（没有可列出的提交）\n'
             fi
-            printf '\n<b>⬇️ 下载</b>\n'
-            printf '• Release: <a href="%s">%s</a>\n' "$release_url" "$RELEASE_TAG"
-            printf '• 文件: %s（%s）\n' "$(basename "$apk")" "$size_human"
-            printf '• SHA-256: <code>%s</code>\n\n' "$sha256"
-            printf '<a href="https://t.me/Betterheybox">Telegram 频道</a>\n'
           } > telegram-message.html
-
-          {
-            printf ' <b>BetterHeybox %s</b>\n' "$RELEASE_VERSION"
-            printf '文件: %s（%s）\n' "$(basename "$apk")" "$size_human"
-            printf 'SHA-256: <code>%s</code>\n' "$sha256"
-            printf 'Release: <a href="%s">%s</a>\n' "$release_url" "$RELEASE_TAG"
-          } > telegram-caption.html
 
       - name: Notify Telegram
         continue-on-error: true
@@ -234,11 +238,11 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
+          # boolean 输入在 env 里是 "true"/"false" 字符串，避免在 if 里做类型猜测
           if [ "$NOTIFY_TELEGRAM" = "false" ]; then
             echo "::notice::notify_telegram=false，跳过 Telegram 通知"
             exit 0
           fi
           bash .github/scripts/telegram-notify.sh \
             --message telegram-message.html \
-            --document "dist/BetterHeybox-${{ steps.release_meta.outputs.version }}.apk" \
-            --caption telegram-caption.html
+            --document "dist/BetterHeybox-${{ steps.release_meta.outputs.version }}.apk"

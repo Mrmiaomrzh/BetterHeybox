@@ -2,9 +2,13 @@
 #
 # BetterHeybox Telegram 通知发送器（CI / Release / Telegram test 共用）
 #
+# 每次调用只发一条消息：
+#   有 --document → sendDocument，正文作为文件说明（caption）
+#   无 --document → sendMessage，正文作为普通消息
+#
 # 用法:
-#   telegram-notify.sh --message FILE [--document FILE] [--caption FILE]
-#                      [--limit N] [--truncate-mark TEXT] [--silent]
+#   telegram-notify.sh --message FILE [--document FILE] [--limit N]
+#                      [--truncate-mark TEXT] [--silent]
 #
 # 环境变量:
 #   TELEGRAM_BOT_TOKEN           Bot Token（必填；未配置则跳过，退出码 0）
@@ -16,10 +20,12 @@
 # 退出码: 0 = 已发送 / 按配置跳过；1 = 发送失败；2 = 参数错误
 #
 # 约定:
-#   - 正文按整行边界截断（默认 3900 字符，Bot API 上限 4096），避免截断 HTML 标签
-#   - 先发正文，再发文件；文件说明上限 1024 字符，同样按行截断
+#   - 长度按「去掉 HTML 标签后的可见字符」计算（Telegram 的 entities parsing 语义）
+#   - 超长时从末尾按整行丢弃（不会截断标签），再追加截断标记；
+#     单行本身就超长时才按字符硬截断
+#   - 默认上限：文件说明 1000（Bot API 上限 1024）/ 普通消息 3900（上限 4096）
 #   - 429 / 网络错误最多重试 3 次，遵循响应里的 retry_after（上限 60s）
-#   - 附件超过 49 MB（Bot 上传上限 50 MB）时跳过附件并给出 warning
+#   - 附件超过 49 MB（Bot 上传上限 50 MB）时改为发普通消息
 #   - 凭据始终 ::add-mask::，dry-run 只显示打码后的 token 前缀
 
 set -euo pipefail
@@ -33,21 +39,21 @@ fi
 
 MESSAGE_FILE=""
 DOCUMENT_FILE=""
-CAPTION_FILE=""
-LIMIT=3900
-TRUNCATE_MARK=$'\n…（内容过长已截断，完整内容见 GitHub）'
+LIMIT=""
+TRUNCATE_MARK=$'\n…（内容过长已截断，完整内容见上方链接）'
 SILENT=0
 MAX_ATTEMPTS=3
+CAPTION_LIMIT=1000
+MESSAGE_LIMIT=3900
 DOCUMENT_MAX_BYTES=$((49 * 1024 * 1024))
 
 usage() {
   cat <<'USAGE'
-用法: telegram-notify.sh --message FILE [--document FILE] [--caption FILE]
-                         [--limit N] [--truncate-mark TEXT] [--silent]
-  --message FILE        正文（HTML）文件，必填
-  --document FILE       要作为文件发送的构建产物（可选）
-  --caption FILE        文件说明（HTML，可选）
-  --limit N             正文长度上限，默认 3900
+用法: telegram-notify.sh --message FILE [--document FILE] [--limit N]
+                         [--truncate-mark TEXT] [--silent]
+  --message FILE        正文（HTML）文件，必填；有附件时作为文件说明
+  --document FILE       随消息一起发送的构建产物（可选）
+  --limit N             可见字符上限，默认：有附件 1000 / 无附件 3900
   --truncate-mark TEXT  截断后追加的说明文字
   --silent              静音发送
 USAGE
@@ -71,16 +77,33 @@ read_text() {
   fi
 }
 
-# 按整行边界截断到 limit 个字符以内，超出时追加截断标记
-truncate_lines() {
-  local text="$1" limit="$2"
-  if [ "${#text}" -le "$limit" ]; then
+# Telegram 的 4096 / 1024 都按 entities parsing 之后的可见字符计，标签与 href 不计入
+parsed_length() {
+  printf '%s' "$1" | sed -e 's/<[^>]*>//g' | wc -m | tr -d '[:space:]'
+}
+
+# 超长时按整行丢弃末尾内容，直到可见字符数放得下（含截断标记）
+fit_message() {
+  local text="$1" limit="$2" budget marker_len attempts=0
+  marker_len="$(parsed_length "$TRUNCATE_MARK")"
+  budget=$((limit - marker_len))
+  [ "$budget" -lt 1 ] && budget=1
+  while [ "$(parsed_length "$text")" -gt "$budget" ]; do
+    if [ -z "$text" ]; then
+      break
+    fi
+    if [ "$attempts" -ge 500 ]; then
+      text="${text:0:$budget}"
+      break
+    fi
+    text="${text%$'\n'*}"
+    attempts=$((attempts + 1))
+  done
+  if [ "$attempts" -gt 0 ]; then
+    printf '%s%s' "$text" "$TRUNCATE_MARK"
+  else
     printf '%s' "$text"
-    return 0
   fi
-  local cut="${text:0:$limit}"
-  cut="${cut%$'\n'*}"
-  printf '%s%s' "$cut" "$TRUNCATE_MARK"
 }
 
 retry_after_seconds() {
@@ -131,7 +154,6 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --message)       MESSAGE_FILE="${2:-}"; shift 2 ;;
     --document)      DOCUMENT_FILE="${2:-}"; shift 2 ;;
-    --caption)       CAPTION_FILE="${2:-}"; shift 2 ;;
     --limit)         LIMIT="${2:-}"; shift 2 ;;
     --truncate-mark) TRUNCATE_MARK="${2:-}"; shift 2 ;;
     --silent)        SILENT=1; shift ;;
@@ -149,9 +171,11 @@ if [ ! -f "$MESSAGE_FILE" ]; then
   fail "找不到正文文件: $MESSAGE_FILE"
   exit 2
 fi
-case "$LIMIT" in
-  ''|*[!0-9]*) fail "--limit 必须是正整数，实际收到: $LIMIT"; exit 2 ;;
-esac
+if [ -n "$LIMIT" ]; then
+  case "$LIMIT" in
+    ''|*[!0-9]*) fail "--limit 必须是正整数，实际收到: $LIMIT"; exit 2 ;;
+  esac
+fi
 
 TOKEN="${TELEGRAM_BOT_TOKEN:-}"
 CHAT_ID="${TELEGRAM_CHAT_ID:-}"
@@ -167,82 +191,89 @@ if is_true "${TELEGRAM_SILENT:-}"; then
   SILENT=1
 fi
 
-RAW_TEXT="$(read_text "$MESSAGE_FILE")"
-if [ -z "$RAW_TEXT" ]; then
-  fail "正文文件为空: $MESSAGE_FILE"
-  exit 2
-fi
-TEXT="$(truncate_lines "$RAW_TEXT" "$LIMIT")"
-if [ "${#RAW_TEXT}" -gt "$LIMIT" ]; then
-  warn "正文 ${#RAW_TEXT} 字符超过 ${LIMIT} 上限，已按行截断"
-fi
-
-CAPTION=""
-if [ -n "$DOCUMENT_FILE" ]; then
-  CAPTION="$(basename "$DOCUMENT_FILE")"
-fi
-if [ -n "$CAPTION_FILE" ] && [ -f "$CAPTION_FILE" ]; then
-  CAPTION="$(truncate_lines "$(read_text "$CAPTION_FILE")" 1000)"
-fi
-
+# 先定附件能不能发，再定正文上限（附件在 → 正文是 caption，上限更小）
 SEND_DOCUMENT=0
 size_bytes=0
 if [ -n "$DOCUMENT_FILE" ]; then
   if [ ! -f "$DOCUMENT_FILE" ]; then
-    warn "找不到附件 ${DOCUMENT_FILE}，只发送正文"
+    warn "找不到附件 ${DOCUMENT_FILE}，改为发送普通消息"
   else
     size_bytes="$(wc -c < "$DOCUMENT_FILE" | tr -d '[:space:]')"
     if [ "$size_bytes" -gt "$DOCUMENT_MAX_BYTES" ]; then
-      warn "附件 $(basename "$DOCUMENT_FILE") 约 $((size_bytes / 1048576)) MB，超过 Telegram 上传上限（50 MB），只发送正文"
+      warn "附件 $(basename "$DOCUMENT_FILE") 约 $((size_bytes / 1048576)) MB，超过 Telegram 上传上限（50 MB），改为发送普通消息"
     else
       SEND_DOCUMENT=1
     fi
   fi
 fi
 
+if [ -z "$LIMIT" ]; then
+  if [ "$SEND_DOCUMENT" -eq 1 ]; then
+    LIMIT="$CAPTION_LIMIT"
+  else
+    LIMIT="$MESSAGE_LIMIT"
+  fi
+fi
+
+RAW_TEXT="$(read_text "$MESSAGE_FILE")"
+if [ -z "$RAW_TEXT" ]; then
+  fail "正文文件为空: $MESSAGE_FILE"
+  exit 2
+fi
+TEXT="$(fit_message "$RAW_TEXT" "$LIMIT")"
+raw_visible="$(parsed_length "$RAW_TEXT")"
+visible="$(parsed_length "$TEXT")"
+if [ "$raw_visible" -gt "$LIMIT" ]; then
+  warn "正文可见字符 ${raw_visible} 超过上限 ${LIMIT}，已按行截断到 ${visible}"
+fi
+
 if is_true "${TELEGRAM_DRY_RUN:-}"; then
-  notice "DRY RUN：不发送任何请求"
+  if [ "$SEND_DOCUMENT" -eq 1 ]; then
+    notice "DRY RUN：将发送 1 条文件说明（caption，上限 ${LIMIT}）"
+  else
+    notice "DRY RUN：将发送 1 条普通消息（上限 ${LIMIT}）"
+  fi
   printf '目标: %s%s\n' "$CHAT_ID" "${THREAD_ID:+（话题 ${THREAD_ID}）}"
   printf 'Token: %s****（已打码）\n' "${TOKEN:0:4}"
-  printf '正文: %s 字符（上限 %s）\n' "${#TEXT}" "$LIMIT"
+  printf '可见字符: %s / %s\n' "$visible" "$LIMIT"
   printf -- '--- 正文开始 ---\n%s\n--- 正文结束 ---\n' "$TEXT"
   if [ "$SEND_DOCUMENT" -eq 1 ]; then
     printf '附件: %s（%s 字节）\n' "$DOCUMENT_FILE" "$size_bytes"
-    printf -- '--- 文件说明开始 ---\n%s\n--- 文件说明结束 ---\n' "$CAPTION"
   fi
   exit 0
 fi
 
-message_args=(
-  --data-urlencode "chat_id=${CHAT_ID}"
-  --data-urlencode "text=${TEXT}"
-  --data-urlencode "parse_mode=HTML"
-  --data-urlencode 'link_preview_options={"is_disabled":true}'
-)
+common_args=()
 if [ -n "$THREAD_ID" ]; then
-  message_args+=( --data-urlencode "message_thread_id=${THREAD_ID}" )
+  common_args+=( --form-string "message_thread_id=${THREAD_ID}" )
 fi
 if [ "$SILENT" -eq 1 ]; then
-  message_args+=( --data-urlencode "disable_notification=true" )
+  common_args+=( --form-string "disable_notification=true" )
 fi
-
-response="$(send sendMessage "${message_args[@]}")" || exit 1
-notice "已发送正文（message_id=$(message_id_of "$response")）"
 
 if [ "$SEND_DOCUMENT" -eq 1 ]; then
   # --form-string：caption 以 <b> 开头时不会被 curl 当成「从文件读取」
   document_args=(
     --form-string "chat_id=${CHAT_ID}"
-    --form-string "caption=${CAPTION}"
+    --form-string "caption=${TEXT}"
     --form-string "parse_mode=HTML"
     -F "document=@${DOCUMENT_FILE}"
   )
+  response="$(send sendDocument "${document_args[@]}" "${common_args[@]}")" || exit 1
+  notice "已发送附件 $(basename "$DOCUMENT_FILE")（message_id=$(message_id_of "$response")）"
+else
+  message_args=(
+    --data-urlencode "chat_id=${CHAT_ID}"
+    --data-urlencode "text=${TEXT}"
+    --data-urlencode "parse_mode=HTML"
+    --data-urlencode 'link_preview_options={"is_disabled":true}'
+  )
   if [ -n "$THREAD_ID" ]; then
-    document_args+=( --form-string "message_thread_id=${THREAD_ID}" )
+    message_args+=( --data-urlencode "message_thread_id=${THREAD_ID}" )
   fi
   if [ "$SILENT" -eq 1 ]; then
-    document_args+=( --form-string "disable_notification=true" )
+    message_args+=( --data-urlencode "disable_notification=true" )
   fi
-  response="$(send sendDocument "${document_args[@]}")" || exit 1
-  notice "已发送附件 $(basename "$DOCUMENT_FILE")（message_id=$(message_id_of "$response")）"
+  response="$(send sendMessage "${message_args[@]}")" || exit 1
+  notice "已发送消息（message_id=$(message_id_of "$response")）"
 fi

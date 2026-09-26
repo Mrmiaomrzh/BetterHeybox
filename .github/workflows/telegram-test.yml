@@ -51,14 +51,8 @@ jobs:
             printf '🧪 <b>Telegram 通知测试</b>（target=<code>%s</code>）\n' "$TEST_TARGET"
             printf '提交: <a href="%s/commit/%s">%s</a> %s\n' "$repo_url" "$full_sha" "$short_sha" "$subject"
             printf '运行: <a href="%s">#%s</a>\n' "$run_url" "${GITHUB_RUN_NUMBER}"
-            printf '收到本消息与下方测试附件，即表示凭证、目标会话与发帖权限正常。\n'
+            printf '收到本消息与附件，即表示凭证、目标会话与发帖权限正常。\n'
           } > telegram-message.html
-
-          {
-            printf '<b>BetterHeybox Telegram 冒烟测试</b>\n'
-            printf 'target: <code>%s</code>\n' "$TEST_TARGET"
-            printf '运行: <a href="%s">#%s</a>\n' "$run_url" "${GITHUB_RUN_NUMBER}"
-          } > telegram-caption.html
 
           printf 'BetterHeybox Telegram smoke test\ntarget: %s\nrun: %s\n' "$TEST_TARGET" "$run_url" > telegram-test.txt
 
@@ -71,5 +65,4 @@ jobs:
         run: |
           bash .github/scripts/telegram-notify.sh \
             --message telegram-message.html \
-            --document telegram-test.txt \
-            --caption telegram-caption.html
+            --document telegram-test.txt
