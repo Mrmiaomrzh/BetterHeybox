@@ -87,6 +87,20 @@ if (-not (Test-Path $dk)) {
 
 $cpParts = @($android, $proj, $std) | Where-Object { $_ }
 if (Test-Path $dk) { $cpParts += $dk }
+
+$lg = Join-Path $work 'liquidglass-classes.jar'
+if (-not (Test-Path $lg)) {
+    $aar = Find-JarAny 'com.github.QWEA0' 'liquidglass' 'liquidglass-*.aar'
+    if ($aar) {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $extract = Join-Path $work 'lg-aar'
+        if (Test-Path $extract) { Remove-Item $extract -Recurse -Force }
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($aar, $extract)
+        Copy-Item (Join-Path $extract 'classes.jar') $lg
+    }
+}
+if (Test-Path $lg) { $cpParts += $lg }
+
 $cp = $cpParts -join ';'
 
 Get-ChildItem "$work\out" -Recurse -File -ErrorAction SilentlyContinue | Remove-Item -Force
@@ -97,7 +111,9 @@ $runtimeCp = $runtimeCp -join ';'
 
 Write-Host "编译 $simpleName ..." -ForegroundColor Cyan
 & java -cp $runtimeCp org.jetbrains.kotlin.cli.jvm.K2JVMCompiler `
-    -cp $cp -jvm-target 17 -nowarn -no-stdlib -no-reflect -d "$work\out" $Source 2>&1 |
+    -cp $cp -jvm-target 17 -nowarn -no-stdlib -no-reflect `
+    -module-name BetterHeybox_app_debug -Xfriend-paths="$proj" `
+    -d "$work\out" $Source 2>&1 |
     Where-Object { $_ -notmatch 'sun\.misc\.Unsafe|FastJarFileSystemKt|WARNING: Please consider reporting' }
 
 $exit = $LASTEXITCODE

@@ -127,9 +127,11 @@ pwsh tools/audit-kotlin-migration.ps1
 再交给父代理做整仓构建 + 装机验证。
 
 **注意**：`ktcheck.ps1` 只证明该文件自身，不验证跨文件调用点。
-它还有两个已知局限，遇到时**不要据此改代码**：
+它还有一个**它自己发现不了**的局限：
 
-1. 引用本 module 的 `internal` 声明会误报 `cannot access ... it is internal in file`
-   （单文件编译不构成同一编译单元）。改用整仓 `:app:compileDebugKotlin` 判断。
-2. 它**不会**发现 #44 的名称改写问题——单文件编译时没有 Java 调用点参与链接。
-   凡是用 `internal` 暴露给 Java 的方法，必须靠 `javap` 或整仓构建确认 JVM 名。
+- 它**不会**发现 #44 的名称改写问题——单文件编译时没有 Java 调用点参与链接。
+  凡是用 `internal` 暴露给 Java 的方法，必须靠 `javap` 或整仓构建确认 JVM 名。
+
+脚本已用 `-Xfriend-paths` + `-module-name` 对齐真实构建，因此引用本 module
+`internal` 声明**不再**误报 `cannot access ... it is internal in file`。
+若再见到该报错，说明 `bundleDebugClassesToCompileJar` 尚未产出（先跑一次 `:app:assembleDebug`）。
