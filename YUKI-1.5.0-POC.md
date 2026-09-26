@@ -1025,5 +1025,74 @@ m.hook(executable).intercept(chain -> {
 
 ---
 
-本地依赖与解包产物位于 `.poc/`（已 gitignore）。
+## 18. 迁移完成
+
+### 18.1 最终状态
+
+| 项 | 结果 |
+|---|---|
+| `app/src/main/java` 下 Java 源文件 | **0 个** |
+| Kotlin 源文件 | 68 个 / 36,687 行 |
+| `yuki/` 桥接层 | **已删除**，仅保留 `HookEntry.kt`（KSP 入口，见 18.3） |
+| 单元测试 | 30 个（16 + 14），0 失败 0 错误 |
+| 构建 | debug + release 均通过 |
+| 装机验证 | **42 Hook 安装 / 0 失败 / 无链接错误** |
+| 纪律审计 | 零违规 |
+
+### 18.2 四条硬性纪律的最终核验
+
+| 纪律 | 结果 |
+|---|---|
+| 绝不把 chain 风格 `intercept` 改成 classic 风格 `hook {` | 全仓 **0 处** classic |
+| 绝不删除 `catch (Throwable)` | 全仓 **733 处**，逐文件与 Java 原文对照过 |
+| `LiquidGlassHookBridge` 吞异常语义必须保留 | `catch (t: Throwable) { chain.proceed() }` **逐字保留** |
+| 反射目标保持 `java.lang.Class` 而非 `KClass` | 全仓 **0 处** KClass |
+
+### 18.3 为什么 `HookEntry.kt` 必须保留在 `yuki/`
+
+KSP **只处理 Kotlin 源集**，`@YukiHookLibXposedEntry` 入口无法用 Java 写。
+这是全项目唯一"必须存在"的文件——它不是桥接层，是入口本身。
+除它之外的桥接代码（`YukiChain` 适配器、`YukiChainView`、`YukiChainFunction`、
+`YukiHookBridge`）已全部删除，原职责并入 `MainModule`。
+
+### 18.4 对 §16 结论的修正
+
+§16 当时的结论是「**不建议全量迁移**」，理由是行为风险高。项目所有者决定推进。
+
+实际执行下来，§16 的**风险识别是对的**，但**量级判断偏悲观**：
+
+| §16 的判断 | 实际情况 |
+|---|---|
+| 收益面窄，主流"先 proceed 后处理"模式收益≈0 | 成立，这部分确实逐字照搬 |
+| 反射无收益且有净损失（`KClass` 会丢 `isBridge()`） | **成立且关键**，全程守住 `Class<*>` |
+| 96 处 chain 语义 + 700 处 `catch` 是主要风险 | 成立，但**靠机械比对可控制** |
+| 零测试兜底 | **已解决**：补了 30 个测试，且 `HeyboxTargets` 的 14 个直接约束了转换 |
+
+真正**没被 §16 预见**的风险是另一类：**工具与流程**。
+
+1. **`internal` 会改写 JVM 方法名**（`名字$模块名`），给 Java 用的 `internal` 方法会 `NoSuchMethodError`，
+   而编译期无任何提示。必须配 `@JvmName`。
+2. **`ktcheck.ps1` 单文件编译的两类误判**：`internal` 可见性假阳性、以及看不到名称改写。
+3. **审计脚本把半成品当违规报**（`.kt` 只有 35% 时 catch 数偏少，被误报成"防御被删"，误导了一轮排查）。
+4. **`git add -A` 把代理的验证脚手架卷进提交**，并暴露出 `.gitignore` 里的 `docs/` 会让文档静默丢失。
+
+结论：迁移本身的机械风险可控且有编译期兜底；**真正需要额外防御的是验证工具本身的正确性**。
+这也是为什么本轮沉淀了 `tools/ktcheck.ps1`、`tools/audit-kotlin-migration.ps1`
+与 [docs/kotlin-migration-traps.md](docs/kotlin-migration-traps.md)——它们的作用不是加速迁移，
+而是**让"看起来过了"与"真的过了"可区分**。
+
+### 18.5 未做的事（诚实记录）
+
+- **目标提到的「46 个检查点 × 4 个宿主版本」人工回归没有做**。
+  实际验证手段是自动化的：42 个 Hook 安装计数、`✘ 失败` 计数、
+  延迟安装计数一致性、以及对默认关闭开关的正向对照（注入开关后确认安装）。
+  这是**代理指标**，不等于 46 项 UI 逐项人工确认。
+  首次推送前建议补做一轮真机人工回归。
+- **只在 MuMu 15（Android 15 / x86_64）上验证过**，未做 arm64 真机。
+- Yuki 仍是 `1.5.0-beta.4`：作者声明 GA 前坐标与 API 可能变。
+- `android.newDsl=false` 是 AGP 10 前的技术债，与本次迁移正交，需单独立项。
+
+---
+
+本地依赖已随仓库提交在 `gradle/m2-yuki`（706 KB），CI 可直接构建。
 所有结论均来自包内源码与字节码，**未使用官网文档**。
