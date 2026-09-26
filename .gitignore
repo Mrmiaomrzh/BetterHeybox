@@ -3,6 +3,11 @@ build/
 !gradle/wrapper/gradle-wrapper.jar
 .vscode/
 
+app/bin/
+app/obj/
+**/bin/
+**/obj/
+
 .idea/
 *.iml
 local.properties
