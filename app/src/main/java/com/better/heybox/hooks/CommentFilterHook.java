@@ -21,7 +21,7 @@ import java.util.regex.Pattern;
 import com.better.heybox.App;
 import com.better.heybox.Checkpoint;
 import com.better.heybox.MainModule;
-import io.github.libxposed.api.XposedInterface;
+import com.better.heybox.yuki.YukiChain;
 
 public final class CommentFilterHook {
 
@@ -272,7 +272,7 @@ public final class CommentFilterHook {
         }
     }
 
-    private Object onSubCommentRowView(XposedInterface.Chain chain) throws Throwable {
+    private Object onSubCommentRowView(YukiChain chain) throws Throwable {
         Object result = chain.proceed();
         try {
             if (!commentFilterActive() || !(result instanceof View)) {
@@ -366,7 +366,7 @@ public final class CommentFilterHook {
         }
     }
 
-    private Object onAdapterBind(XposedInterface.Chain chain) throws Throwable {
+    private Object onAdapterBind(YukiChain chain) throws Throwable {
         Object holder = chain.getArg(0);
         View itemView = holderView(holder);
         if (itemView != null) {
@@ -428,7 +428,7 @@ public final class CommentFilterHook {
         }
     }
 
-    private Object onBaseAdapterBind(XposedInterface.Chain chain) throws Throwable {
+    private Object onBaseAdapterBind(YukiChain chain) throws Throwable {
         Object holder = chain.getArg(0);
         int position = ((Number) chain.getArg(1)).intValue();
         View itemView = holderView(holder);
@@ -518,7 +518,7 @@ public final class CommentFilterHook {
         }
     }
 
-    private Object onSubCommentRowBind(XposedInterface.Chain chain) throws Throwable {
+    private Object onSubCommentRowBind(YukiChain chain) throws Throwable {
         Object result = chain.proceed();
         try {
             if (!commentFilterActive()) {
@@ -584,7 +584,7 @@ public final class CommentFilterHook {
         return installed;
     }
 
-    private Object onEpoxyItemBind(XposedInterface.Chain chain) throws Throwable {
+    private Object onEpoxyItemBind(YukiChain chain) throws Throwable {
         Object result = chain.proceed();
         try {
             if (!gameRelayEnabled()) {
@@ -653,7 +653,7 @@ public final class CommentFilterHook {
         return text != null && (text.contains("<a") || text.contains("heybox://"));
     }
 
-    private Object onSetTotalList(XposedInterface.Chain chain) throws Throwable {
+    private Object onSetTotalList(YukiChain chain) throws Throwable {
         Object arg = chain.getArg(0);
         int hidden = 0;
         Object floorKey = null;

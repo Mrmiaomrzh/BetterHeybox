@@ -7,8 +7,7 @@ import java.lang.reflect.Method;
 import com.better.heybox.App;
 import com.better.heybox.HeyboxTargets;
 import com.better.heybox.MainModule;
-
-import io.github.libxposed.api.XposedInterface;
+import com.better.heybox.yuki.YukiChain;
 
 public final class AdFilterHook {
 
@@ -88,7 +87,7 @@ public final class AdFilterHook {
         }
     }
 
-    private Object filterFeedAd(XposedInterface.Chain chain) throws Throwable {
+    private Object filterFeedAd(YukiChain chain) throws Throwable {
         if (module.isEnabled(App.KEY_FEED_AD, true)) {
             try {
                 Object elem = chain.getArg(0);

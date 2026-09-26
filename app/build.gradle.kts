@@ -2,6 +2,8 @@ import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.ksp)
 }
 
 val keystoreProps = Properties().apply {
@@ -63,9 +65,21 @@ android {
     }
 }
 
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
+
 dependencies {
+    implementation(libs.yuki.core)
+    implementation(libs.yuki.runtime.libxposed)
+    implementation(libs.kavaref.core)
+    ksp(libs.yuki.compiler)
+
     compileOnly(libs.libxposed.api)
-    implementation(libs.libxposed.service)
+    compileOnly(libs.libxposed.service)
+
     implementation(libs.dexkit)
     implementation("com.github.QWEA0:liquidglass:90f4ea28e3")
 }

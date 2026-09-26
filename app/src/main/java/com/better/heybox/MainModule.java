@@ -2,16 +2,22 @@ package com.better.heybox;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.content.pm.ApplicationInfo;
 import android.os.SystemClock;
 import android.util.Log;
 
+import java.lang.reflect.Member;
+import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
-import io.github.libxposed.api.XposedModule;
+import com.highcapable.yukihookapi.hook.param.PackageParam;
 
+import com.better.heybox.yuki.YukiChain;
+import com.better.heybox.yuki.YukiHookBridge;
 import com.better.heybox.hooks.AdFilterHook;
 import com.better.heybox.hooks.BottomTabHook;
 import com.better.heybox.hooks.BrowserRedirectHook;
@@ -39,11 +45,13 @@ import com.better.heybox.hooks.WebViewDevToolsHook;
 import com.better.heybox.liquidglass.LiquidGlassHookBridge;
 import com.better.heybox.liquidglass.LiquidGlassInstaller;
 
-public class MainModule extends XposedModule {
+public final class MainModule {
 
     public static final String TAG = "BetterHeybox";
 
     private com.better.heybox.hooks.DailyTaskHook dailyTaskHook;
+
+    private static volatile MainModule sInstance;
 
     private volatile ClassLoader targetClassLoader;
     private final java.util.List<HookSpec> hookSpecs =
@@ -51,6 +59,26 @@ public class MainModule extends XposedModule {
     private final java.util.concurrent.atomic.AtomicInteger pendingHookCount =
             new java.util.concurrent.atomic.AtomicInteger();
     private SharedPreferences.OnSharedPreferenceChangeListener settingsListener;
+
+    private final PackageParam param;
+    private final YukiHookBridge bridge;
+
+    private MainModule(PackageParam param) {
+        this.param = param;
+        this.bridge = new YukiHookBridge(param);
+        this.targetClassLoader = param.getHostClassLoader();
+    }
+
+    public static void attach(PackageParam param) {
+        MainModule module = new MainModule(param);
+        sInstance = module;
+        module.logd(Log.INFO, TAG, ">>> 命中小黑盒，安装 Hook");
+        module.deferInstallForDowngradeCheck();
+    }
+
+    public static MainModule get() {
+        return sInstance;
+    }
 
     public static final String TARGET_PKG = "com.max.xiaoheihe";
 
@@ -62,52 +90,44 @@ public class MainModule extends XposedModule {
                     "1.3.396"
             )));
 
-    @Override
-    public void onModuleLoaded(ModuleLoadedParam param) {
-        Checkpoint.mark("onModuleLoaded: %s", param.getProcessName());
-        Checkpoint.mark("framework: %s (%s) API %d", getFrameworkName(), getFrameworkVersion(), getApiVersion());
-        logd(Log.INFO, TAG, "onModuleLoaded: " + param.getProcessName());
-        logd(Log.INFO, TAG, "framework: " + getFrameworkName()
-                + " (" + getFrameworkVersion() + ") API " + getApiVersion());
+    public YukiHookBridge.HookHandle hook(Member member) {
+        return bridge.hook(member);
     }
 
-    @Override
-    public boolean onHotReloading(HotReloadingParam param) {
-        logd(Log.INFO, TAG, "允许热重载");
-        return true;
+    public SharedPreferences getRemotePreferences(String group) {
+        return bridge.remotePreferences(group);
     }
 
-    @Override
-    public void onPackageReady(PackageReadyParam param) {
-        String packageName = param.getPackageName();
-        Checkpoint.mark("onPackageReady: %s (target=%b)", packageName, TARGET_PKG.equals(packageName));
-        logd(Log.INFO, TAG, "onPackageReady: " + packageName);
-
-        if (TARGET_PKG.equals(packageName)) {
-            logd(Log.INFO, TAG, ">>> 命中小黑盒，安装 Hook");
-            deferInstallForDowngradeCheck(param);
-        }
+    public ApplicationInfo getModuleApplicationInfo() {
+        return param.getModule().getAppInfo();
     }
 
-    private void deferInstallForDowngradeCheck(PackageReadyParam param) {
+    private void log(int level, String tag, String msg) {
+        bridge.frameworkLog(level, tag, msg, null);
+    }
+
+    private void log(int level, String tag, String msg, Throwable tr) {
+        bridge.frameworkLog(level, tag, msg, tr);
+    }
+
+    private void deferInstallForDowngradeCheck() {
         try {
-            Class<?> appCls = Class.forName("android.app.Application", false, param.getClassLoader());
-            java.lang.reflect.Method onCreate = appCls.getDeclaredMethod("onCreate");
-            java.util.concurrent.atomic.AtomicBoolean decided =
-                    new java.util.concurrent.atomic.AtomicBoolean(false);
+            Class<?> appCls = Class.forName("android.app.Application", false, targetClassLoader);
+            Method onCreate = appCls.getDeclaredMethod("onCreate");
+            AtomicBoolean decided = new AtomicBoolean(false);
             hook(onCreate).intercept(chain -> {
                 chain.proceed();
                 if (decided.compareAndSet(false, true)) {
-                    activateIfNotDowngraded(param, chain.getThisObject());
+                    activateIfNotDowngraded(chain.getThisObject());
                 }
                 return null;
             });
         } catch (Throwable t) {
             logd(Log.WARN, TAG, "检查决策点 Hook 失败", t);
-            installHooks(param);
+            installHooks();
         }
     }
-    private void activateIfNotDowngraded(PackageReadyParam param, Object app) {
+    private void activateIfNotDowngraded(Object app) {
         long own = ownVersionCode();
         long floor = -1;
         try {
@@ -132,9 +152,10 @@ public class MainModule extends XposedModule {
             }
             Checkpoint.mark("调试开关开启：已清除模块版本降级限制");
             logd(Log.WARN, TAG, "调试开关开启：已清除模块版本降级限制，按常规激活");
-            installHooks(param);
+            installHooks();
             return;
         }
+        boolean moduleUpdated = false;
         try {
             Context appContext = app instanceof Context ? (Context) app : null;
             if (appContext != null) {
@@ -146,6 +167,7 @@ public class MainModule extends XposedModule {
                     long next = Math.max(floor, own);
                     HeyboxPrefs.setString(App.KEY_MODULE_VERSION_FLOOR, String.valueOf(next));
                     if (next != floor) {
+                        moduleUpdated = true;
                         logd(Log.INFO, TAG, "版本下限: " + next);
                     }
                 }
@@ -161,12 +183,19 @@ public class MainModule extends XposedModule {
             logd(Log.WARN, TAG, "检测到模块过时 own=" + own + " < floor=" + floor + "，拒绝激活");
             return;
         }
-        installHooks(param);
+        installHooks();
+        if (moduleUpdated) {
+            GeneralHook.notifyModuleUpdated(app);
+            Checkpoint.mark("检测到模块更新: floor=%d -> %d，提示重启", floor, own);
+        }
     }
 
     private long ownVersionCode() {
         try {
-            android.content.pm.ApplicationInfo info = getModuleApplicationInfo();
+            ApplicationInfo info = getModuleApplicationInfo();
+            if (info == null) {
+                return -1L;
+            }
             android.content.pm.PackageInfo pkg = getPackageArchiveInfoCompat(info.sourceDir);
             if (pkg == null) {
                 return -1L;
@@ -185,8 +214,12 @@ public class MainModule extends XposedModule {
         }
         return null;
     }
-    private void installHooks(PackageReadyParam param) {
-        ClassLoader cl = param.getClassLoader();
+    private void installHooks() {
+        ClassLoader cl = targetClassLoader;
+        if (cl == null) {
+            cl = param.getHostClassLoader();
+            targetClassLoader = cl;
+        }
         CrashGuard.install();
         LiquidGlassHookBridge.setModule(this);
         Checkpoint.mark(">>> 开始安装 Hook");

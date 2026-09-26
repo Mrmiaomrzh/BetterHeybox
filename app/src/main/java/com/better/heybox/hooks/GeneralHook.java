@@ -1,6 +1,7 @@
 package com.better.heybox.hooks;
 
 import android.app.Activity;
+import android.app.Application;
 import android.content.pm.PackageInfo;
 import android.util.Log;
 import android.view.View;
@@ -103,11 +104,21 @@ public final class GeneralHook {
     private static final AtomicBoolean DOWNGRADE_NOTICE_SHOWN = new AtomicBoolean(false);
 
     public static void notifyDowngraded(Object app) {
-        if (!(app instanceof android.app.Application)) {
+        notifyOnce(app, DOWNGRADE_NOTICE_SHOWN, "BetterHeybox 已停用：模块过时，请更新模块后重启小黑盒");
+    }
+
+    private static final AtomicBoolean UPDATE_NOTICE_SHOWN = new AtomicBoolean(false);
+
+    public static void notifyModuleUpdated(Object app) {
+        notifyOnce(app, UPDATE_NOTICE_SHOWN, "模块已更新，建议重启小黑盒以完整生效");
+    }
+
+    private static void notifyOnce(Object app, AtomicBoolean guard, String message) {
+        if (!(app instanceof Application)) {
             return;
         }
-        ((android.app.Application) app).registerActivityLifecycleCallbacks(
-                new android.app.Application.ActivityLifecycleCallbacks() {
+        ((Application) app).registerActivityLifecycleCallbacks(
+                new Application.ActivityLifecycleCallbacks() {
                     @Override
                     public void onActivityCreated(Activity activity, android.os.Bundle savedInstanceState) {
                     }
@@ -118,10 +129,9 @@ public final class GeneralHook {
 
                     @Override
                     public void onActivityResumed(Activity activity) {
-                        if (!DOWNGRADE_NOTICE_SHOWN.compareAndSet(false, true)) {
+                        if (!guard.compareAndSet(false, true)) {
                             return;
                         }
-                        String message = "BetterHeybox 已停用：模块过时，请更新模块后重启小黑盒";
                         try {
                             Class<?> toastUtil = Class.forName("com.max.hbutils.utils.f", false,
                                     activity.getClassLoader());

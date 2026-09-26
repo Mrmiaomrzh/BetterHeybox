@@ -693,8 +693,98 @@ activateIfNotDowngraded
 
 ### 14.4 状态
 
-方案已定，尚未实现：`:app` 尚未迁移到 Yuki，入口与生命周期还是 LibXposed 原生形态。
-待正式迁移时按 §14.2 接入。
+**已实现**（§15）。`activateIfNotDowngraded` 在 `own > floor` 时置 `moduleUpdated`，
+安装完成后调用 `GeneralHook.notifyModuleUpdated(app)`，复用与 `notifyDowngraded`
+相同的 `registerActivityLifecycleCallbacks` 首次 `onResume` 提示模式
+（两者已抽为共用的 `notifyOnce`）。
+
+---
+
+## 15. :app 正式迁移（已完成并装机验证）
+
+### 15.1 改造策略：桥接层保住 150 处调用点
+
+核心决策是**不把业务 Hook 改成 Kotlin**，而是用一层 Kotlin 桥接让 Java 调用点几乎零改动。
+
+| 新增（Kotlin） | 作用 |
+|---|---|
+| `yuki/HookEntry.kt` | `@YukiHookLibXposedEntry` 入口，`loadApp` 回调里 `MainModule.attach(this)` |
+| `yuki/YukiChain.kt` | `YukiChain`（5 个方法）、`YukiChainView`、`YukiChainFunction` |
+| `yuki/YukiHookBridge.kt` | `hook(Member)` / `frameworkLog` / `remotePreferences` |
+
+`MainModule` 保留**全部 public 方法**（20 个 Hook 类与约 150 处
+`module.hook(m).intercept(chain -> ...)` 逐字未动），只做四类改动：
+
+1. 不再 `extends XposedModule`，改由静态 `attach(PackageParam)` 接入
+2. 补回继承来的 API：`getRemotePreferences` / `getModuleApplicationInfo` / `log`
+3. 生命周期回调（`onModuleLoaded` / `onPackageReady` / `onHotReloading`）移出入口
+4. 10 处声明类型 `XposedInterface.Chain` → `YukiChain`
+
+### 15.2 三个非显然的坑
+
+**1. Java lambda 无法抛受检异常。**
+Yuki 的 chain 回调类型是 `kotlin.jvm.functions.Function1`，其 `invoke` **未声明**
+`throws Throwable`（已 javap 确认），而项目大量 handler 声明 `throws Throwable`。
+解法是 Kotlin `fun interface YukiChainFunction` + `@Throws(Throwable::class)`——
+JVM 签名因此带上 `throws Throwable`，Java lambda 才能编译。已验证产物：
+
+```text
+public interface com.better.heybox.yuki.YukiChainFunction {
+  public abstract java.lang.Object apply(com.better.heybox.yuki.YukiChain) throws java.lang.Throwable;
+}
+```
+
+**2. `remotePreferences` 必须反射取。**
+Yuki 的 `YukiHookPreferences` 既未实现 `SharedPreferences`，也不暴露
+`registerOnSharedPreferenceChangeListener`，而 `watchSettingsChanges()` 依赖该能力。
+其 `internal val current` 编译为 public 的 `getCurrent$yukihook_core()`，
+桥接层反射取回以保留既有行为。**该方法名绑定 Yuki 模块名，上游改名会静默退化**
+（届时退化为需重启宿主才生效，属可接受降级）。
+
+**3. 成员扩展需要词法接收者。**
+`intercept` 声明在 `PackageParam` 类体内，跨文件用 `param.intercept(...)` 解析失败，
+必须 `with(param) { member.intercept(...) }`；且回调是**接收者** lambda，
+写 `{ chain -> }` 会报类型不匹配，须用 `this`。
+
+### 15.3 装机验证（MuMu 15 / Android 15 / LSPosed IT 2.1.1 / 小黑盒 1.3.396）
+
+```text
+D/YukiHook       Welcome to YukiHook 1.5.0-beta.4! Running on LSPosed API 102
+I/BetterHeybox   >>> 命中小黑盒，安装 Hook
+D/YukiHook       Executing hooker [intercept] (1) for public void android.app.Application.onCreate()
+I/BetterHeybox   目标解析完成: game.rec.list.bind=候选 ... feeds.list.bind.6=候选
+I/BetterHeybox   ✔ Heybox 版本检测/更新屏蔽/伪装通知权限/开屏广告/信息流广告/气泡广告/角标广告
+I/BetterHeybox   ✔ onActivityResult / 设置页入口 / 液态玻璃 实现启动提示 Hook 已安装
+D/BetterHeybox   跳过安装（开关关闭）: 底部导航
+```
+
+- 目标解析（DexKit + 候选名）全部命中
+- 开关门控生效（底部导航按开关跳过）
+- 业务过滤实时工作：关键词 / 视频帖 / 等级阈值 / 点赞阈值 + 视图层探针
+- **主进程与 pushservice 双进程均正常**
+- 异常扫描 `NoSuchMethodError` / `ClassNotFoundException` / `VerifyError` /
+  `LinkageError` / `FATAL EXCEPTION`：**无**
+
+### 15.4 release（R8）验证
+
+`yukihook-core.aar` 的 `proguard.txt` 为空，consumer 规则需自备。已补：
+
+- `-keep class com.better.heybox.** { *; }`（含 KSP 生成的入口类）
+- `-keep` 三个由 Yuki 反射定位的类：`generated.YukiHookProperties`、
+  `YukiHook_Impl`、`ModuleApplication_Impl`
+- `-adaptresourcefilecontents META-INF/xposed/java_init.list` 保持入口类名
+
+release 构建通过，R8 后 `java_init.list` 仍为
+`com.better.heybox.yuki.HookEntry_YukiHookXposedInit`，元数据完好。
+release APK 1989 KB / debug APK 9168.8 KB。
+
+> 迁移前 debug APK 为 4403.7 KB，增量即 Yuki 依赖膨胀（§11.5）。
+
+### 15.5 遗留
+
+- `android.newDsl=false` / `android.builtInKotlin=false` 为全局属性，AGP 10 将移除
+- 真机 arm64 环境未复测（模拟器为 x86_64，宿主 `primaryCpuAbi=arm64-v8a`）
+- 同优先级多 Hook 顺序、`AppLifecycle`、DexKit 延迟补挂仍未专项验证
 
 ---
 

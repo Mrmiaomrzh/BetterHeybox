@@ -1,7 +1,7 @@
 package com.better.heybox.liquidglass;
 
 import com.better.heybox.MainModule;
-import io.github.libxposed.api.XposedInterface;
+import com.better.heybox.yuki.YukiChain;
 
 public final class LiquidGlassHookBridge {
     private static volatile MainModule module;
@@ -16,5 +16,5 @@ public final class LiquidGlassHookBridge {
             catch (Throwable t) { return chain.proceed(); }
         });
     }
-    interface ChainFunction { Object apply(XposedInterface.Chain chain) throws Throwable; }
+    interface ChainFunction { Object apply(YukiChain chain) throws Throwable; }
 }

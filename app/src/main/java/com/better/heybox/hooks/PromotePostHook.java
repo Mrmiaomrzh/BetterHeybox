@@ -9,8 +9,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import com.better.heybox.App;
 import com.better.heybox.HeyboxTargets;
 import com.better.heybox.MainModule;
-
-import io.github.libxposed.api.XposedInterface;
+import com.better.heybox.yuki.YukiChain;
 
 public final class PromotePostHook {
 
@@ -33,7 +32,7 @@ public final class PromotePostHook {
                 + "/" + method.getParameterCount());
     }
 
-    private Object onRender(XposedInterface.Chain chain) throws Throwable {
+    private Object onRender(YukiChain chain) throws Throwable {
         List<Object> args = chain.getArgs();
         Object bbsLink = findBbsLink(args);
         Object viewHolder = findViewHolder(args);

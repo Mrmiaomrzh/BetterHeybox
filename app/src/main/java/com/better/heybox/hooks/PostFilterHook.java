@@ -12,7 +12,7 @@ import java.util.regex.Pattern;
 import com.better.heybox.App;
 import com.better.heybox.HeyboxTargets;
 import com.better.heybox.MainModule;
-import io.github.libxposed.api.XposedInterface;
+import com.better.heybox.yuki.YukiChain;
 
 public final class PostFilterHook {
 
@@ -131,7 +131,7 @@ public final class PostFilterHook {
         }
     }
 
-    private Object onBbsListBind(XposedInterface.Chain chain) throws Throwable {
+    private Object onBbsListBind(YukiChain chain) throws Throwable {
         View itemView = FeedItemHider.getItemView(chain.getArg(0));
         if (itemView != null) {
             FeedItemHider.restore(itemView);
@@ -443,7 +443,7 @@ public final class PostFilterHook {
         }
     }
 
-    private Object filterFlowModel(XposedInterface.Chain chain) throws Throwable {
+    private Object filterFlowModel(YukiChain chain) throws Throwable {
         Object result = chain.proceed();
         try {
             if (result == null) {
@@ -619,7 +619,7 @@ public final class PostFilterHook {
         }
     }
 
-    private Object onCardBind(XposedInterface.Chain chain) throws Throwable {
+    private Object onCardBind(YukiChain chain) throws Throwable {
         View cardView = chain.getThisObject() instanceof View
                 ? (View) chain.getThisObject() : null;
         if (cardView != null) {
@@ -798,7 +798,7 @@ public final class PostFilterHook {
         }
     }
 
-    private Object onNewsLinkTitle(XposedInterface.Chain chain) throws Throwable {
+    private Object onNewsLinkTitle(YukiChain chain) throws Throwable {
         View itemView = chain.getThisObject() instanceof View
                 ? FeedItemHider.topLevel((View) chain.getThisObject()) : null;
         if (itemView != null) {
@@ -870,7 +870,7 @@ public final class PostFilterHook {
         com.better.heybox.Checkpoint.mark("发帖过滤首页配置样式卡安装: %d 处 / %d 类", installed, classes);
     }
 
-    private Object onConfigStyleBind(XposedInterface.Chain chain) throws Throwable {
+    private Object onConfigStyleBind(YukiChain chain) throws Throwable {
         View itemView = chain.getThisObject() instanceof View
                 ? FeedItemHider.topLevel((View) chain.getThisObject()) : null;
         if (itemView != null) {
