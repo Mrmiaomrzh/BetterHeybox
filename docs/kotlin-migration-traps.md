@@ -80,9 +80,37 @@ lambda 内直接写抛异常的代码即可——**不要**自己加 `catch (Thr
 | 38 | `public static final String KEY_X` | companion 里 `const val`，编译后仍是静态常量，`App.KEY_X` 两侧写法不变 |
 | 39 | 非常量静态字段 | `@JvmField`（否则变成 getter，Java 侧 `obj.field` 编译失败） |
 | 40 | 静态方法 | `@JvmStatic` 放 companion |
-| 41 | Java 的**包级可见** | Kotlin 无对应。仅本文件使用时收为 `private`；否则保留 public 并在注释说明 |
+| 41 | Java 的**包级可见** | Kotlin 无对应。仅本文件使用时收为 `private`；否则用 `@JvmStatic internal` —— **但必须配 `@JvmName`，见 #44** |
 | 42 | 私有静态方法传给 `Thread(...)` | 方法引用会生成 `Function0` 而非 `Runnable` → 用 lambda 包裹 |
 | 43 | `SimpleDateFormat` / `ThreadLocal` 匿名子类 | `object : ThreadLocal<T>() { override fun initialValue(): T = ... }` |
+| 44 | **`internal` 会改写 JVM 方法名** | 见下节，**这是本项目实际踩过的坑** |
+
+### #44 `internal` 的名称改写（本项目实测）
+
+`internal` 的字节码可见性是 public，但**方法名会被加上 `$模块名` 后缀**：
+
+```
+Kotlin:  internal fun isBbsLinkBinder(m: Method): Boolean
+javap:   public static final boolean isBbsLinkBinder$app_debug(java.lang.reflect.Method)
+```
+
+后果：同包（甚至同 module）的 **Java** 代码写 `HeyboxTargets.isBbsLinkBinder(m)` 会**链接失败**，
+报 `NoSuchMethodError`——而 Kotlin 源码侧一切正常，编译期无任何提示。
+
+**正确写法**（`HeyboxTargets` 的 14 个 matcher 方法、`GameLibraryCleanHook.touchState` 均如此）：
+
+```kotlin
+@JvmStatic
+@JvmName("isBbsLinkBinder")   // 抵消名称改写，JVM 名与 Java 版逐字一致
+internal fun isBbsLinkBinder(method: Method): Boolean
+```
+
+三个注解缺一不可：
+- `internal` → 保持「模块内可见、对外不暴露」的意图
+- `@JvmStatic` → 静态方法形态
+- `@JvmName` → 抵消名称改写，让 Java 调用点能链接
+
+**注意**：`@JvmName` 只影响 JVM 名，不影响 Kotlin 侧调用——Kotlin 代码仍写 `isBbsLinkBinder(m)`。
 
 ## 五、验证手段
 
@@ -99,3 +127,9 @@ pwsh tools/audit-kotlin-migration.ps1
 再交给父代理做整仓构建 + 装机验证。
 
 **注意**：`ktcheck.ps1` 只证明该文件自身，不验证跨文件调用点。
+它还有两个已知局限，遇到时**不要据此改代码**：
+
+1. 引用本 module 的 `internal` 声明会误报 `cannot access ... it is internal in file`
+   （单文件编译不构成同一编译单元）。改用整仓 `:app:compileDebugKotlin` 判断。
+2. 它**不会**发现 #44 的名称改写问题——单文件编译时没有 Java 调用点参与链接。
+   凡是用 `internal` 暴露给 Java 的方法，必须靠 `javap` 或整仓构建确认 JVM 名。
