@@ -525,7 +525,7 @@ public final class HeyboxTargets {
         return null;
     }
 
-    private static String signature(Method method) {
+    static String signature(Method method) {
         return method.getDeclaringClass().getName() + "#" + method.getName()
                 + "#" + method.getParameterCount();
     }
@@ -557,7 +557,7 @@ public final class HeyboxTargets {
         }
     }
 
-    private static boolean contains(String[] array, String value) {
+    static boolean contains(String[] array, String value) {
         for (String item : array) {
             if (item.equals(value)) {
                 return true;
@@ -566,7 +566,7 @@ public final class HeyboxTargets {
         return false;
     }
 
-    private static boolean hasParam(Method method, String paramClassName) {
+    static boolean hasParam(Method method, String paramClassName) {
         for (Class<?> type : method.getParameterTypes()) {
             if (paramClassName.equals(type.getName())) {
                 return true;
@@ -575,13 +575,13 @@ public final class HeyboxTargets {
         return false;
     }
 
-    private static boolean isStringPredicate(Method method) {
+    static boolean isStringPredicate(Method method) {
         return method.getParameterCount() == 1
                 && method.getParameterTypes()[0] == String.class
                 && method.getReturnType() == boolean.class;
     }
 
-    private static boolean isInnerParam(Method method) {
+    static boolean isInnerParam(Method method) {
         if (method.getParameterCount() != 1) {
             return false;
         }
@@ -589,24 +589,24 @@ public final class HeyboxTargets {
         return method.getParameterTypes()[0].getName().startsWith(owner + "$");
     }
 
-    private static boolean isUtilParam(Method method) {
+    static boolean isUtilParam(Method method) {
         return method.getParameterCount() == 1
                 && method.getParameterTypes()[0].getName().startsWith("com.max.xiaoheihe.utils.");
     }
 
-    private static boolean isBooleanFlagIn(Method method) {
+    static boolean isBooleanFlagIn(Method method) {
         return method.getParameterCount() == 1
                 && method.getParameterTypes()[0] == boolean.class
                 && method.getReturnType() != void.class;
     }
 
-    private static boolean isFeedsBinder(Method method) {
+    static boolean isFeedsBinder(Method method) {
         return method.getParameterCount() == 2
                 && "com.max.xiaoheihe.bean.news.FeedsContentBaseObj"
                 .equals(method.getParameterTypes()[1].getName());
     }
 
-    private static boolean isBbsLinkBinder(Method method) {
+    static boolean isBbsLinkBinder(Method method) {
         if (method.isBridge() || method.isSynthetic()) {
             return false;
         }
@@ -620,7 +620,7 @@ public final class HeyboxTargets {
         return isViewHolderParam(types[0]);
     }
 
-    private static boolean isViewHolderParam(Class<?> type) {
+    static boolean isViewHolderParam(Class<?> type) {
         Class<?> holder = sViewHolderClass;
         if (holder == null) {
             try {
@@ -638,7 +638,7 @@ public final class HeyboxTargets {
         return type.getName().startsWith("com.max.hbcommon.base.adapter.s$");
     }
 
-    private static boolean isRecommendBinder(Method method) {
+    static boolean isRecommendBinder(Method method) {
         if (method.getReturnType() != void.class || method.getParameterCount() != 2) {
             return false;
         }
@@ -646,7 +646,7 @@ public final class HeyboxTargets {
         return types[1] == Object.class && isViewHolderParam(types[0]);
     }
 
-    private static boolean isBigBrotherBinder(Method method) {
+    static boolean isBigBrotherBinder(Method method) {
         if (method.getReturnType() != void.class || method.getParameterCount() != 2) {
             return false;
         }
@@ -657,7 +657,7 @@ public final class HeyboxTargets {
                 .equals(types[0].getName());
     }
 
-    private static boolean isBBDelegateBinder(Method method) {
+    static boolean isBBDelegateBinder(Method method) {
         if (method.getReturnType() != void.class || method.getParameterCount() != 3) {
             return false;
         }
@@ -673,7 +673,7 @@ public final class HeyboxTargets {
         return false;
     }
 
-    private static boolean isLinksGetter(Method method) {
+    static boolean isLinksGetter(Method method) {
         return !method.isBridge()
                 && method.getParameterCount() == 0
                 && java.util.List.class.isAssignableFrom(method.getReturnType());

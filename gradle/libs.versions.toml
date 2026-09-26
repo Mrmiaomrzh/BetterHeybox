@@ -6,6 +6,7 @@ kotlin = "2.4.10"
 ksp = "2.3.10"
 yuki = "1.5.0-beta.4"
 kavaref = "1.1.0"
+junit = "4.13.2"
 
 [libraries]
 libxposed-api = { module = "io.github.libxposed:api", version.ref = "libxposed" }
@@ -15,6 +16,7 @@ yuki-core = { module = "com.highcapable.yukihookapi:yukihook-core", version.ref 
 yuki-runtime-libxposed = { module = "com.highcapable.yukihookapi:yukihook-runtime-libxposed", version.ref = "yuki" }
 yuki-compiler = { module = "com.highcapable.yukihookapi:yukihook-compiler", version.ref = "yuki" }
 kavaref-core = { module = "com.highcapable.kavaref:kavaref-core", version.ref = "kavaref" }
+junit = { module = "junit:junit", version.ref = "junit" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

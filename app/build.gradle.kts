@@ -90,4 +90,6 @@ dependencies {
 
     implementation(libs.dexkit)
     implementation("com.github.QWEA0:liquidglass:90f4ea28e3")
+
+    testImplementation(libs.junit)
 }
