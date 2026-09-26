@@ -786,6 +786,96 @@ release APK 1989 KB / debug APK 9168.8 KB。
 - 真机 arm64 环境未复测（模拟器为 x86_64，宿主 `primaryCpuAbi=arm64-v8a`）
 - 同优先级多 Hook 顺序、`AppLifecycle`、DexKit 延迟补挂仍未专项验证
 
+### 15.6 Release 体积精确 A/B
+
+在 worktree 中 checkout 迁移前提交 `9a0d3a5`，以**相同工具链**构建 release 后对比
+（基线产出 unsigned APK，差异仅为签名块）：
+
+| | 迁移前 | 迁移后 | 增量 |
+|---|---:|---:|---:|
+| APK 总体 | 1876.6 KB | 1989.0 KB | **+112.4 KB（+6.0%）** |
+| dex | 798.2 KB | 925.8 KB | +127.6 KB |
+| native | 1445.3 KB | 1445.3 KB | ±0 |
+| res+其他 | 18.5 KB | 61.1 KB | +42.6 KB |
+| dex 类数 | 500 | 732 | +232 |
+| dex 方法数 | 5324 | 6282 | +958 |
+
+**修正 §11.5 的判断。** 该节「+2012 class / +4.0 MB dex」基于依赖闭包与
+**debug（无 R8）**构建。release 开 R8 后，Yuki 传递引入的
+appcompat / preference / emoji2 / recyclerview 等绝大部分被裁掉——
+Yuki 实际只用到其中很小一部分。**发布产物只涨 112 KB（+6%），native 部分完全没变。**
+
+---
+
+## 16. Java → Kotlin 迁移勘察
+
+### 16.1 规模
+
+| 项 | 数量 |
+|---|---:|
+| Java 文件 | 66 个 |
+| 总行数 | 33,986 行 |
+| 平均 | 515 行/文件 |
+| `hooks/` 业务 Hook 类 | 27 个 / 18,575 行 |
+| 其他（基础设施、工具） | 39 个 / 15,411 行 |
+
+行数最大的文件：
+`SettingsEntryHook` 4003、`LiquidGlassInstaller` 2675、`VideoDownloadManager` 1906、
+`GameLibraryCleanHook` 1756、`DailyTaskHook` 1736、`CommentFilterHook` 1390、
+`PostFilterHook` 1367、`CustomTextSelection` 1267。
+
+### 16.2 与框架的耦合分布（决定性数据）
+
+对 `MainModule` 全部 public 方法做调用点统计：
+
+| API | 调用点 | 占比 | 转 Kotlin 能否改善 |
+|---|---:|---:|---|
+| `module.logd` / `logv` | **503** | 65% | 否——日志门面，调用点一字不改 |
+| `module.isEnabled` / `getString` / `dp` | 169 | 22% | 否——配置读取，语言无关 |
+| `module.hook(...)` → `.intercept` | **94** | 12% | **是——唯一受益点** |
+| 其他（`onSettingChanged` 等） | 13 | 2% | 否 |
+
+另有 `YukiChain` 类型声明 21 处。
+
+**结论：只有约 12% 的框架耦合能真正受益。**
+`logd` 是全项目最大的耦合点（503 次），而它恰恰是语言无关的。
+
+> 更正 §15.1 中「约 150 处」的说法：实测 `.intercept(` 调用点为 **96 处**，
+> `module.hook` 为 94 处。
+
+### 16.3 其他关键密度
+
+| 指标 | 数量 | 说明 |
+|---|---:|---|
+| `Class.forName` | 154 | 宿主私有 API 解析 |
+| `getDeclaredMethod/Field` | 135 | 同上 |
+| `Method.invoke` | 122 | 同上 |
+| 宿主类名硬编码（`com.max.*`） | 156 | 混淆/改名即失效 |
+| null 检查 | **1428** | Kotlin 空安全的最大受益点 |
+| `synchronized` | 99 | 改协程风险高 |
+| 线程 / Handler / Executor | 50 | 同上 |
+
+反射调用合计约 **411 处**。这是 Kotlin **帮不上忙**甚至更啰嗦的部分——
+Kotlin 的 `::class` / 属性引用在跨进程反射场景下需要 `KClass` ↔ `Class` 转换，
+并引入 `kotlin.reflect` 依赖（`minSdk 26` 下需额外体积）。
+
+反射最密集：`SettingsEntryHook`(49)、`DailyTaskHook`(44)、`ImageShareHook`(33)、
+`GameLibraryCleanHook`(30)、`PostFilterHook`(29)。
+
+### 16.4 有利条件：抽象边界已经干净
+
+`HeyboxTargets`（803 行）是所有 Hook 的共同依赖，负责目标解析：
+声明式 `Target` 定义（key / classes / methods / anchors / 参数区间 / validator）
++ DexKit 解析 + 反射兜底 + 持久化缓存 + 单线程异步解析 + 挂起队列。
+
+**它完全不依赖 libxposed 或 Yuki**，只产出 `java.lang.reflect.Method` 交给消费者。
+这意味着：
+
+- 该层可以永久保持 Java，零成本
+- Kotlin 迁移可以渐进进行，且限制在「挂载层」
+
+这与 §15.1 的桥接层设计一致——抽象边界已经切好了。
+
 ---
 
 本地依赖与解包产物位于 `.poc/`（已 gitignore）。
