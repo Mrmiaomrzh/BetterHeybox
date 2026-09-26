@@ -408,26 +408,11 @@ public final class VideoDownloadManager {
     }
 
     private static boolean isHlsUrl(String url) {
-        return url != null && url.toLowerCase(Locale.US).contains(".m3u8");
+        return DownloadStateRules.isHlsUrl(url);
     }
 
     private static boolean isVideoExtension(String ext) {
-        switch (ext) {
-            case "mp4":
-            case "mov":
-            case "m4v":
-            case "mkv":
-            case "webm":
-            case "avi":
-            case "flv":
-            case "3gp":
-            case "rmvb":
-            case "wmv":
-            case "ts":
-                return true;
-            default:
-                return false;
-        }
+        return DownloadStateRules.isVideoExtension(ext);
     }
 
 
@@ -470,13 +455,11 @@ public final class VideoDownloadManager {
 
 
         public boolean isTerminal() {
-            State s = state;
-            return s == State.COMPLETED || s == State.FAILED || s == State.CANCELLED;
+            return DownloadStateRules.isTerminal(state);
         }
 
         private void transition(State next) {
-            State current = state;
-            if (current == State.CANCELLED && next != State.CANCELLED) {
+            if (!DownloadStateRules.allowsTransition(state, next)) {
                 return;
             }
             state = next;
@@ -587,7 +570,7 @@ public final class VideoDownloadManager {
         }
 
         void pause() {
-            if (state != State.DOWNLOADING && state != State.PENDING) {
+            if (!DownloadStateRules.canPause(state)) {
                 return;
             }
             pauseRequested.set(true);
@@ -596,9 +579,7 @@ public final class VideoDownloadManager {
         }
 
         void resumeDownload() {
-            State s = state;
-            if (s != State.PAUSED && s != State.FAILED && s != State.CANCELLED
-                    && s != State.PENDING) {
+            if (!DownloadStateRules.canResume(state)) {
                 return;
             }
             cancelled.set(false);
@@ -1567,15 +1548,8 @@ public final class VideoDownloadManager {
                     if (url == null || tasks.containsKey(taskKey(url))) {
                         continue;
                     }
-                    State st;
-                    try {
-                        st = State.valueOf(o.optString("state", "PAUSED"));
-                    } catch (Throwable bad) {
-                        st = State.PAUSED;
-                    }
-                    if (st == State.DOWNLOADING || st == State.PENDING) {
-                        st = State.PAUSED;
-                    }
+                    State st = DownloadStateRules.coerceRestoredState(
+                            o.optString("state", "PAUSED"));
                     Map<String, String> headers = new HashMap<>();
                     JSONObject hs = o.optJSONObject("headers");
                     if (hs != null) {
