@@ -70,7 +70,7 @@ class MessageRedDotHook(private val module: MainModule) {
             val holder: Class<*> = Class.forName(HOLDER_CLASS, false, cl)
             val bind = adapter.getDeclaredMethod("onBindViewHolder", holder, Integer.TYPE)
             module.hook(bind).intercept { chain ->
-                val viewHolder = chain.getArg(0)
+                val viewHolder = chain.arg(0)
                 if (sEntryClean) {
                     try {
                         restoreForBind(viewHolder)

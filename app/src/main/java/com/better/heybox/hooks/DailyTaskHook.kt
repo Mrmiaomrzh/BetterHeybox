@@ -97,9 +97,9 @@ class DailyTaskHook(private val module: MainModule) {
                         return@intercept chain.proceed()
                     }
                     try {
-                        val data = chain.getArg(1)
+                        val data = chain.arg(1)
                         if (data != null) {
-                            val ctx = chain.getArg(0)
+                            val ctx = chain.arg(0)
                             completeShare(data, ctx, cl)
                         }
                     } catch (t: Throwable) {
@@ -167,7 +167,7 @@ class DailyTaskHook(private val module: MainModule) {
                         return@intercept result
                     }
                     try {
-                        val self = chain.getThisObject()
+                        val self = chain.instanceOrNull
                         if (self is Dialog) {
                             autoClickChannel(self)
                         }
@@ -553,7 +553,7 @@ class DailyTaskHook(private val module: MainModule) {
                     }
                     try {
                         fakeUmengShareSuccess(
-                            chain.getThisObject(), chain.getArg(1),
+                            chain.instanceOrNull, chain.arg(1),
                             shareMedia, defaultMedia, label
                         )
                     } catch (t: Throwable) {
@@ -593,7 +593,7 @@ class DailyTaskHook(private val module: MainModule) {
                 if (!autoActive) {
                     return@intercept chain.proceed()
                 }
-                val self = chain.getThisObject()
+                val self = chain.instanceOrNull
                 val listener = readFieldByType(self, listenerType)
                 val media = readFieldByType(self, mediaType)
                 if (listener == null || media == null) {
@@ -629,7 +629,7 @@ class DailyTaskHook(private val module: MainModule) {
                         return@intercept chain.proceed()
                     }
                     try {
-                        val args = chain.getArgs()
+                        val args = chain.args
                         if (args.size > 4) {
                             val arg4 = args[4]
                             if (arg4 is Intent && isExternalWebJump(arg4)) {
@@ -690,7 +690,7 @@ class DailyTaskHook(private val module: MainModule) {
                     continue
                 }
                 module.hook(method).intercept { chain ->
-                    val arg = chain.getArg(0)
+                    val arg = chain.arg(0)
                     if (autoActive && arg is String && isBlockedAuxNavigation(arg)) {
                         onAuxNavigationBlocked("网页容器加载", arg)
                         return@intercept null
@@ -709,7 +709,7 @@ class DailyTaskHook(private val module: MainModule) {
                 "setWebViewClient", WebViewClient::class.java
             )
             module.hook(setter).intercept { chain ->
-                val client = chain.getArg(0)
+                val client = chain.arg(0)
                 if (client != null) {
                     hookWebClientClass(client.javaClass)
                 }
@@ -763,7 +763,7 @@ class DailyTaskHook(private val module: MainModule) {
                         if (!autoActive) {
                             return@intercept chain.proceed()
                         }
-                        val url = extractNavigateUrl(chain.getArgs())
+                        val url = extractNavigateUrl(chain.args)
                         if (isBlockedAuxNavigation(url)) {
                             onAuxNavigationBlocked("网页跳转", url)
                             return@intercept java.lang.Boolean.TRUE
@@ -840,7 +840,7 @@ class DailyTaskHook(private val module: MainModule) {
                 return@intercept chain.proceed()
             }
             try {
-                val listener = chain.getArg(listenerArg)
+                val listener = chain.arg(listenerArg)
                 if (listener != null) {
                     fake.invoke(listener)
                     module.logd(
@@ -849,7 +849,7 @@ class DailyTaskHook(private val module: MainModule) {
                     )
                     warnChannelMismatch(channel, logLabel)
                 }
-                val ctx = chain.getArg(0)
+                val ctx = chain.arg(0)
                 val context = if (ctx is Context) ctx else null
                 mainHandler.post { onStepCompleted(context) }
             } catch (t: Throwable) {
@@ -871,7 +871,7 @@ class DailyTaskHook(private val module: MainModule) {
             module.hook(onResume).intercept { chain ->
                 val result = chain.proceed()
                 try {
-                    val self = chain.getThisObject()
+                    val self = chain.instanceOrNull
                     if (self is Activity) {
                         maybeStartDailyTask(self)
                     }
@@ -940,8 +940,8 @@ class DailyTaskHook(private val module: MainModule) {
             val intSetter = titleBar.getMethod("setActionIcon", java.lang.Integer.TYPE)
             module.hook(intSetter).intercept { chain ->
                 try {
-                    val self = chain.getThisObject()
-                    val resId = chain.getArg(0) as Int
+                    val self = chain.instanceOrNull
+                    val resId = chain.arg(0) as Int
                     if (self is View && resId != 0) {
                         val name = self.resources
                             .getResourceEntryName(resId)
@@ -964,7 +964,7 @@ class DailyTaskHook(private val module: MainModule) {
                 ) {
                     module.hook(m).intercept { chain ->
                         try {
-                            val self = chain.getThisObject()
+                            val self = chain.instanceOrNull
                             if (self is View) {
                                 actionIcons.put(self, "")
                             }
@@ -1004,7 +1004,7 @@ class DailyTaskHook(private val module: MainModule) {
                 if (!allowed) {
                     return@intercept result
                 }
-                val selfObj = chain.getThisObject()
+                val selfObj = chain.instanceOrNull
                 if ("setActionIconOnClickListener" == setterName &&
                     isMessageIconPage(selfObj)
                 ) {
@@ -1015,7 +1015,7 @@ class DailyTaskHook(private val module: MainModule) {
                     return@intercept result
                 }
                 try {
-                    val self = chain.getThisObject()
+                    val self = chain.instanceOrNull
                     if (self == null) {
                         return@intercept result
                     }
@@ -1029,7 +1029,7 @@ class DailyTaskHook(private val module: MainModule) {
                     val act = ctx as? Activity
                     if (act != null) {
                         val titleBarObj: Any = self
-                        val listener = chain.getArg(0)
+                        val listener = chain.arg(0)
                         val scheduledStep = currentStep
                         mainHandler.postDelayed({
                             try {

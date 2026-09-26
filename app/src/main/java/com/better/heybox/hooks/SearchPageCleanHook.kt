@@ -47,7 +47,7 @@ class SearchPageCleanHook(private val module: MainModule) {
                 module.hook(onResume).intercept { chain ->
                     val result = chain.proceed()
                     try {
-                        val view = getView.invoke(chain.getThisObject())
+                        val view = getView.invoke(chain.instanceOrNull)
                         if (view is View) {
                             apply(view)
                         }

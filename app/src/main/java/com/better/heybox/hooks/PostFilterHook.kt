@@ -12,7 +12,7 @@ import com.better.heybox.App
 import com.better.heybox.Checkpoint
 import com.better.heybox.HeyboxTargets
 import com.better.heybox.MainModule
-import com.better.heybox.yuki.YukiChain
+import com.highcapable.yukihookapi.hook.param.HookChain
 import java.lang.ref.WeakReference
 import java.lang.reflect.Method
 import java.util.ArrayList
@@ -141,12 +141,12 @@ class PostFilterHook(module: MainModule) {
     }
 
     @Throws(Throwable::class)
-    private fun onBbsListBind(chain: YukiChain): Any? {
-        val itemView = FeedItemHider.getItemView(chain.getArg(0))
+    private fun onBbsListBind(chain: HookChain): Any? {
+        val itemView = FeedItemHider.getItemView(chain.arg(0))
         if (itemView != null) {
             FeedItemHider.restore(itemView)
         }
-        val data = chain.getArg(1)
+        val data = chain.arg(1)
         try {
             if (isPostLike(data) && !isExcludedPageContext(itemView)) {
                 if (applySyncFilters(data, "社区列表")) {
@@ -264,11 +264,11 @@ class PostFilterHook(module: MainModule) {
                 return
             }
             module.hook(m).intercept { chain ->
-                val ctrl = chain.getThisObject()
+                val ctrl = chain.instanceOrNull
                 sFlowControllerRef = if (ctrl == null) null else WeakReference(ctrl)
                 var replacement: List<*>? = null
                 try {
-                    replacement = filterFlowList(chain.getArg(0))
+                    replacement = filterFlowList(chain.arg(0))
                 } catch (t: Throwable) {
                     module.logd(Log.WARN, MainModule.TAG, "列表过滤异常，放行: " + t)
                 }
@@ -457,7 +457,7 @@ class PostFilterHook(module: MainModule) {
     }
 
     @Throws(Throwable::class)
-    private fun filterFlowModel(chain: YukiChain): Any? {
+    private fun filterFlowModel(chain: HookChain): Any? {
         val result = chain.proceed()
         try {
             if (result == null) {
@@ -627,9 +627,9 @@ class PostFilterHook(module: MainModule) {
     }
 
     @Throws(Throwable::class)
-    private fun onCardBind(chain: YukiChain): Any? {
+    private fun onCardBind(chain: HookChain): Any? {
         val cardView: View? =
-            if (chain.getThisObject() is View) chain.getThisObject() as View else null
+            if (chain.instanceOrNull is View) chain.instanceOrNull as View else null
         if (cardView != null) {
             FeedItemHider.restore(cardView)
         }
@@ -638,7 +638,7 @@ class PostFilterHook(module: MainModule) {
             if (cardView == null) {
                 return result
             }
-            val model = chain.getArg(0)
+            val model = chain.arg(0)
             if (model == null) {
                 return result
             }
@@ -704,7 +704,7 @@ class PostFilterHook(module: MainModule) {
             )
             module.hook(onMeasure).intercept { chain ->
                 try {
-                    fixWaterfallRow(chain.getThisObject())
+                    fixWaterfallRow(chain.instanceOrNull)
                 } catch (t: Throwable) {
                     module.logd(Log.WARN, MainModule.TAG, "首页成对行排版修正异常: " + t)
                 }
@@ -821,16 +821,16 @@ class PostFilterHook(module: MainModule) {
     }
 
     @Throws(Throwable::class)
-    private fun onNewsLinkTitle(chain: YukiChain): Any? {
+    private fun onNewsLinkTitle(chain: HookChain): Any? {
         val itemView: View? =
-            if (chain.getThisObject() is View)
-                FeedItemHider.topLevel(chain.getThisObject() as View) else null
+            if (chain.instanceOrNull is View)
+                FeedItemHider.topLevel(chain.instanceOrNull as View) else null
         if (itemView != null) {
             FeedItemHider.restore(itemView)
         }
         val result = chain.proceed()
         try {
-            val raw = chain.getArg(0)
+            val raw = chain.arg(0)
             val title = if (raw is String) raw as String else null
             probe(
                 "全宽卡", "view=" + (if (itemView == null) "null" else itemView.javaClass.simpleName)
@@ -889,16 +889,16 @@ class PostFilterHook(module: MainModule) {
     }
 
     @Throws(Throwable::class)
-    private fun onConfigStyleBind(chain: YukiChain): Any? {
+    private fun onConfigStyleBind(chain: HookChain): Any? {
         val itemView: View? =
-            if (chain.getThisObject() is View)
-                FeedItemHider.topLevel(chain.getThisObject() as View) else null
+            if (chain.instanceOrNull is View)
+                FeedItemHider.topLevel(chain.instanceOrNull as View) else null
         if (itemView != null) {
             FeedItemHider.restore(itemView)
         }
         val result = chain.proceed()
         try {
-            val model = chain.getArg(0)
+            val model = chain.arg(0)
             if (itemView == null || model == null) {
                 return result
             }
@@ -928,11 +928,11 @@ class PostFilterHook(module: MainModule) {
         try {
             HeyboxTargets.install(PromoteDetector.TARGET_FEEDS_BIND) { method ->
                 module.hook(method).intercept { chain ->
-                    val itemView = FeedItemHider.getItemView(chain.getArg(0))
+                    val itemView = FeedItemHider.getItemView(chain.arg(0))
                     if (itemView != null) {
                         FeedItemHider.restore(itemView)
                     }
-                    val data = chain.getArg(1)
+                    val data = chain.arg(1)
                     try {
                         if (applySyncFilters(data)) {
                             FeedItemHider.hide(itemView)

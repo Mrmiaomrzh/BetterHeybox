@@ -75,7 +75,7 @@ class SettingsEntryHook(private val module: MainModule) {
             module.hook(onCreate).intercept { chain ->
                 val result = chain.proceed()
                 try {
-                    val self = chain.getThisObject()
+                    val self = chain.instanceOrNull
                     if (self is Activity) {
                         val activity = self
                         activity.window.decorView.postDelayed(
@@ -111,7 +111,7 @@ class SettingsEntryHook(private val module: MainModule) {
             module.hook(target).intercept { chain ->
                 val result = chain.proceed()
                 try {
-                    val thisObj = chain.getThisObject()
+                    val thisObj = chain.instanceOrNull
                     if (thisObj is Activity && entryClass.isInstance(thisObj)) {
                         val activity = thisObj
                         activity.window.decorView.post(Runnable {
@@ -174,9 +174,9 @@ class SettingsEntryHook(private val module: MainModule) {
             module.hook(m).intercept { chain ->
                 val result = chain.proceed()
                 try {
-                    val a0 = chain.getArg(0)
-                    val a1 = chain.getArg(1)
-                    val a2 = chain.getArg(2)
+                    val a0 = chain.arg(0)
+                    val a1 = chain.arg(1)
+                    val a2 = chain.arg(2)
                     val requestCode = if (a0 is Int) a0 else 0
                     val resultCode = if (a1 is Int) a1 else 0
                     val data = if (a2 is Intent) a2 else null

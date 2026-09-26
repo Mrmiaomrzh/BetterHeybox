@@ -45,7 +45,7 @@ class GeneralHook(private val module: MainModule) {
             val onResume = baseActivity.getDeclaredMethod("onResume")
             module.hook(onResume).intercept { chain ->
                 val result = chain.proceed()
-                val activity = chain.getThisObject() as? Activity
+                val activity = chain.instanceOrNull as? Activity
                 if (activity != null) {
                     ForegroundTracker.onActivityResumed(activity)
                     val decor: View = activity.window.decorView
@@ -113,7 +113,7 @@ class GeneralHook(private val module: MainModule) {
             module.hook(updateEntry).intercept { chain ->
                 if (module.isEnabled(App.KEY_BLOCK_UPDATE, false)) {
                     module.logd(Log.INFO, MainModule.TAG, "已屏蔽 Heybox 更新入口 AppUpdateManager.P()")
-                    return@intercept chain.getThisObject()
+                    return@intercept chain.instanceOrNull
                 }
                 chain.proceed()
             }

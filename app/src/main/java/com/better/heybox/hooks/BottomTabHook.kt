@@ -29,7 +29,7 @@ class BottomTabHook(private val module: MainModule) {
             module.hook(onCreate).intercept { chain ->
                 val result = chain.proceed()
                 try {
-                    applyBottomTabSettings(chain.getThisObject())
+                    applyBottomTabSettings(chain.instanceOrNull)
                 } catch (t: Throwable) {
                     module.logd(Log.ERROR, MainModule.TAG, "应用底部导航栏设置异常", t)
                 }
@@ -42,7 +42,7 @@ class BottomTabHook(private val module: MainModule) {
                 module.hook(onResume).intercept { chain ->
                     val result = chain.proceed()
                     try {
-                        applyBottomTabSettings(chain.getThisObject())
+                        applyBottomTabSettings(chain.instanceOrNull)
                     } catch (t: Throwable) {
                         module.logd(Log.WARN, MainModule.TAG, "onResume 应用底栏设置失败: $t")
                     }
@@ -60,7 +60,7 @@ class BottomTabHook(private val module: MainModule) {
                     module.hook(b).intercept { chain ->
                         val result = chain.proceed()
                         try {
-                            val mainActivity = ViewUtils.findOuter(chain.getThisObject(), clazz)
+                            val mainActivity = ViewUtils.findOuter(chain.instanceOrNull, clazz)
                             if (mainActivity != null) {
                                 applyBottomTabSettings(mainActivity)
                             }

@@ -1,7 +1,7 @@
 package com.better.heybox.liquidglass
 
 import com.better.heybox.MainModule
-import com.better.heybox.yuki.YukiChain
+import com.highcapable.yukihookapi.hook.param.HookChain
 import java.lang.reflect.Executable
 
 object LiquidGlassHookBridge {
@@ -27,6 +27,6 @@ object LiquidGlassHookBridge {
 
     fun interface ChainFunction {
         @Throws(Throwable::class)
-        fun apply(chain: YukiChain): Any?
+        fun apply(chain: HookChain): Any?
     }
 }

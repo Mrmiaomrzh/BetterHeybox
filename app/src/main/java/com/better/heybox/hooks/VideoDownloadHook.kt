@@ -60,8 +60,8 @@ class VideoDownloadHook(private val module: MainModule) {
                 module.hook(method).intercept { chain ->
                     val result = chain.proceed()
                     try {
-                        val args = chain.getArgs()
-                        val thisObj = chain.getThisObject()
+                        val args = chain.args
+                        val thisObj = chain.instanceOrNull
                         val url = if (args.isNotEmpty() && args[0] is String)
                             args[0] as String else null
                         val headers = if (args.size > 1 && args[1] is Map<*, *>)

@@ -63,7 +63,7 @@ class WatchHook(private val module: MainModule) {
             if (onCreate != null) {
                 module.hook(onCreate).intercept { chain ->
                     val result = chain.proceed()
-                    notifyOpen(chain.getThisObject())
+                    notifyOpen(chain.instanceOrNull)
                     result
                 }
             }
@@ -71,7 +71,7 @@ class WatchHook(private val module: MainModule) {
             if (onResume != null) {
                 module.hook(onResume).intercept { chain ->
                     val result = chain.proceed()
-                    notifyOpen(chain.getThisObject())
+                    notifyOpen(chain.instanceOrNull)
                     result
                 }
                 any = true
@@ -116,7 +116,7 @@ class WatchHook(private val module: MainModule) {
                 module.hook(m).intercept { chain ->
                     val result = chain.proceed()
                     try {
-                        val ctx = chain.getArg(0)
+                        val ctx = chain.arg(0)
                         if (ctx is Context) {
                             WatchEngine.onPushArrived(ctx)
                         }
@@ -152,7 +152,7 @@ class WatchHook(private val module: MainModule) {
                     module.hook(ctor).intercept { chain ->
                         val result = chain.proceed()
                         try {
-                            HttpBridge.captureIfClient(chain.getArg(0), chain.getArg(1), cl)
+                            HttpBridge.captureIfClient(chain.arg(0), chain.arg(1), cl)
                         } catch (ignored: Throwable) {
                         }
                         result
@@ -188,7 +188,7 @@ class WatchHook(private val module: MainModule) {
                         module.hook(m).intercept { chain ->
                             val result = chain.proceed()
                             try {
-                                WatchEngine.onFeedJson(chain.getArg(0))
+                                WatchEngine.onFeedJson(chain.arg(0))
                             } catch (ignored: Throwable) {
                             }
                             result

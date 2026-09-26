@@ -61,10 +61,10 @@ class SingleColumnFeedHook(private val module: MainModule) {
                 val result = chain.proceed()
                 try {
                     if (enabled()) {
-                        val rv = chain.getArg(1)
+                        val rv = chain.arg(1)
                         val cur = getLayoutManager.invoke(rv)
                         if (cur != null && sglmClass.isInstance(cur)) {
-                            setLayoutManager.invoke(rv, llmCtor.newInstance(chain.getArg(0)))
+                            setLayoutManager.invoke(rv, llmCtor.newInstance(chain.arg(0)))
                             module.logd(Log.INFO, MainModule.TAG, "已屏蔽双列瀑布流，切换为单列布局")
                         }
                     }
@@ -97,7 +97,7 @@ class SingleColumnFeedHook(private val module: MainModule) {
             module.hook(onViewAdded).intercept { chain ->
                 try {
                     if (enabled()) {
-                        (chain.getThisObject() as LinearLayout).orientation =
+                        (chain.instanceOrNull as LinearLayout).orientation =
                             LinearLayout.VERTICAL
                     }
                 } catch (t: Throwable) {
@@ -106,7 +106,7 @@ class SingleColumnFeedHook(private val module: MainModule) {
                 val result = chain.proceed()
                 try {
                     if (enabled()) {
-                        val child = chain.getArg(0) as View
+                        val child = chain.arg(0) as View
                         child.layoutParams = LinearLayout.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.WRAP_CONTENT
@@ -131,7 +131,7 @@ class SingleColumnFeedHook(private val module: MainModule) {
                 val result = chain.proceed()
                 try {
                     if (enabled()) {
-                        val self = chain.getThisObject() as View
+                        val self = chain.instanceOrNull as View
                         val lp = self.layoutParams
                         if (lp is LinearLayout.LayoutParams && lp.width == 0) {
                             lp.width = ViewGroup.LayoutParams.MATCH_PARENT
@@ -151,9 +151,9 @@ class SingleColumnFeedHook(private val module: MainModule) {
                 val result = chain.proceed()
                 try {
                     if (enabled()) {
-                        val width = chain.getArg(0) as Int
+                        val width = chain.arg(0) as Int
                         if (width > 0) {
-                            resizeCover(chain.getThisObject() as ViewGroup, width)
+                            resizeCover(chain.instanceOrNull as ViewGroup, width)
                         }
                     }
                 } catch (t: Throwable) {

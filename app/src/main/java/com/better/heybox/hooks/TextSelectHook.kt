@@ -87,7 +87,7 @@ class TextSelectHook(private val module: MainModule) {
                 val result = chain.proceed()
 
                 try {
-                    val arg = chain.getArg(0)
+                    val arg = chain.arg(0)
                     if (arg is View) {
                         scheduleEnableTextSelect(arg, 0)
                         registerRoot(arg)

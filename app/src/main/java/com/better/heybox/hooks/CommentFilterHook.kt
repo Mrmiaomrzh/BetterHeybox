@@ -10,7 +10,7 @@ import android.widget.TextView
 import com.better.heybox.App
 import com.better.heybox.Checkpoint
 import com.better.heybox.MainModule
-import com.better.heybox.yuki.YukiChain
+import com.highcapable.yukihookapi.hook.param.HookChain
 import java.lang.reflect.Field
 import java.lang.reflect.Method
 import java.util.ArrayList
@@ -172,15 +172,15 @@ class CommentFilterHook(module: MainModule) {
     }
 
     @Throws(Throwable::class)
-    private fun onSubCommentRowView(chain: YukiChain): Any? {
+    private fun onSubCommentRowView(chain: HookChain): Any? {
         val result = chain.proceed()
         try {
             if (!commentFilterActive() || result !is View) {
                 return result
             }
             val row = result as View
-            val self = chain.getThisObject()
-            val index = (chain.getArg(0) as java.lang.Number).intValue()
+            val self = chain.instanceOrNull
+            val index = (chain.arg(0) as java.lang.Number).intValue()
             val comment = rowItem(self, index)
             if (comment == null) {
                 return result
@@ -269,15 +269,15 @@ class CommentFilterHook(module: MainModule) {
     }
 
     @Throws(Throwable::class)
-    private fun onAdapterBind(chain: YukiChain): Any? {
-        val holder = chain.getArg(0)
+    private fun onAdapterBind(chain: HookChain): Any? {
+        val holder = chain.arg(0)
         val itemView = holderView(holder)
         if (itemView != null) {
             restoreCyView(itemView)
         }
         val result = chain.proceed()
         try {
-            val self = chain.getThisObject()
+            val self = chain.instanceOrNull
             if (self != null) {
                 registerAdapter(self)
             }
@@ -285,13 +285,13 @@ class CommentFilterHook(module: MainModule) {
                 return result
             }
             if (commentFilterActive()) {
-                var reason: String? = if (isEnabled()) spamReason(chain.getArg(1)) else null
+                var reason: String? = if (isEnabled()) spamReason(chain.arg(1)) else null
                 if (reason == null) {
-                    reason = gameFloorReason(chain.getArg(1))
+                    reason = gameFloorReason(chain.arg(1))
                 }
                 if (reason != null) {
                     countHit("列表", reason)
-                    logBlocked("列表", chain.getArg(1), reason)
+                    logBlocked("列表", chain.arg(1), reason)
                     hideCyView(itemView)
                     return result
                 }
@@ -332,16 +332,16 @@ class CommentFilterHook(module: MainModule) {
     }
 
     @Throws(Throwable::class)
-    private fun onBaseAdapterBind(chain: YukiChain): Any? {
-        val holder = chain.getArg(0)
-        val position = (chain.getArg(1) as java.lang.Number).intValue()
+    private fun onBaseAdapterBind(chain: HookChain): Any? {
+        val holder = chain.arg(0)
+        val position = (chain.arg(1) as java.lang.Number).intValue()
         val itemView = holderView(holder)
         if (itemView != null) {
             restoreCyView(itemView)
         }
         val result = chain.proceed()
         try {
-            val adapter = chain.getThisObject()
+            val adapter = chain.instanceOrNull
             if (adapter != null) {
                 registerAdapter(adapter)
             }
@@ -424,19 +424,19 @@ class CommentFilterHook(module: MainModule) {
     }
 
     @Throws(Throwable::class)
-    private fun onSubCommentRowBind(chain: YukiChain): Any? {
+    private fun onSubCommentRowBind(chain: HookChain): Any? {
         val result = chain.proceed()
         try {
             if (!commentFilterActive()) {
                 return result
             }
-            val row = holderRowView(chain.getArg(1))
+            val row = holderRowView(chain.arg(1))
             if (row == null) {
                 return result
             }
-            var comment = chain.getArg(2)
+            var comment = chain.arg(2)
             if (safeGet(comment, "getText").isEmpty()) {
-                val alt = chain.getArg(3)
+                val alt = chain.arg(3)
                 if (!safeGet(alt, "getText").isEmpty()) {
                     comment = alt
                 }
@@ -496,17 +496,17 @@ class CommentFilterHook(module: MainModule) {
     }
 
     @Throws(Throwable::class)
-    private fun onEpoxyItemBind(chain: YukiChain): Any? {
+    private fun onEpoxyItemBind(chain: HookChain): Any? {
         val result = chain.proceed()
         try {
             if (!gameRelayEnabled()) {
                 return result
             }
-            val view = chain.getThisObject()
+            val view = chain.instanceOrNull
             if (view !is View) {
                 return result
             }
-            val item = chain.getArg(0)
+            val item = chain.arg(0)
             val text = itemRichText(item)
             probeRow(item, text)
             if (text.isEmpty() || gameLinkReasonForText(text) == null) {
@@ -566,8 +566,8 @@ class CommentFilterHook(module: MainModule) {
     }
 
     @Throws(Throwable::class)
-    private fun onSetTotalList(chain: YukiChain): Any? {
-        val arg = chain.getArg(0)
+    private fun onSetTotalList(chain: HookChain): Any? {
+        val arg = chain.arg(0)
         var hidden = 0
         var floorKey: Any? = null
         try {
@@ -597,7 +597,7 @@ class CommentFilterHook(module: MainModule) {
                                     + (if (total > 0) stringify(total) else "?") + " 条、隐藏 " + hidden
                                     + " 条，下一页游标=" + safeGet(list[list.size - 1], "getCommentid")
                         )
-                        scheduleAutoLoadMore(chain.getThisObject(), floorKey)
+                        scheduleAutoLoadMore(chain.instanceOrNull, floorKey)
                     }
                 }
             }

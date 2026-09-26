@@ -45,7 +45,7 @@ class ImageShareHook(private val module: MainModule) {
             module.hook(getLocalHandlers).intercept { chain ->
                 val result = chain.proceed()
                 if (result is List<*>) {
-                    val currentMediaData = chain.getArg(1)
+                    val currentMediaData = chain.arg(1)
                     appendSystemShareHandler(result, currentMediaData, cl)
                 } else {
                     module.logd(
@@ -58,7 +58,7 @@ class ImageShareHook(private val module: MainModule) {
 
             val openShare = customizer.getDeclaredMethod("h0", mediaData)
             module.hook(openShare).intercept { chain ->
-                pendingImageShareMediaData = chain.getArg(0)
+                pendingImageShareMediaData = chain.arg(0)
                 val pending = pendingImageShareMediaData
                 module.logd(
                     Log.INFO, MainModule.TAG, "图片长按分享入口命中: mediaData=" +
@@ -77,7 +77,7 @@ class ImageShareHook(private val module: MainModule) {
                     chain.proceed()
                 } else {
                     pendingImageShareMediaData = null
-                    val handlers = chain.getArg(0)
+                    val handlers = chain.arg(0)
                     if (handlers is List<*>) {
                         module.logd(
                             Log.INFO, MainModule.TAG,
@@ -94,7 +94,7 @@ class ImageShareHook(private val module: MainModule) {
             )
             val showDialog = shareDialog.getDeclaredMethod("g")
             module.hook(showDialog).intercept { chain ->
-                val dialog = chain.getThisObject()
+                val dialog = chain.instanceOrNull
                 if (isImageForward(readForwardModel(dialog, cl), cl)) {
                     val actions = readShareDialogActions(dialog)
                     if (actions is List<*>) {
@@ -115,9 +115,9 @@ class ImageShareHook(private val module: MainModule) {
             )
             module.hook(buildForwardActions).intercept { chain ->
                 val result = chain.proceed()
-                val actions = chain.getArg(2)
-                if (actions is List<*> && isImageForward(chain.getArg(1), cl)) {
-                    val ctxArg = chain.getArg(0)
+                val actions = chain.arg(2)
+                if (actions is List<*> && isImageForward(chain.arg(1), cl)) {
+                    val ctxArg = chain.arg(0)
                     appendSystemShareAction(
                         actions, cl, if (ctxArg is Context) ctxArg else null
                     )

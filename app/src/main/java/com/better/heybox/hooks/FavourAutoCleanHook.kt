@@ -75,8 +75,8 @@ class FavourAutoCleanHook(private val module: MainModule) {
             module.hook(method).intercept { chain ->
                 val result = chain.proceed()
                 try {
-                    val target = if (staticWrapper) chain.getArg(0) else chain.getThisObject()
-                    val list = if (staticWrapper) chain.getArg(1) else chain.getArg(0)
+                    val target = if (staticWrapper) chain.arg(0) else chain.instanceOrNull
+                    val list = if (staticWrapper) chain.arg(1) else chain.arg(0)
                     onListLoaded(target, list, method.declaringClass.classLoader)
                 } catch (t: Throwable) {
                     module.logd(Log.WARN, MainModule.TAG, "失效收藏检查异常，放行: $t")

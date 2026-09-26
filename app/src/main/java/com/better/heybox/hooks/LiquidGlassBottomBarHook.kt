@@ -37,7 +37,7 @@ class LiquidGlassBottomBarHook(private val module: MainModule) {
         module.hook(method).intercept { chain ->
             val result = chain.proceed()
             try {
-                val self = chain.getThisObject()
+                val self = chain.instanceOrNull
                 val activity = if (inner) {
                     ViewUtils.findOuter(self, main) as? Activity
                 } else {

@@ -23,7 +23,7 @@ class TargetHintHook(private val module: MainModule) {
             module.hook(activityCls.getDeclaredMethod("onResume")).intercept { chain ->
                 val result = chain.proceed()
                 try {
-                    val activity = chain.getThisObject() as? Activity
+                    val activity = chain.instanceOrNull as? Activity
                     if (activity != null && !activity.isFinishing) {
                         attach(activity, cl)
                     }
@@ -108,7 +108,7 @@ class TargetHintHook(private val module: MainModule) {
             module.hook(extract).intercept { chain ->
                 val result = chain.proceed()
                 try {
-                    val key = chain.getArgs()[1]
+                    val key = chain.args[1]
                     if ("heybox_id" == key && result is String && result.isNotEmpty() &&
                         result != "-1"
                     ) {

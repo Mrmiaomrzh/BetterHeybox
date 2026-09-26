@@ -80,10 +80,10 @@ class GameLibraryCleanHook(private val module: MainModule) {
         module.hook(method).intercept { chain ->
             val result = chain.proceed()
             try {
-                val adapter = chain.getThisObject()
+                val adapter = chain.instanceOrNull
                 val list = dataListOf(adapter)
-                val item = chain.getArg(1)
-                handle(item, chain.getArg(0), "内层", list, indexOf(list, item))
+                val item = chain.arg(1)
+                handle(item, chain.arg(0), "内层", list, indexOf(list, item))
             } catch (t: Throwable) {
                 logOnce(t)
             }
@@ -101,7 +101,7 @@ class GameLibraryCleanHook(private val module: MainModule) {
     private fun hookWrapperBind(method: Method) {
         sInstalledWrapper = true
         module.hook(method).intercept { chain ->
-            val wrapper = chain.getThisObject()
+            val wrapper = chain.instanceOrNull
             val inner = innerAdapterOf(wrapper)
             if (inner == null) {
                 if (sScopeMissingLogged.compareAndSet(false, true)) {
@@ -123,9 +123,9 @@ class GameLibraryCleanHook(private val module: MainModule) {
             }
             val result = chain.proceed()
             try {
-                val position = if (chain.getArg(1) is Int) chain.getArg(1) as Int else -1
+                val position = if (chain.arg(1) is Int) chain.arg(1) as Int else -1
                 handle(
-                    itemAt(inner, position), chain.getArg(0), "外层",
+                    itemAt(inner, position), chain.arg(0), "外层",
                     dataListOf(inner), position
                 )
             } catch (t: Throwable) {
@@ -151,9 +151,9 @@ class GameLibraryCleanHook(private val module: MainModule) {
         module.hook(method).intercept { chain ->
             val result = chain.proceed()
             try {
-                val item = chain.getArg(2)
-                val list = dataListOf(chain.getArg(1))
-                handle(item, chain.getArg(0), "预绑定", list, indexOf(list, item))
+                val item = chain.arg(2)
+                val list = dataListOf(chain.arg(1))
+                handle(item, chain.arg(0), "预绑定", list, indexOf(list, item))
             } catch (t: Throwable) {
                 logOnce(t)
             }
@@ -270,7 +270,7 @@ class GameLibraryCleanHook(private val module: MainModule) {
             module.hook(performLongClick).intercept { chain ->
                 val result = chain.proceed()
                 try {
-                    if (maybePromptHideEntry(chain.getThisObject())) {
+                    if (maybePromptHideEntry(chain.instanceOrNull)) {
                         return@intercept java.lang.Boolean.TRUE
                     }
                 } catch (ignored: Throwable) {
@@ -291,11 +291,11 @@ class GameLibraryCleanHook(private val module: MainModule) {
             val eventClass = Class.forName("android.view.MotionEvent", false, cl)
             val dispatch = groupClass.getDeclaredMethod("dispatchTouchEvent", eventClass)
             module.hook(dispatch).intercept { chain ->
-                val event = chain.getArg(0)
-                if (event !is MotionEvent || chain.getThisObject() !is View) {
+                val event = chain.arg(0)
+                if (event !is MotionEvent || chain.instanceOrNull !is View) {
                     return@intercept chain.proceed()
                 }
-                val dispatcher = chain.getThisObject() as View
+                val dispatcher = chain.instanceOrNull as View
                 if (!isTopLevelViewGroup(dispatcher)) {
                     return@intercept chain.proceed()
                 }
@@ -386,7 +386,7 @@ class GameLibraryCleanHook(private val module: MainModule) {
             module.hook(setOnClickListener).intercept { chain ->
                 val result = chain.proceed()
                 try {
-                    val target = chain.getThisObject()
+                    val target = chain.instanceOrNull
                     if (target is View && insideBoardView(target)) {
                         bindLongPressTree(target, 0)
                     }
@@ -411,7 +411,7 @@ class GameLibraryCleanHook(private val module: MainModule) {
                 if (java.lang.Boolean.TRUE == result) {
                     return@intercept result
                 }
-                if (insideBoardView(chain.getThisObject())) java.lang.Boolean.TRUE else result
+                if (insideBoardView(chain.instanceOrNull)) java.lang.Boolean.TRUE else result
             }
             sInstalledClickable = true
             module.logd(Log.INFO, MainModule.TAG, "✔ 游戏库精简 Hook 已安装（长按可达）")

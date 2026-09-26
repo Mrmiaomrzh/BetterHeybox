@@ -48,7 +48,7 @@ class BrowserRedirectHook(private val module: MainModule) {
                 module.hook(onCreate).intercept { chain ->
                     chain.proceed()
                     try {
-                        val self = chain.getThisObject()
+                        val self = chain.instanceOrNull
                         if (self is Activity) {
                             handleEntry(self)
                         }
@@ -74,10 +74,10 @@ class BrowserRedirectHook(private val module: MainModule) {
                     continue
                 }
                 module.hook(method).intercept { chain ->
-                    val arg = chain.getArg(0)
+                    val arg = chain.arg(0)
                     if (arg is String && shouldRedirect(arg)) {
                         val url = arg
-                        val self = chain.getThisObject()
+                        val self = chain.instanceOrNull
                         val webView = self as? WebView
                         val context = webView?.context
                         if (!canCloseContainer(context)) {
@@ -107,7 +107,7 @@ class BrowserRedirectHook(private val module: MainModule) {
                 "setWebViewClient", WebViewClient::class.java
             )
             module.hook(setter).intercept { chain ->
-                val client = chain.getArg(0)
+                val client = chain.arg(0)
                 if (client != null) {
                     hookClientClass(client.javaClass)
                 }
@@ -124,7 +124,7 @@ class BrowserRedirectHook(private val module: MainModule) {
                 "setWebChromeClient", WebChromeClient::class.java
             )
             module.hook(setter).intercept { chain ->
-                val client = chain.getArg(0)
+                val client = chain.arg(0)
                 if (client != null) {
                     hookChromeClientClass(client.javaClass)
                 }
@@ -207,7 +207,7 @@ class BrowserRedirectHook(private val module: MainModule) {
                 }
                 module.hook(method).intercept { chain ->
                     try {
-                        val args = chain.getArgs()
+                        val args = chain.args
                         if (args.size > 4 && args[4] is Intent) {
                             redirectEntryIntent(args[4] as Intent)
                         }
@@ -313,7 +313,7 @@ class BrowserRedirectHook(private val module: MainModule) {
             }
             try {
                 module.hook(method).intercept { chain ->
-                    val args = chain.getArgs()
+                    val args = chain.args
                     val webView = if (args.isNotEmpty() && args[0] is WebView) {
                         args[0] as WebView
                     } else {
@@ -344,7 +344,7 @@ class BrowserRedirectHook(private val module: MainModule) {
                 }
                 try {
                     module.hook(method).intercept { chain ->
-                        val args = chain.getArgs()
+                        val args = chain.args
                         if (args.size >= 2 && args[0] is WebView && args[1] is String) {
                             recordPageStart(args[0] as WebView, args[1] as String)
                         }
@@ -376,7 +376,7 @@ class BrowserRedirectHook(private val module: MainModule) {
             }
             try {
                 module.hook(method).intercept { chain ->
-                    val args = chain.getArgs()
+                    val args = chain.args
                     if (args.size >= 2 && args[0] is WebView && args[1] is String) {
                         recordTitle(args[0] as WebView, args[1] as String)
                     }

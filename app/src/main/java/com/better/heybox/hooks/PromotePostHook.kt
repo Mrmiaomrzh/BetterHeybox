@@ -4,7 +4,7 @@ import android.util.Log
 import com.better.heybox.App
 import com.better.heybox.HeyboxTargets
 import com.better.heybox.MainModule
-import com.better.heybox.yuki.YukiChain
+import com.highcapable.yukihookapi.hook.param.HookChain
 import java.lang.reflect.Method
 import java.util.concurrent.ConcurrentHashMap
 
@@ -22,8 +22,8 @@ class PromotePostHook(private val module: MainModule) {
         )
     }
 
-    private fun onRender(chain: YukiChain): Any? {
-        val args = chain.getArgs()
+    private fun onRender(chain: HookChain): Any? {
+        val args = chain.args
         val bbsLink = findBbsLink(args)
         val viewHolder = findViewHolder(args)
         try {

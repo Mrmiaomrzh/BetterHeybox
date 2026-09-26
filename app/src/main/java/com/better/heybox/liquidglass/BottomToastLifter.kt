@@ -65,12 +65,12 @@ object BottomToastLifter {
                 ?: throw NoSuchMethodException(className + " target method")
             LiquidGlassHookBridge.hookExecutable(hookTarget) { chain ->
                 try {
-                    preLift(chain.getArg(0), chain.getArg(1))
+                    preLift(chain.arg(0), chain.arg(1))
                 } catch (ignored: Throwable) {
                 }
                 val result = chain.proceed()
                 try {
-                    watchAfterAdd(chain.getArg(0), chain.getArg(1))
+                    watchAfterAdd(chain.arg(0), chain.arg(1))
                 } catch (ignored: Throwable) {
                 }
                 result
@@ -329,7 +329,7 @@ object BottomToastLifter {
             LiquidGlassHookBridge.hookExecutable(show) { chain ->
                 val result = chain.proceed()
                 try {
-                    val thiz = chain.getThisObject()
+                    val thiz = chain.instanceOrNull
                     if (thiz is Toast) {
                         val v = thiz.getView()
                         LiquidGlassLog.log(
@@ -388,11 +388,11 @@ object BottomToastLifter {
             )
             LiquidGlassHookBridge.hookExecutable(inflate) { chain ->
                 try {
-                    val resId = chain.getArg(0) as Int
+                    val resId = chain.arg(0) as Int
                     if (sToastLayoutId1 == 0 && sToastLayoutId2 == 0
                         && sResolveAttempts < 5
                     ) {
-                        resolveToastLayoutIds(chain.getThisObject())
+                        resolveToastLayoutIds(chain.instanceOrNull)
                     }
                     if (resId != 0
                         && (resId == sToastLayoutId1

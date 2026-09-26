@@ -159,11 +159,11 @@ class CommentCopyHook(private val module: MainModule) {
         module.hook(method).intercept { chain ->
             try {
                 if (canIntercept() && !inRecentSheetWindow()) {
-                    val textArg = chain.getArg(textIdx)
+                    val textArg = chain.arg(textIdx)
                     if (textArg is CharSequence && textArg.length > 0) {
                         ModuleStats.commentCopyHelperCalls.incrementAndGet()
                         val recorded = validRecordedView()
-                        var activity = activityOfArg(chain.getArg(ctxIdx))
+                        var activity = activityOfArg(chain.arg(ctxIdx))
                         if (activity == null && recorded != null) {
                             activity = ViewUtils.findActivity(recorded)
                         }
@@ -210,7 +210,7 @@ class CommentCopyHook(private val module: MainModule) {
             val method = ClipboardManager::class.java
                 .getDeclaredMethod("setPrimaryClip", ClipData::class.java)
             module.hook(method).intercept { chain ->
-                val clip = chain.getArg(0)
+                val clip = chain.arg(0)
                 try {
                     if (canIntercept() && OWN_CLIP_LABEL != clipLabel(clip)
                         && !inRecentSheetWindow()
@@ -224,7 +224,7 @@ class CommentCopyHook(private val module: MainModule) {
                                     Log.WARN, MainModule.TAG, "[评论自由复制] 拦下评论复制："
                                             + summarize(text.toString()) + " → 改弹二级菜单"
                                 )
-                                showCopySheet(comment, text, chain.getThisObject())
+                                showCopySheet(comment, text, chain.instanceOrNull)
                                 return@intercept null
                             }
                         }
@@ -267,7 +267,7 @@ class CommentCopyHook(private val module: MainModule) {
                 }
                 module.hook(method).intercept { chain ->
                     try {
-                        val arg = chain.getArg(0)
+                        val arg = chain.arg(0)
                         if (inSuppressWindow() || isCopyToastText(stringify(arg))) {
                             module.logd(
                                 Log.WARN, MainModule.TAG, "[评论自由复制] 已抑制宿主提示（"
@@ -300,7 +300,7 @@ class CommentCopyHook(private val module: MainModule) {
             val show = Toast::class.java.getDeclaredMethod("show")
             module.hook(show).intercept { chain ->
                 try {
-                    if (shouldSuppressToast(chain.getThisObject())) {
+                    if (shouldSuppressToast(chain.instanceOrNull)) {
                         module.logd(Log.WARN, MainModule.TAG, "[评论自由复制] 已抑制宿主「已复制」Toast")
                         return@intercept null
                     }
@@ -384,7 +384,7 @@ class CommentCopyHook(private val module: MainModule) {
                 val result = chain.proceed()
                 try {
                     if (module.isEnabled(App.KEY_COMMENT_FREE_COPY, true)) {
-                        val self = chain.getThisObject()
+                        val self = chain.instanceOrNull
                         if (self is View) {
                             val comment = findCommentViewNear(self)
                             if (comment != null) {

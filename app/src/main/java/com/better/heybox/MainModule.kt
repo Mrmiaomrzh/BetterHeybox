@@ -36,7 +36,9 @@ import com.better.heybox.hooks.VideoDownloadHook
 import com.better.heybox.hooks.WatchHook
 import com.better.heybox.hooks.WebViewDevToolsHook
 import com.better.heybox.liquidglass.LiquidGlassHookBridge
-import com.better.heybox.yuki.YukiHookBridge
+import com.highcapable.yukihookapi.hook.core.api.priority.YukiHookPriority
+import com.highcapable.yukihookapi.hook.log.YLog
+import com.highcapable.yukihookapi.hook.param.HookChain
 import com.highcapable.yukihookapi.hook.param.PackageParam
 import java.lang.reflect.Member
 import java.util.concurrent.CopyOnWriteArrayList
@@ -56,22 +58,44 @@ class MainModule private constructor(private val param: PackageParam) {
     private val pendingHookCount = AtomicInteger()
 
     private var settingsListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
+    fun hook(member: Member): HookHandle = HookHandle(member)
 
-    private val bridge = YukiHookBridge(param)
+    inner class HookHandle(private val member: Member) {
 
-    fun hook(member: Member): YukiHookBridge.HookHandle = bridge.hook(member)
+        fun intercept(body: (HookChain) -> Any?) {
+            with(param) {
+                member.intercept(YukiHookPriority.DEFAULT) {
+                    body(this)
+                }
+            }
+        }
+    }
 
-    fun getRemotePreferences(group: String): SharedPreferences? = bridge.remotePreferences(group)
+    fun getRemotePreferences(group: String): SharedPreferences? = try {
+        val prefs = param.preferences(group)
+        prefs.javaClass.getMethod("getCurrent\$yukihook_core").invoke(prefs) as SharedPreferences
+    } catch (t: Throwable) {
+        null
+    }
 
     fun getModuleApplicationInfo(): ApplicationInfo = param.module.appInfo
 
 
     private fun log(level: Int, tag: String, msg: String) {
-        bridge.frameworkLog(level, tag, msg, null)
+        frameworkLog(level, tag, msg, null)
     }
 
     private fun log(level: Int, tag: String, msg: String, tr: Throwable) {
-        bridge.frameworkLog(level, tag, msg, tr)
+        frameworkLog(level, tag, msg, tr)
+    }
+
+    private fun frameworkLog(level: Int, tag: String, msg: String, tr: Throwable?) {
+        when (level) {
+            android.util.Log.DEBUG -> YLog.debug(msg, tr, tag, YLog.EnvType.BOTH)
+            android.util.Log.INFO -> YLog.info(msg, tr, tag, YLog.EnvType.BOTH)
+            android.util.Log.WARN -> YLog.warn(msg, tr, tag, YLog.EnvType.BOTH)
+            else -> YLog.error(msg, tr, tag, YLog.EnvType.BOTH)
+        }
     }
 
     private fun deferInstallForDowngradeCheck() {
@@ -83,7 +107,7 @@ class MainModule private constructor(private val param: PackageParam) {
             hook(onCreate).intercept { chain ->
                 chain.proceed()
                 if (decided.compareAndSet(false, true)) {
-                    activateIfNotDowngraded(chain.getThisObject())
+                    activateIfNotDowngraded(chain.instanceOrNull)
                 }
                 null
             }

@@ -4,7 +4,7 @@ import android.util.Log
 import com.better.heybox.App
 import com.better.heybox.HeyboxTargets
 import com.better.heybox.MainModule
-import com.better.heybox.yuki.YukiChain
+import com.highcapable.yukihookapi.hook.param.HookChain
 import java.lang.reflect.Method
 
 class AdFilterHook(private val module: MainModule) {
@@ -88,10 +88,10 @@ class AdFilterHook(private val module: MainModule) {
         }
     }
 
-    private fun filterFeedAd(chain: YukiChain): Any? {
+    private fun filterFeedAd(chain: HookChain): Any? {
         if (module.isEnabled(App.KEY_FEED_AD, true)) {
             try {
-                val elem = chain.getArg(0)
+                val elem = chain.arg(0)
                 if (elem != null) {
                     val obj = elem.javaClass.getMethod("getAsJsonObject").invoke(elem)
                     if (obj != null) {
@@ -108,7 +108,7 @@ class AdFilterHook(private val module: MainModule) {
                                     Log.INFO, MainModule.TAG,
                                     "屏蔽信息流广告条目 原因=content_type=$ctStr 属于宿主广告常量表" + detail
                                 )
-                                return createEmptyFeedObj(chain.getThisObject())
+                                return createEmptyFeedObj(chain.instanceOrNull)
                             }
                         }
                     }

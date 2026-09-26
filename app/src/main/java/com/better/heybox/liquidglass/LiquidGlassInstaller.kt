@@ -2442,7 +2442,7 @@ object LiquidGlassInstaller {
             LiquidGlassHookBridge.hookExecutable(m) { chain ->
                 var tint = 0x30FFFFFF
                 try {
-                    val thiz = chain.getThisObject()
+                    val thiz = chain.instanceOrNull
                     var mode = 0
                     var isBarView = false
                     if (thiz is View) {
@@ -2529,7 +2529,7 @@ object LiquidGlassInstaller {
             LiquidGlassHookBridge.hookExecutable(onResume) { chain ->
                 val r = chain.proceed()
                 try {
-                    val self = chain.getThisObject()
+                    val self = chain.instanceOrNull
                     if (self is Activity) {
                         val a = self
                         a.getWindow().getDecorView().postDelayed(
