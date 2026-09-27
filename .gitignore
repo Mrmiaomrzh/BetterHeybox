@@ -8,6 +8,8 @@ build/
 .idea/
 *.iml
 local.properties
+.poc/
+app/bin/
 
 # Android
 captures/
@@ -52,6 +54,3 @@ scripts/
 !.github/scripts/
 .github/TELEGRAM.md
 
-# IDE
-.poc/
-app/bin/
