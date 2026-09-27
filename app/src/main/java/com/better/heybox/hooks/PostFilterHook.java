@@ -163,6 +163,7 @@ public final class PostFilterHook {
     private List<?> filterBbsLinks(List<?> raw) {
         List<Object> keep = new ArrayList<>(raw.size());
         int blocked = 0;
+        com.better.heybox.ModuleStats.bbsListItemsSeen.addAndGet(raw.size());
         for (Object item : raw) {
             if (!isPostLike(item)) {
                 keep.add(item);
@@ -174,7 +175,12 @@ public final class PostFilterHook {
                 continue;
             }
             blocked++;
+            com.better.heybox.ModuleStats.bbsListItemsDropped.incrementAndGet();
             logBlocked("社区列表(数据层)", item, reason);
+        }
+        if (module.isEnabled(App.KEY_VERBOSE_LOG, false)) {
+            module.logd(Log.INFO, module.TAG, "[#41] 社区列表 数据层 页内条目=" + raw.size()
+                    + " 删除=" + blocked + " 可见=" + (raw.size() - blocked));
         }
         if (blocked == 0) {
             return null;

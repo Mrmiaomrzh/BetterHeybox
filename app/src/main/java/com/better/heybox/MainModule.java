@@ -251,7 +251,8 @@ public class MainModule extends XposedModule {
             dailyTaskHook = new DailyTaskHook(this);
             dailyTaskHook.install(ignored);
         }, cl, App.KEY_DAILY_TASK_ENABLED);
-        registerHook("动态推送", new WatchHook(this)::install, cl, App.KEY_WATCH_ENABLED);
+        registerHook("动态推送", new WatchHook(this)::install, cl,
+                App.KEY_WATCH_ENABLED, App.KEY_LOG);
 
         watchSettingsChanges();
         Checkpoint.mark(">>> Hook 安装完成，总耗时 %d ms", SystemClock.elapsedRealtime() - t0);

@@ -30,6 +30,11 @@ public final class ModuleStats {
     public static final AtomicInteger dailyTaskResumeChecks = new AtomicInteger();
     /** "no share link configured" hits (the log line itself is throttled) */
     public static final AtomicInteger dailyTaskNoLink = new AtomicInteger();
+    public static final AtomicInteger bbsListItemsSeen = new AtomicInteger();
+    public static final AtomicInteger bbsListItemsDropped = new AtomicInteger();
+    public static final AtomicInteger bbsListItemsHidden = new AtomicInteger();
+    public static final AtomicInteger topicFeedRequests = new AtomicInteger();
+    public static final AtomicInteger topicFeedStallRuns = new AtomicInteger();
 
     /** module operations slower than {@link #SLOW_MS} */
     public static final AtomicInteger slowOps = new AtomicInteger();
@@ -67,6 +72,11 @@ public final class ModuleStats {
                 .append(" 个 View，累计 ").append(commentDfsMillis.get()).append(" ms");
         sb.append('\n').append("每日任务：onResume 检查=").append(dailyTaskResumeChecks.get())
                 .append(" / 未配置链接=").append(dailyTaskNoLink.get());
+        sb.append('\n').append("社区/话题列表(#41)：数据层条目=").append(bbsListItemsSeen.get())
+                .append(" / 数据层删除=").append(bbsListItemsDropped.get())
+                .append(" / 视图隐藏=").append(bbsListItemsHidden.get());
+        sb.append('\n').append("话题信息流分页(#41)：宿主请求=").append(topicFeedRequests.get())
+                .append(" / 疑似空转告警=").append(topicFeedStallRuns.get());
         sb.append('\n').append("慢操作(>").append(SLOW_MS).append("ms)=").append(slowOps.get());
         if (!SLOW_BY_NAME.isEmpty()) {
             sb.append("：");

@@ -8,28 +8,8 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.util.Map;
 
-/**
- * 复用宿主 OkHttp 的请求桥。
- *
- * <p>小黑盒业务接口需要 hkey/_time/nonce 签名，客户端自己算既脆弱又容易随版本失效；
- * 这里改为<b>捕获宿主自己的 HTTP 客户端实例</b>，用它发我们自己的 URL —— 宿主的签名拦截器、
- * Cookie、UA 全部照常生效。
- *
- * <p><b>为什么不按类名找</b>：实测小黑盒 1.3.395 的 R8 把 OkHttp 的公开 API 类全部改了名
- * （{@code OkHttpClient} → {@code okhttp3.z}、{@code Request} → {@code okhttp3.a0}，
- * 且 {@code okhttp3.Request} 这个名字根本不存在），所以：
- * <ol>
- *   <li>载体类用 {@code okhttp3.internal.connection.RealCall} 的构造函数捕获
- *       —— 它的第一个参数就是客户端（R8 改不了参数顺序）</li>
- *   <li>请求的构造/发送全部按<b>方法签名形状</b>动态识别（与名字无关）：
- *       Request#newBuilder() → Builder#url(String) → Builder#build()；
- *       Client#newCall(Request) → Call#execute() → Response#code()/body().string()</li>
- * </ol>
- * 任何异常都只记日志并返回 null，绝不影响宿主。
- */
 public final class HttpBridge {
 
-    /** 候选载体类：OkHttp 4/5 与旧版路径 */
     public static final String[] CLIENT_HOLDERS = {
             "okhttp3.internal.connection.RealCall",
             "okhttp3.RealCall",
@@ -62,10 +42,6 @@ public final class HttpBridge {
         return sClient != null && sNewCall != null && sExecute != null;
     }
 
-    /**
-     * 记住用户在小黑盒里打开过的话题 id：这些是他真正在看的话题，
-     * 比「我关注的话题」接口更可靠（后者实测要求一个未知的平台参数）。
-     */
     private static void rememberTopic(String id) {
         if (id == null || id.isEmpty()) {
             return;
@@ -90,19 +66,42 @@ public final class HttpBridge {
                         sb.append(t).append(',');
                     }
                 }
-                com.better.heybox.HeyboxPrefs.init(com.better.heybox.App.resolveAppContext());
-                com.better.heybox.HeyboxPrefs.setString(
-                        com.better.heybox.App.KEY_WATCH_RECENT_TOPICS, sb.toString());
+                final String joined = sb.toString();
+                prefsExecutor().execute(() -> {
+                    try {
+                        com.better.heybox.HeyboxPrefs.init(com.better.heybox.App.resolveAppContext());
+                        com.better.heybox.HeyboxPrefs.setString(
+                                com.better.heybox.App.KEY_WATCH_RECENT_TOPICS, joined);
+                    } catch (Throwable ignored) {
+                    }
+                });
             } catch (Throwable ignored) {
             }
         }
     }
 
-    /** 最近在宿主里打开过的话题 id（最新在前） */
+    private static volatile java.util.concurrent.Executor sPrefsExecutor;
+
+    private static java.util.concurrent.Executor prefsExecutor() {
+        java.util.concurrent.Executor e = sPrefsExecutor;
+        if (e != null) {
+            return e;
+        }
+        synchronized (HttpBridge.class) {
+            if (sPrefsExecutor == null) {
+                sPrefsExecutor = java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                    Thread t = new Thread(r, "betterheybox-prefs");
+                    t.setDaemon(true);
+                    return t;
+                });
+            }
+            return sPrefsExecutor;
+        }
+    }
+
     public static java.util.List<String> recentTopicIds() {
         java.util.List<String> out = new java.util.ArrayList<>();
         synchronized (sRecentTopics) {
-            // 反转：最新在前
             String[] arr = sRecentTopics.toArray(new String[0]);
             for (int i = arr.length - 1; i >= 0; i--) {
                 out.add(arr[i]);
@@ -111,7 +110,6 @@ public final class HttpBridge {
         return out;
     }
 
-    /** 当前登录 userid（从宿主请求里解析，拿不到返回 null） */
     public static String hostUserId() {
         return sHostUserId;
     }
@@ -120,11 +118,6 @@ public final class HttpBridge {
         return sDescribe;
     }
 
-    /**
-     * 由 RealCall 构造函数调用：arg0 = 客户端（OkHttpClient），arg1 = 原始请求（Request）。
-     *
-     * @return 是否已具备发请求的能力
-     */
     public static boolean captureIfClient(Object client, Object request, ClassLoader cl) {
         logHostRequest(request);
         if (client == null) {
@@ -167,31 +160,23 @@ public final class HttpBridge {
 
     private static volatile long sLogFlagAt;
     private static volatile boolean sLogFlag;
-    /** 从宿主请求里顺手解析出的当前登录 userid（很多接口要用） */
     private static volatile String sHostUserId;
-    // 注意：只认宿主自己的写法（user_id= / ws 连接串），
-    // 否则会把我们模块自己请求里的 userid=（那是个被关注的用户）当成登录用户
-    private static final java.util.regex.Pattern HOST_UID =
-            java.util.regex.Pattern.compile("user_id=(\\d{5,20})");
-    private static final java.util.regex.Pattern ANY_UID =
-            java.util.regex.Pattern.compile("userid=(\\d{5,20})");
-    private static final java.util.regex.Pattern TOPIC_ID =
-            java.util.regex.Pattern.compile("topic_id=(\\d{1,20})");
-    /** 最近在宿主里打开过的话题 id（有界，最新在前） */
     private static final java.util.LinkedHashSet<String> sRecentTopics = new java.util.LinkedHashSet<>();
     private static final int RECENT_TOPIC_LIMIT = 20;
 
     private static final java.util.regex.Pattern URL_IN_TOSTRING =
             java.util.regex.Pattern.compile("url=([^,\\s]+)");
 
-    /**
-     * 诊断：开启「记录日志」时，把宿主自己发的<b>话题/标签</b>类请求记进模块日志。
-     * 这些接口的参数写法（比如平台字段）只有看宿主真实请求才能对齐，比自己猜参数可靠。
-     * OkHttp 的 Request#toString() 会带出完整 URL，且它是 Object 方法，R8 不会改名。
-     */
+    private static final ThreadLocal<Boolean> sOwnRequest = new ThreadLocal<>();
+    private static final int LOG_VALUE_MAX = 256;
+    private static final int LOG_URL_SAMPLE_MAX = 1600;
+    private static final long LOG_PARSE_SLOW_MS = 50L;
     private static void logHostRequest(Object request) {
         try {
             if (request == null) {
+                return;
+            }
+            if (Boolean.TRUE.equals(sOwnRequest.get())) {
                 return;
             }
             long now = System.currentTimeMillis();
@@ -203,36 +188,169 @@ public final class HttpBridge {
             if (!sLogFlag) {
                 return;
             }
-            java.util.regex.Matcher mt = URL_IN_TOSTRING.matcher(String.valueOf(request));
+            long t0 = android.os.SystemClock.elapsedRealtime();
+            String raw = String.valueOf(request);
+            java.util.regex.Matcher mt = URL_IN_TOSTRING.matcher(raw);
             if (!mt.find()) {
                 return;
             }
-            String url = mt.group(1);
+            int from = mt.start(1);
+            int to = mt.end(1);
             if (sHostUserId == null) {
-                java.util.regex.Matcher um = HOST_UID.matcher(url);
-                if (!um.find() && url.contains("ws.xiaoheihe.cn")) {
-                    um = ANY_UID.matcher(url);
+                String uid = firstDigitsParam(raw, from, to, "user_id=");
+                if (uid != null && uid.length() < 5) {
+                    uid = null;
                 }
-                if (um.find()) {
-                    sHostUserId = um.group(1);
+                if (uid == null && contains(raw, from, to, "ws.xiaoheihe.cn")) {
+                    uid = firstDigitsParam(raw, from, to, "userid=");
+                    if (uid != null && uid.length() < 5) {
+                        uid = null;
+                    }
+                }
+                if (uid != null) {
+                    sHostUserId = uid;
                     log(Log.INFO, "宿主登录 userid = " + sHostUserId);
                 }
             }
-            // 只记与「话题 / 搜索」相关的宿主请求：这几类端点的参数写法要跟宿主对齐
-            if (url.contains("topic") || url.contains("hashtag") || url.contains("/search")) {
-                log(Log.INFO, "宿主请求 " + url);
+            String topicId = firstDigitsParam(raw, from, to, "topic_id=");
+            if (contains(raw, from, to, "topic") || contains(raw, from, to, "hashtag")
+                    || contains(raw, from, to, "/search")) {
+                long cost = android.os.SystemClock.elapsedRealtime() - t0;
+                if (cost > LOG_PARSE_SLOW_MS) {
+                    com.better.heybox.ModuleStats.slow("宿主请求解析", cost);
+                }
+                log(Log.INFO, "宿主请求 " + compactUrl(raw, from, to)
+                        + " (len=" + (to - from) + ", " + cost + "ms, "
+                        + Thread.currentThread().getName() + ")");
+                noteTopicFeedRequest(raw, from, to, topicId);
             }
-            java.util.regex.Matcher tm = TOPIC_ID.matcher(url);
-            if (tm.find()) {
-                rememberTopic(tm.group(1));
+            if (topicId != null) {
+                rememberTopic(topicId);
             }
         } catch (Throwable ignored) {
         }
     }
 
-    // ------------------------------------------------------------ 结构识别
+    private static boolean contains(String raw, int from, int to, String needle) {
+        int at = raw.indexOf(needle, from);
+        return at >= 0 && at < to;
+    }
 
-    /** Request#newBuilder() -> Builder#url(String) -> Builder#build() */
+    private static String firstDigitsParam(String raw, int from, int to, String key) {
+        int at = raw.indexOf(key, from);
+        if (at < 0 || at >= to) {
+            return null;
+        }
+        int begin = at + key.length();
+        int end = begin;
+        while (end < to && end - begin < 20) {
+            char c = raw.charAt(end);
+            if (c < '0' || c > '9') {
+                break;
+            }
+            end++;
+        }
+        return end > begin ? raw.substring(begin, end) : null;
+    }
+
+    private static int intParam(String raw, int from, int to, String key, int def) {
+        String value = firstDigitsParam(raw, from, to, key);
+        if (value == null) {
+            return def;
+        }
+        try {
+            return Integer.parseInt(value);
+        } catch (Throwable ignored) {
+            return def;
+        }
+    }
+
+    private static String compactUrl(String raw, int from, int to) {
+        StringBuilder sb = new StringBuilder(Math.min(to - from, 640) + 32);
+        int i = from;
+        while (i < to && sb.length() < LOG_URL_SAMPLE_MAX) {
+            int amp = raw.indexOf('&', i);
+            if (amp < 0 || amp >= to) {
+                amp = to;
+            }
+            int eq = raw.indexOf('=', i);
+            if (eq >= 0 && eq < amp) {
+                int valueLen = amp - eq - 1;
+                if (valueLen > LOG_VALUE_MAX) {
+                    sb.append(raw, i, eq + 1).append('<').append(valueLen).append("字符>");
+                } else {
+                    sb.append(raw, i, amp);
+                }
+            } else {
+                sb.append(raw, i, amp);
+            }
+            if (amp < to) {
+                sb.append('&');
+            }
+            i = amp + 1;
+        }
+        if (i < to) {
+            sb.append("…(剩余").append(to - i).append("字符)");
+        }
+        return sb.toString();
+    }
+
+    private static final int TOPIC_FEED_TRACK_MAX = 8;
+    private static final long TOPIC_FEED_WINDOW_MS = 15_000L;
+    private static final int TOPIC_FEED_BURST = 5;
+    private static final long TOPIC_FEED_WARN_INTERVAL_MS = 60_000L;
+    private static final class FeedTrace {
+        final java.util.ArrayDeque<Long> recent = new java.util.ArrayDeque<>();
+        int lastOffset = Integer.MIN_VALUE;
+    }
+
+    private static final java.util.LinkedHashMap<String, FeedTrace> sTopicFeed =
+            new java.util.LinkedHashMap<>();
+    private static volatile long sTopicFeedWarnAt;
+    private static void noteTopicFeedRequest(String raw, int from, int to, String topicId) {
+        if (topicId == null || !contains(raw, from, to, "bbs/app/topic/feeds")) {
+            return;
+        }
+        int offset = intParam(raw, from, to, "offset=", -1);
+        com.better.heybox.ModuleStats.topicFeedRequests.incrementAndGet();
+        long now = System.currentTimeMillis();
+        int inWindow;
+        synchronized (sTopicFeed) {
+            FeedTrace trace = sTopicFeed.get(topicId);
+            if (trace == null) {
+                trace = new FeedTrace();
+                sTopicFeed.put(topicId, trace);
+                while (sTopicFeed.size() > TOPIC_FEED_TRACK_MAX) {
+                    java.util.Iterator<String> it = sTopicFeed.keySet().iterator();
+                    it.next();
+                    it.remove();
+                }
+            }
+            if (offset > trace.lastOffset) {
+                trace.recent.addLast(now);
+            }
+            trace.lastOffset = offset;
+            while (!trace.recent.isEmpty() && now - trace.recent.peekFirst() > TOPIC_FEED_WINDOW_MS) {
+                trace.recent.pollFirst();
+            }
+            inWindow = trace.recent.size();
+        }
+        if (inWindow < TOPIC_FEED_BURST) {
+            return;
+        }
+        if (now - sTopicFeedWarnAt < TOPIC_FEED_WARN_INTERVAL_MS) {
+            return;
+        }
+        sTopicFeedWarnAt = now;
+        com.better.heybox.ModuleStats.topicFeedStallRuns.incrementAndGet();
+        log(Log.WARN, "[#41] 话题信息流疑似分页空转：topic_id=" + topicId
+                + " " + (TOPIC_FEED_WINDOW_MS / 1000) + "s 内翻页请求=" + inWindow + " 次"
+                + "（最新 offset=" + offset
+                + "，数据层条目=" + com.better.heybox.ModuleStats.bbsListItemsSeen.get()
+                + " 删除=" + com.better.heybox.ModuleStats.bbsListItemsDropped.get()
+                + " 视图隐藏=" + com.better.heybox.ModuleStats.bbsListItemsHidden.get() + "）");
+    }
+
     private static boolean resolveRequestBuilder(Class<?> reqCls) {
         for (Method nb : reqCls.getMethods()) {
             if (nb.getParameterCount() != 0) {
@@ -256,9 +374,6 @@ public final class HttpBridge {
             if (urlSetter == null || build == null) {
                 continue;
             }
-            // Builder#method(String, RequestBody)：用于把复用的模板强制成 GET。
-            // 注意排除 header/addHeader(String, String) —— 它们形状相同，
-            // 若误选并传入 null 会在 okhttp 内部抛 NPE（实测踩过）
             Method methodSetter = null;
             for (Method m : t.getMethods()) {
                 Class<?>[] ps = m.getParameterTypes();
@@ -277,7 +392,6 @@ public final class HttpBridge {
         return false;
     }
 
-    /** Client#newCall(Request) -> Call#execute() -> Response#code()/body().string() */
     private static boolean resolveCallChain(Class<?> clientCls, Class<?> reqCls) {
         for (Method nc : clientCls.getMethods()) {
             Class<?>[] ps = nc.getParameterTypes();
@@ -332,7 +446,6 @@ public final class HttpBridge {
         return false;
     }
 
-    /** Object 自带方法（toString/hashCode/getClass 等）不算候选，否则任何类都"看起来"有 string() */
     private static boolean isObjectMethod(Method m) {
         Class<?> d = m.getDeclaringClass();
         if (d == Object.class) {
@@ -342,7 +455,6 @@ public final class HttpBridge {
         return "toString".equals(n) || "hashCode".equals(n) || "getClass".equals(n);
     }
 
-    /** 在某类型上找返回 String 的 0 参数方法（排除 Object 自带） */
     private static Method findStringMethod(Class<?> c) {
         for (Method m : c.getMethods()) {
             if (m.getParameterCount() == 0 && m.getReturnType() == String.class && !isObjectMethod(m)) {
@@ -352,7 +464,6 @@ public final class HttpBridge {
         return null;
     }
 
-    /** 一次性结构诊断：识别失败时把关键信息打出来（每行一条，避免被文件日志按行截断） */
     private static void dumpDiagnostics(Object client, Object request) {
         if (sDiagLogged) {
             return;
@@ -382,8 +493,6 @@ public final class HttpBridge {
         }
     }
 
-    // ------------------------------------------------------------ 发请求
-
     public static String get(String url, Map<String, String> headers) {
         return request("GET", url, headers, null);
     }
@@ -402,8 +511,6 @@ public final class HttpBridge {
         Object req;
         try {
             Object builder = sNewBuilder.invoke(template);
-            // newBuilder() 会把原请求的 method/body 一起复制过来，重置为 GET。
-            // 这一步只是保险，失败也不该影响请求本身
             if (sMethod != null) {
                 try {
                     sMethod.invoke(builder, "GET", null);
@@ -433,12 +540,13 @@ public final class HttpBridge {
             log(Log.WARN, "构造请求失败: " + t + " / cause=" + cause);
             return null;
         }
-        // 只支持 GET（当前用途），POST 需要 RequestBody，这里不做，避免依赖更多混淆类
         if (!"GET".equals(method) && body != null) {
             log(Log.WARN, "暂不支持 " + method + " 请求，已跳过 " + shortUrl(url));
             return null;
         }
         long t0 = android.os.SystemClock.elapsedRealtime();
+        Boolean ownPrev = sOwnRequest.get();
+        sOwnRequest.set(Boolean.TRUE);
         try {
             Object call = sNewCall.invoke(client, req);
             Object resp = sExecute.invoke(call);
@@ -455,6 +563,12 @@ public final class HttpBridge {
         } catch (Throwable t) {
             log(Log.WARN, "请求失败 " + shortUrl(url) + " : " + t);
             return null;
+        } finally {
+            if (ownPrev == null) {
+                sOwnRequest.remove();
+            } else {
+                sOwnRequest.set(ownPrev);
+            }
         }
     }
 

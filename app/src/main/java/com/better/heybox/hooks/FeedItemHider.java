@@ -65,6 +65,7 @@ public final class FeedItemHider {
                 lp.height = 0;
                 itemView.setLayoutParams(lp);
             }
+            com.better.heybox.ModuleStats.bbsListItemsHidden.incrementAndGet();
         } catch (Throwable ignored) {
         }
     }
