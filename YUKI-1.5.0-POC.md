@@ -635,7 +635,7 @@ public final class ProbeEntry_YukiHookXposedInit extends LibXposedEntry {
 
 - APK 内 `module.prop` 为 `autoHotReload=true`
 - 补丁版装机后模块正常加载，与既有 `com.better.heybox` 共存，无崩溃/链接错误
-### 13.4 已放弃热重载，改用「模块更新时提示并重启」
+### 13.4 已放弃该补丁，改用官方原生热重载（beta.5）
 
 补丁本身验证可行（编译产物含 `onHotReloading`、APK 携带 `autoHotReload=true`、装机正常），
 但**决定放弃**，原因三条：
@@ -647,7 +647,12 @@ public final class ProbeEntry_YukiHookXposedInit extends LibXposedEntry {
    而 Yuki 把 handle 包在私有 `RegistrationHandle` 里从不外抛，重载后是否正确清理存疑
 3. 实际触发走 `ILSPManagerService` binder，只能由 LSPosed Manager UI 发起，无法脚本化验证
 
-已回退到 KSP 默认 `autoHotReload=false`，`yuki-probe` 构建脚本中仅保留决策注释。
+当时回退到 KSP 默认 `autoHotReload=false`，`yuki-probe` 构建脚本中仅保留决策注释。
+
+**后续（见 §19）：beta.5 把上述三条全部消解**——热重载成为官方一等能力，
+清理职责由框架通过 `registerModuleLifecycle { onDispose { … } }` 显式交给模块，
+触发改由模块进程自己调用 `XposedService.hotReloadModule`。
+因此本节的三条理由对**补丁方案**仍然成立，但不再适用于 beta.5 原生方案。
 
 ---
 
@@ -1169,6 +1174,134 @@ vs clean 重建 4,435.7 KB，虚高 **4.7 MB**）。**现已全部替换为 clea
 - Yuki 仍是 `1.5.0-beta.4`：作者声明 GA 前坐标与 API 可能变。
 - `android.newDsl=false` 是 AGP 10 前的技术债，与本次迁移正交，需单独立项。
 - **包体目标未达成**：见 §18.5，迁移使代码增大 108 KB。
+
+---
+
+## 19. 升级 beta.5 并启用原生热重载
+
+### 19.1 变更范围
+
+| 项 | 值 |
+|---|---|
+| `yuki` 版本 | `1.5.0-beta.4` → `1.5.0-beta.5` |
+| `gradle/m2-yuki` | 删除 beta.4 全部 23 个文件，落入 beta.5 同构 23 个文件 |
+| `HookEntry` `minApiVersion` | `101` → `102`（热重载的硬门槛） |
+| `HookEntry` `hotReload` | 新增 `HotReload.MANUAL` |
+
+`minApiVersion` 抬到 102 是**兼容面收窄**：低于 API 102 的框架将不再加载本模块。
+本项目实际运行环境为 LSPosed IT 2.1.1（API 102），已确认可接受。
+
+### 19.2 MANUAL 而非 AUTO
+
+`HotReload` 三档语义（来自 beta.5 `createModuleProperties()`）：
+
+| 档位 | `module.prop` | 行为 |
+|---|---|---|
+| `NONE` | `autoHotReload=false` | 拒绝重载请求 |
+| `MANUAL` | `autoHotReload=false` | 接受重载，但**只能由模块自己发起** |
+| `AUTO` | `autoHotReload=true` | 宿主装上新 APK 后由框架自动重载 |
+
+选 `MANUAL` 的理由：本项目持有大量**模块自有资源**（4 个线程/线程池、
+`ActivityLifecycleCallbacks`、`SharedPreferences` 监听器、约 449 行静态状态），
+beta.5 要求模块在 `onDispose` 里自行释放。`AUTO` 会在模块还没来得及实现清理时
+就被框架自动重载，风险不可控；`MANUAL` 保留「人来决定何时重载」的控制权。
+
+### 19.3 生成产物核验
+
+`kspDebugKotlin` 后实测：
+
+```text
+# META-INF/xposed/module.prop
+minApiVersion=102
+targetApiVersion=102
+staticScope=true
+autoHotReload=false          # MANUAL 的正确取值
+
+# HookEntry_YukiHookXposedInit.kt
+public class HookEntry_YukiHookXposedInit : LibXposed102Entry() {
+    override val hotReload: ModuleReloadPolicy = ModuleReloadPolicy.MANUAL
+}
+```
+
+`autoHotReload=false` 是 `MANUAL` 的**预期值**，不是失败——只有 `AUTO` 才为 `true`。
+
+### 19.4 触发链路（关键架构约束）
+
+beta.5 的 `YukiHookModuleReload.checkApi()` 要求：
+
+```text
+!YukiHook.isStandalone  &&  !isHostEnvironment  &&  YukiHookBridge.isModuleActive
+```
+
+即 `reload` **只能在模块进程调用**，而设置面板运行在**宿主进程**。
+另外 `XposedServiceHelper` 内部是**单个静态 listener**（`registerListener` 会覆盖前一个），
+所以不能靠再注册一个监听器来并行拿服务。
+
+本项目 `App` 已经继承了 `XposedServiceHelper.OnServiceListener` 并在
+`onServiceBind` 里保存了 `XposedService`，因此**直接复用这个已有的服务句柄**：
+
+```text
+设置面板（宿主进程）点击「热重载模块」
+  └─ 广播 com.better.heybox.RELOAD_MODULE（显式组件）
+       └─ PreferenceReceiver（模块进程）
+            └─ 等 App.getService() 绑定（最长 6s）
+                 └─ ModuleReloader.request(null)
+                      └─ service.runningTargets → hotReloadModule(target, …)
+```
+
+因此走的是 libxposed 原生 `XposedService.hotReloadModule`，
+而不是 Yuki 的 `YukiHook.Module.reload` 门面——后者会要求 Yuki 自己的
+服务注册表，与项目现有的 listener 冲突。
+
+### 19.5 重载前释放模块自有资源
+
+`ModuleResourceCleanup.releaseAll()` 挂在 `registerModuleLifecycle { onDispose { … } }`，
+逐项 best-effort（任一项失败不影响其余）：
+
+| 顺序 | 目标 | 释放内容 |
+|---|---|---|
+| 1 | `AIClickbaitChecker` | `HandlerThread("bhx-ai-checker")`、待处理队列、判定缓存 |
+| 2 | `WatchEngine` | `betterheybox-watch` 单线程池 |
+| 3 | `WatchSeen` | `betterheybox-seen` 定时线程池（先落盘） |
+| 4 | `HeyboxTargets` | `bhx-targets` 线程池、目标/缓存表 |
+| 5 | `DexKitResolver` | 解析线程池 |
+| 6 | `VideoDownloadManager` | 下载线程池、活动任务、通知回调 |
+| 7 | `ForegroundTracker` | `ActivityLifecycleCallbacks` 反注册 |
+| 8 | `MainModule` | `SharedPreferences` 变更监听器反注册 |
+| 9 | `LogRecorder` | 日志写入线程（**最后**释放，前面失败才写得进日志） |
+
+### 19.6 构建与产物验证
+
+| 检查 | 结果 |
+|---|---|
+| `testDebugUnitTest` | **30/30 通过，0 失败** |
+| `assembleDebug` | 成功 |
+| `assembleRelease`（R8） | 成功 |
+| release `module.prop` | `minApiVersion=102`、`autoHotReload=false` |
+| release `java_init.list` | 仍只有 `HookEntry_YukiHookXposedInit`（唯一 Java entry，满足热重载前提） |
+| R8 `mapping.txt` | `ModuleReloader` / `ModuleResourceCleanup` / `PreferenceReceiver` / `HookEntry` 均未被裁掉 |
+| APK dex 内容 | `ModuleReloader`、`ModuleResourceCleanup`、`RELOAD_MODULE` 均在 debug 与 release 包内 |
+| beta.4→beta.5 反射兼容 | `YukiHookPreferences.getCurrent$yukihook_core` 在 beta.5 字节码中仍存在 |
+
+### 19.7 未做的事（诚实记录）
+
+- **热重载未做真机运行时验证**：本轮无可用设备（`adb devices` 为空），
+  且仓库内无 `keystore.properties`，无法产出与已装 v0.8.4 同签名的 APK。
+  上述结论全部来自**构建期与静态核验**，未观测到真实的 `SUCCEEDED` 回调。
+- **beta.5 的 `proguard.txt` 为空**（与 beta.4 相同），
+  因此项目自带的 consumer R8 规则仍是必需的，未随版本升级而简化。
+- `yuki-probe` 仍是 `minApiVersion = 101`：它是独立探针模块，
+  与本项目热重载无关，未同步抬版本。
+- **「点了没反应」可能是预期行为**：本实现走 libxposed 原生
+  `hotReloadModule`，它只做校验与提交，结果由框架异步回调。
+  若目标进程仍在运行当前模块代码（`UP_TO_DATE`），框架可能返回
+  `UNSUPPORTED`/`FAILED` 而不真正重载。因此该按钮的**主要用途是
+  「模块 APK 已替换后无需重启宿主」**，不是用来刷新配置——
+  配置变更请走已有的 preferences 通道。
+  实际状态以模块日志里的 `热重载结果: …` 一行为准（含每个目标的 `state`）。
+- **`PreferenceReceiver` 仍是 `exported=true` 且无权限保护**（沿用既有设计，
+  `SET_BOOLEAN` 早已如此）。本次只新增一个 action，未改动安全模型；
+  若要收紧需单独立项。
 
 ---
 
