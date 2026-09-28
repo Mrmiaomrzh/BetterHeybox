@@ -87,12 +87,6 @@ class PreferenceReceiver : BroadcastReceiver() {
 
         private val ALLOWED_KEYS: Set<String> = HashSet(App.BOOLEAN_DEFAULTS.keys)
 
-        /**
-         * Requests a hot reload of the hooked host processes.
-         *
-         * The request must originate in the module process because the framework
-         * service connection lives there.
-         */
         private fun handleReloadRequest() {
             Checkpoint.mark("收到模块热重载请求")
             Logs.i("BetterHeybox", "收到模块热重载请求, pid=" + Process.myPid())

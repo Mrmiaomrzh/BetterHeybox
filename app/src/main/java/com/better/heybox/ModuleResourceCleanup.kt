@@ -4,13 +4,6 @@ import com.better.heybox.hooks.AIClickbaitChecker
 import com.better.heybox.watch.WatchEngine
 import com.better.heybox.watch.WatchSeen
 
-/**
- * Releases module-owned threads, executors and callbacks before a hot reload.
- *
- * The framework replaces the module instance in place, so the outgoing instance
- * must stop everything it owns. Each step is best-effort: one failing release
- * must not prevent the remaining ones from running.
- */
 object ModuleResourceCleanup {
 
     private const val TAG = "BetterHeybox"
@@ -33,7 +26,6 @@ object ModuleResourceCleanup {
         release("视频下载") { VideoDownloadManager.shutdown() }
         release("前台跟踪") { ForegroundTracker.shutdown() }
         release("模块实例") { MainModule.releaseCurrent() }
-        // 日志写入最后释放，前面的失败才能写进日志文件。
         release("日志写入") { LogRecorder.shutdown() }
         Logs.w(TAG, "热重载准备：模块资源释放完成")
     }

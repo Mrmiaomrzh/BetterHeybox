@@ -3141,14 +3141,6 @@ class SettingsEntryHook(private val module: MainModule) {
         }
     }
 
-    /**
-     * Asks the module process to hot reload the hooked host.
-     *
-     * The settings panel runs in the host process, so the framework service
-     * connection and the reload request live in the module process. The panel
-     * only forwards the request through [PreferenceReceiver]; the module process
-     * reports the actual availability and result in the module log.
-     */
     private fun requestModuleReload(activity: Activity) {
         try {
             val request = Intent(PreferenceReceiver.ACTION_RELOAD_MODULE)

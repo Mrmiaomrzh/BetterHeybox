@@ -80,10 +80,6 @@ class MainModule private constructor(private val param: PackageParam) {
 
     fun getModuleApplicationInfo(): ApplicationInfo = param.module.appInfo
 
-    /**
-     * Unregisters the settings listener so the outgoing module instance is not
-     * retained by the host preferences after a hot reload.
-     */
     fun release() {
         val listener = settingsListener ?: return
         settingsListener = null
@@ -571,7 +567,6 @@ class MainModule private constructor(private val param: PackageParam) {
         @JvmStatic
         fun get(): MainModule? = sInstance
 
-        /** Releases the current module instance before a hot reload. */
         @JvmStatic
         fun releaseCurrent() {
             val instance = sInstance ?: return
