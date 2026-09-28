@@ -82,6 +82,15 @@ object DexKitResolver {
     private val MAIN = Handler(Looper.getMainLooper())
 
     @JvmStatic
+    fun shutdown() {
+        MAIN.removeCallbacksAndMessages(null)
+        try {
+            EXECUTOR.shutdownNow()
+        } catch (ignored: Throwable) {
+        }
+    }
+
+    @JvmStatic
     fun getHeyboxDialogSpec(module: MainModule, activity: Activity, cb: SpecCallback) {
         val cl = activity.classLoader
         val cacheKey = try {

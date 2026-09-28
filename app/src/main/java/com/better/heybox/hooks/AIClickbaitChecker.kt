@@ -153,13 +153,13 @@ class AIClickbaitChecker private constructor() {
                 return
             }
             sFlushScheduled = true
-            sWorkHandler!!.postDelayed({ flush() }, BATCH_DELAY_MS)
+            sWorkHandler?.postDelayed({ flush() }, BATCH_DELAY_MS)
         }
 
         @JvmStatic
         fun testConnection(module: MainModule, callback: TestCallback?) {
             ensureWorker()
-            sWorkHandler!!.post {
+            sWorkHandler?.post {
                 try {
                     val base = module.getString(App.KEY_AI_BASE_URL, "")!!.trim()
                     val model = module.getString(App.KEY_AI_MODEL, "")!!.trim()
@@ -208,6 +208,21 @@ class AIClickbaitChecker private constructor() {
             }
         }
 
+        @JvmStatic
+        fun shutdown() {
+            synchronized(sLock) {
+                sWorkHandler?.removeCallbacksAndMessages(null)
+                sWorkHandler = null
+                sThread?.quitSafely()
+                sThread = null
+                sPending.clear()
+                sCallback = null
+                sModule = null
+                sFlushScheduled = false
+                sVerdictCache.evictAll()
+            }
+        }
+
         private fun flush() {
             val batch = ArrayList<Array<String>>()
             synchronized(sLock) {
@@ -232,7 +247,7 @@ class AIClickbaitChecker private constructor() {
             }
             synchronized(sLock) {
                 if (sPending.isNotEmpty()) {
-                    sWorkHandler!!.postDelayed({ flush() }, 100L)
+                    sWorkHandler?.postDelayed({ flush() }, 100L)
                 }
             }
         }

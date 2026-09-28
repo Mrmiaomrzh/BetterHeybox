@@ -13,6 +13,27 @@ object ForegroundTracker {
 
     @Volatile private var sActiveCount = 0
 
+    @Volatile private var sApp: Application? = null
+
+    @Volatile private var sCallbacks: Application.ActivityLifecycleCallbacks? = null
+
+    @JvmStatic
+    fun shutdown() {
+        val app = sApp
+        val callbacks = sCallbacks
+        if (app != null && callbacks != null) {
+            try {
+                app.unregisterActivityLifecycleCallbacks(callbacks)
+            } catch (ignored: Throwable) {
+            }
+        }
+        sApp = null
+        sCallbacks = null
+        sRegistered.set(false)
+        sFirstResume.set(false)
+        sActiveCount = 0
+    }
+
     @JvmStatic
     fun onActivityResumed(activity: Activity) {
         if (!BuildFlags.DEBUG) {
@@ -34,7 +55,7 @@ object ForegroundTracker {
             if (app !is Application) {
                 return
             }
-            app.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
+            val callbacks = object : Application.ActivityLifecycleCallbacks {
                 override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
                 override fun onActivityStarted(activity: Activity) {
                     if (++sActiveCount == 1) {
@@ -52,9 +73,13 @@ object ForegroundTracker {
 
                 override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
                 override fun onActivityDestroyed(activity: Activity) {}
-            })
+            }
+            app.registerActivityLifecycleCallbacks(callbacks)
+            sApp = app
+            sCallbacks = callbacks
             Checkpoint.mark("前台跟踪已注册")
         } catch (t: Throwable) {
+            sRegistered.set(false)
             Checkpoint.mark("前台跟踪注册失败: %s", t)
         }
     }

@@ -999,6 +999,10 @@ class SettingsEntryHook(private val module: MainModule) {
                         showTargetStatus(activity)
                     })
 
+                    Action.RELOAD_MODULE -> setRowClick(itemCls, item, View.OnClickListener { _ ->
+                        requestModuleReload(activity)
+                    })
+
                     Action.CLEAR_LOG -> setRowClick(itemCls, item, View.OnClickListener { _ ->
                         confirmClearLogs(activity)
                     })
@@ -3137,6 +3141,34 @@ class SettingsEntryHook(private val module: MainModule) {
         }
     }
 
+    /**
+     * Asks the module process to hot reload the hooked host.
+     *
+     * The settings panel runs in the host process, so the framework service
+     * connection and the reload request live in the module process. The panel
+     * only forwards the request through [PreferenceReceiver]; the module process
+     * reports the actual availability and result in the module log.
+     */
+    private fun requestModuleReload(activity: Activity) {
+        try {
+            val request = Intent(PreferenceReceiver.ACTION_RELOAD_MODULE)
+                .setComponent(
+                    android.content.ComponentName(
+                        modulePackageName(), PreferenceReceiver::class.java.name
+                    )
+                )
+                .addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
+            activity.sendBroadcast(request)
+            LogRecorder.recordEvent("已请求模块热重载")
+            Toast.makeText(
+                activity, "已请求热重载，结果见模块日志", Toast.LENGTH_SHORT
+            ).show()
+        } catch (t: Throwable) {
+            module.logd(Log.WARN, MainModule.TAG, "请求热重载失败", t)
+            Toast.makeText(activity, "请求热重载失败：" + t, Toast.LENGTH_LONG).show()
+        }
+    }
+
     private fun writeEmbeddedBoolean(activity: Activity, key: String, value: Boolean): Boolean {
         LogRecorder.setContext(activity)
         HeyboxPrefs.init(activity)
@@ -4228,7 +4260,7 @@ class SettingsEntryHook(private val module: MainModule) {
 
     internal enum class Action {
         NONE, EDIT_LINK, CLEAR_DAILY, CHANNEL, EXPORT, IMPORT,
-        EXPORT_LOG, CLEAR_LOG, VIEW_LOG, RUNTIME_STATUS, TARGET_STATUS, OPEN_WEB, PICK_DIR, RESET_GLASS,
+        EXPORT_LOG, CLEAR_LOG, VIEW_LOG, RUNTIME_STATUS, TARGET_STATUS, RELOAD_MODULE, OPEN_WEB, PICK_DIR, RESET_GLASS,
         CHOOSE_GLASS, GLASS_SHEET,
         POST_LEVEL, POST_KEYWORDS, COMMENT_KEYWORDS, COMMENT_FILTER_DIAG, AI_PROVIDER, AI_PROMPT, AI_TEST,
         AI_MAX_TOKENS,
@@ -4666,7 +4698,7 @@ class SettingsEntryHook(private val module: MainModule) {
             for (i in groups.indices) {
                 val g = groups[i]
                 if (TITLE_GENERAL == g.title) {
-                    val items = arrayOfNulls<SwitchDef>(g.items.size + 2)
+                    val items = arrayOfNulls<SwitchDef>(g.items.size + 3)
                     System.arraycopy(g.items, 0, items, 0, g.items.size)
                     items[g.items.size] = SwitchDef(
                         "运行状态", "查看模块运行检查点", null, false, false,
@@ -4675,6 +4707,10 @@ class SettingsEntryHook(private val module: MainModule) {
                     items[g.items.size + 1] = SwitchDef(
                         "目标解析状态", "查看混淆名定位结果与判定依据", null, false, false,
                         true, null, Action.TARGET_STATUS
+                    )
+                    items[g.items.size + 2] = SwitchDef(
+                        "热重载模块", "模块更新后无需重启小黑盒，立即重载钩子", null, false, false,
+                        true, null, Action.RELOAD_MODULE
                     )
                     @Suppress("UNCHECKED_CAST")
                     groups[i] = SettingsGroup(g.title, items as Array<SwitchDef>)

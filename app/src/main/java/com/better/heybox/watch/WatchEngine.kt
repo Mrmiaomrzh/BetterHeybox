@@ -43,6 +43,17 @@ object WatchEngine {
     @JvmStatic
     fun lastResult(): String = sLastResult
 
+    @JvmStatic
+    fun shutdown() {
+        sRunning.set(false)
+        sActivity = WeakReference(null)
+        sModule = null
+        try {
+            POOL.shutdownNow()
+        } catch (ignored: Throwable) {
+        }
+    }
+
 
     @JvmStatic
     fun onAppOpen(activity: Activity?) {

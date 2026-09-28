@@ -193,6 +193,29 @@ class HeyboxTargets private constructor() {
         }
 
         @JvmStatic
+        fun shutdown() {
+            sMain?.removeCallbacksAndMessages(null)
+            try {
+                EXECUTOR.shutdownNow()
+            } catch (ignored: Throwable) {
+            }
+            synchronized(this) {
+                TARGETS.clear()
+                RESOLVED.clear()
+                SOURCE.clear()
+                PENDING.clear()
+                HOOKED.clear()
+                ORDER.clear()
+                sCl = null
+                sContext = null
+                sMain = null
+                sVersionCode = 0
+                sStarted = false
+                sViewHolderClass = null
+            }
+        }
+
+        @JvmStatic
         fun methods(key: String): List<Method> {
             val list = RESOLVED[key]
             return list ?: Collections.emptyList()

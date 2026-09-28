@@ -80,6 +80,20 @@ class MainModule private constructor(private val param: PackageParam) {
 
     fun getModuleApplicationInfo(): ApplicationInfo = param.module.appInfo
 
+    /**
+     * Unregisters the settings listener so the outgoing module instance is not
+     * retained by the host preferences after a hot reload.
+     */
+    fun release() {
+        val listener = settingsListener ?: return
+        settingsListener = null
+        try {
+            getRemotePreferences(App.PREFS_GROUP)?.unregisterOnSharedPreferenceChangeListener(listener)
+        } catch (t: Throwable) {
+            logv(TAG, "设置变更监听注销失败: $t")
+        }
+    }
+
 
     private fun log(level: Int, tag: String, msg: String) {
         frameworkLog(level, tag, msg, null)
@@ -556,6 +570,17 @@ class MainModule private constructor(private val param: PackageParam) {
 
         @JvmStatic
         fun get(): MainModule? = sInstance
+
+        /** Releases the current module instance before a hot reload. */
+        @JvmStatic
+        fun releaseCurrent() {
+            val instance = sInstance ?: return
+            sInstance = null
+            try {
+                instance.release()
+            } catch (ignored: Throwable) {
+            }
+        }
 
         @JvmStatic
         fun getHeyboxTabLabel(context: Context?, resName: String?, def: String?): String? {

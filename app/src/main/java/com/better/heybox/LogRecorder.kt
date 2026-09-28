@@ -1,6 +1,7 @@
 package com.better.heybox
 
 import android.content.Context
+import android.os.Looper
 import android.os.Process
 import android.os.SystemClock
 import android.util.Log
@@ -237,6 +238,28 @@ object LogRecorder {
     fun dropInfo(): String? {
         val d = sDropped.get()
         return if (d == 0L) null else "丢弃 $d 行"
+    }
+
+    @JvmStatic
+    fun shutdown() {
+        sWriterStop = true
+        val writer = sWriter
+        if (writer != null) {
+            writer.interrupt()
+            if (Looper.myLooper() != Looper.getMainLooper()) {
+                try {
+                    writer.join(FLUSH_WAIT_MS)
+                } catch (ignored: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                }
+            }
+        }
+        sWriter = null
+        sQueue.clear()
+        sPending.set(0)
+        synchronized(IO_LOCK) {
+            closeStreamLocked()
+        }
     }
 
     @JvmStatic

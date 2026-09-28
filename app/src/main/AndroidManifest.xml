@@ -16,6 +16,7 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="com.better.heybox.SET_BOOLEAN" />
+                <action android:name="com.better.heybox.RELOAD_MODULE" />
             </intent-filter>
         </receiver>
     </application>

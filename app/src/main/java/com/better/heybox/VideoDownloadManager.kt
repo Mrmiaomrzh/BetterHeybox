@@ -1516,6 +1516,29 @@ class VideoDownloadManager private constructor() {
         }
 
         @JvmStatic
+        fun shutdown() {
+            INSTANCE.shutdownInternal()
+        }
+
+        private fun VideoDownloadManager.shutdownInternal() {
+            val snapshot = synchronized(tasks) { ArrayList(tasks.values) }
+            for (task in snapshot) {
+                try {
+                    task.cancel()
+                } catch (ignored: Throwable) {
+                }
+            }
+            synchronized(tasks) { tasks.clear() }
+            listeners.clear()
+            mainHandler.removeCallbacksAndMessages(null)
+            try {
+                executor.shutdownNow()
+            } catch (ignored: Throwable) {
+            }
+            appContext = null
+        }
+
+        @JvmStatic
         fun isSupportedUrl(url: String?): Boolean {
             if (url == null) {
                 return false

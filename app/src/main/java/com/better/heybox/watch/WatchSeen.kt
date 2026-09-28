@@ -124,6 +124,24 @@ object WatchSeen {
         flushNow()
     }
 
+    @JvmStatic
+    fun shutdown() {
+        try {
+            flushNow()
+        } catch (ignored: Throwable) {
+        }
+        synchronized(LOCK) {
+            sSeen = null
+            sBaselined = null
+            sDirty = false
+            sModule = null
+        }
+        try {
+            sWriter.shutdownNow()
+        } catch (ignored: Throwable) {
+        }
+    }
+
 
     private var sBaselined: MutableSet<String>? = null
 

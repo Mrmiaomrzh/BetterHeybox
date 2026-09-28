@@ -15,6 +15,17 @@ class PreferenceReceiver : BroadcastReceiver() {
             return
         }
         val action = intent.action
+        if (ACTION_RELOAD_MODULE == action) {
+            val result = goAsync()
+            Thread({
+                try {
+                    handleReloadRequest()
+                } finally {
+                    result.finish()
+                }
+            }, "bhx-hot-reload-req").start()
+            return
+        }
         val key = intent.getStringExtra(EXTRA_KEY)
         val value = intent.getBooleanExtra(EXTRA_VALUE, false)
         Checkpoint.mark("广播接收: action=%s key=%s value=%s", action, key, value)
@@ -67,6 +78,7 @@ class PreferenceReceiver : BroadcastReceiver() {
 
     companion object {
         const val ACTION_SET_BOOLEAN = "com.better.heybox.SET_BOOLEAN"
+        const val ACTION_RELOAD_MODULE = "com.better.heybox.RELOAD_MODULE"
         const val EXTRA_KEY = "key"
         const val EXTRA_VALUE = "value"
 
@@ -74,6 +86,43 @@ class PreferenceReceiver : BroadcastReceiver() {
         private const val WAIT_SERVICE_BIND_MS = 6000L
 
         private val ALLOWED_KEYS: Set<String> = HashSet(App.BOOLEAN_DEFAULTS.keys)
+
+        /**
+         * Requests a hot reload of the hooked host processes.
+         *
+         * The request must originate in the module process because the framework
+         * service connection lives there.
+         */
+        private fun handleReloadRequest() {
+            Checkpoint.mark("收到模块热重载请求")
+            Logs.i("BetterHeybox", "收到模块热重载请求, pid=" + Process.myPid())
+            var service = App.getService()
+            val deadline = System.currentTimeMillis() + WAIT_SERVICE_BIND_MS
+            while (service == null && System.currentTimeMillis() < deadline) {
+                try {
+                    Thread.sleep(100)
+                } catch (ignored: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    break
+                }
+                service = App.getService()
+            }
+            if (service == null) {
+                val reason = "热重载取消：等待框架服务绑定超时"
+                Logs.w("BetterHeybox", reason)
+                LogRecorder.recordEvent(reason)
+                return
+            }
+            if (!ModuleReloader.isAvailable()) {
+                val reason = "热重载不可用：" + ModuleReloader.describe()
+                Logs.w("BetterHeybox", reason)
+                LogRecorder.recordEvent(reason)
+                return
+            }
+            ModuleReloader.request(null) { message ->
+                Logs.i("BetterHeybox", "热重载结果: " + message)
+            }
+        }
 
         @JvmStatic
         fun tryFlush(context: Context, pending: SharedPreferences?) {
