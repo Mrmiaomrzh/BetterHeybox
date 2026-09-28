@@ -3,7 +3,7 @@
   "component": {
     "group": "com.highcapable.yukihookapi",
     "module": "yukihook-core",
-    "version": "1.5.0-beta.4",
+    "version": "1.5.0-beta.5",
     "attributes": {
       "org.gradle.status": "release"
     }
@@ -40,13 +40,13 @@
       ],
       "files": [
         {
-          "name": "yukihook-core-1.5.0-beta.4.aar",
-          "url": "yukihook-core-1.5.0-beta.4.aar",
-          "size": 344282,
-          "sha512": "d899ca34f82201726adc5172e63ad38995b8cfb9cfe45d54d55020a1105a635948b0059f96880c96fe7819e8cd12389a7deddd659cd22f4848249092d7fe1022",
-          "sha256": "55456106cd46203982342750f3dca998e4887e8a4be03821f3ac0f30f7c6d2bc",
-          "sha1": "c89cd99599790c4c6870acc61cfe6d5997588413",
-          "md5": "90a7f473a1c5d7d2b220e40571d1b318"
+          "name": "yukihook-core-1.5.0-beta.5.aar",
+          "url": "yukihook-core-1.5.0-beta.5.aar",
+          "size": 436047,
+          "sha512": "07c7994f94ecc5f93a92c40cd871c5fd4374dd7b96959117270b5f7e29795c0b83ad201ceedeab1563164259c4619c48ecd30271d8188704e9493d5433adf3d8",
+          "sha256": "017df524b958b8155051b6189af9972344e70f03955d76d91e47876fa30f5d97",
+          "sha1": "8309a29d8abdee2119d626f20c7b76235c92a422",
+          "md5": "44ebc46fc7d71417185a732814017112"
         }
       ]
     },
@@ -144,13 +144,13 @@
       ],
       "files": [
         {
-          "name": "yukihook-core-1.5.0-beta.4.aar",
-          "url": "yukihook-core-1.5.0-beta.4.aar",
-          "size": 344282,
-          "sha512": "d899ca34f82201726adc5172e63ad38995b8cfb9cfe45d54d55020a1105a635948b0059f96880c96fe7819e8cd12389a7deddd659cd22f4848249092d7fe1022",
-          "sha256": "55456106cd46203982342750f3dca998e4887e8a4be03821f3ac0f30f7c6d2bc",
-          "sha1": "c89cd99599790c4c6870acc61cfe6d5997588413",
-          "md5": "90a7f473a1c5d7d2b220e40571d1b318"
+          "name": "yukihook-core-1.5.0-beta.5.aar",
+          "url": "yukihook-core-1.5.0-beta.5.aar",
+          "size": 436047,
+          "sha512": "07c7994f94ecc5f93a92c40cd871c5fd4374dd7b96959117270b5f7e29795c0b83ad201ceedeab1563164259c4619c48ecd30271d8188704e9493d5433adf3d8",
+          "sha256": "017df524b958b8155051b6189af9972344e70f03955d76d91e47876fa30f5d97",
+          "sha1": "8309a29d8abdee2119d626f20c7b76235c92a422",
+          "md5": "44ebc46fc7d71417185a732814017112"
         }
       ]
     },
@@ -164,13 +164,13 @@
       },
       "files": [
         {
-          "name": "yukihook-core-1.5.0-beta.4-sources.jar",
-          "url": "yukihook-core-1.5.0-beta.4-sources.jar",
-          "size": 128557,
-          "sha512": "b1d0acfd05211cea63699b118946ea525c5c213e7ed11a705eb29a562a5cf473733b279d5c21a0bbb74e327d3455a58426358da23a31367e06d57ae9d0c79151",
-          "sha256": "597382414473424f4f50016bebf454a4684c5eeb6f3e3af35a8059e6390b98ca",
-          "sha1": "d6e2df217fd78765dc305e5129cbbe91f9f8bbb0",
-          "md5": "1342e7d1002a7b67a595ba6b97c9383e"
+          "name": "yukihook-core-1.5.0-beta.5-sources.jar",
+          "url": "yukihook-core-1.5.0-beta.5-sources.jar",
+          "size": 161346,
+          "sha512": "becb34076463c68f0df80f9f6303b91faa62cdcd2d862096484df032f9dc1a46cc8ae19cacc875acc759600b3bf08e3e4204463241edb291a83048fff0c7222a",
+          "sha256": "a92de51e281f931100bcce0b9d4b7f01a979c027acb9e3e631a0805ac4d96e5a",
+          "sha1": "b6689b083142b16f1fca9c6480e16b859c3afc98",
+          "md5": "5484f43196558d863862dea43339b60e"
         }
       ]
     }

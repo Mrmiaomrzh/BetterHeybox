@@ -3,7 +3,7 @@
   "component": {
     "group": "com.highcapable.yukihookapi",
     "module": "yukihook-compiler",
-    "version": "1.5.0-beta.4",
+    "version": "1.5.0-beta.5",
     "attributes": {
       "org.gradle.status": "release"
     }
@@ -36,13 +36,13 @@
       ],
       "files": [
         {
-          "name": "yukihook-compiler-1.5.0-beta.4.jar",
-          "url": "yukihook-compiler-1.5.0-beta.4.jar",
-          "size": 45441,
-          "sha512": "18fdd16a06847f8d5058c3dddb300d94026f3618599d990198ce76b12b5aa7a66f4e7775b2dfec9c2252d3ae073ddfcd925dc72f77e4b597bfb9a02ad8460a82",
-          "sha256": "56deb65e5a945a022712f1dabfbf556e9ab766ea68e57254514c148a0ebab399",
-          "sha1": "fc6de4c093d6eb3d389aa580c1f1dd94a5c8d942",
-          "md5": "f90d4d45edeee3fc82d23045e5558a06"
+          "name": "yukihook-compiler-1.5.0-beta.5.jar",
+          "url": "yukihook-compiler-1.5.0-beta.5.jar",
+          "size": 48323,
+          "sha512": "deb12fcda6474538203adc23a483f0edd6b247c6dd32cd539cc2e56a105188d585c29073e69d0462d46d4652d6ee8b402a91a4535a10ee60389393572150e6ef",
+          "sha256": "b433b70687d88eed57527b2118b86c03e9ceefca6a0eebea6c6ad48ccb96fbe7",
+          "sha1": "d6b487ac8aa56bf1000e56d742119d79fd45a36d",
+          "md5": "0712238f237d5358fa8974aeb532fb2b"
         }
       ]
     },
@@ -89,13 +89,13 @@
       ],
       "files": [
         {
-          "name": "yukihook-compiler-1.5.0-beta.4.jar",
-          "url": "yukihook-compiler-1.5.0-beta.4.jar",
-          "size": 45441,
-          "sha512": "18fdd16a06847f8d5058c3dddb300d94026f3618599d990198ce76b12b5aa7a66f4e7775b2dfec9c2252d3ae073ddfcd925dc72f77e4b597bfb9a02ad8460a82",
-          "sha256": "56deb65e5a945a022712f1dabfbf556e9ab766ea68e57254514c148a0ebab399",
-          "sha1": "fc6de4c093d6eb3d389aa580c1f1dd94a5c8d942",
-          "md5": "f90d4d45edeee3fc82d23045e5558a06"
+          "name": "yukihook-compiler-1.5.0-beta.5.jar",
+          "url": "yukihook-compiler-1.5.0-beta.5.jar",
+          "size": 48323,
+          "sha512": "deb12fcda6474538203adc23a483f0edd6b247c6dd32cd539cc2e56a105188d585c29073e69d0462d46d4652d6ee8b402a91a4535a10ee60389393572150e6ef",
+          "sha256": "b433b70687d88eed57527b2118b86c03e9ceefca6a0eebea6c6ad48ccb96fbe7",
+          "sha1": "d6b487ac8aa56bf1000e56d742119d79fd45a36d",
+          "md5": "0712238f237d5358fa8974aeb532fb2b"
         }
       ]
     },
@@ -109,13 +109,13 @@
       },
       "files": [
         {
-          "name": "yukihook-compiler-1.5.0-beta.4-sources.jar",
-          "url": "yukihook-compiler-1.5.0-beta.4-sources.jar",
-          "size": 29491,
-          "sha512": "2d3915ea5cf3da02e0423355b7f01a4c6abae35c953b93701c45fb2c4e4e0f1cafadd04714e418b97dab03b72103545eda907e5281a8ff84b717fc0b39ddec0c",
-          "sha256": "d142bb282e5c03456e5707a8006055fcf0bc5b101b13eaae40f8579cd2a479a4",
-          "sha1": "701b17aa0ab6befe6d8a2d81cba7a936b481fbe2",
-          "md5": "5c8ffa941d21b28ff070bec89bca6b72"
+          "name": "yukihook-compiler-1.5.0-beta.5-sources.jar",
+          "url": "yukihook-compiler-1.5.0-beta.5-sources.jar",
+          "size": 36813,
+          "sha512": "ef1b80aeeda7af21b3eb7f4a542d58e9f9ee7d5ccbdd3154d1d1e2debe7b12e85777c48004c5a40b78747d0a5db222150da6ebad643cc813c560f6b76e117980",
+          "sha256": "684b959174931a44d3eb9a24b2a5aeaf72b1a11018c7812f250723145b95bf68",
+          "sha1": "bb0fd524839163afacf6f1ad1e72ae83ddb9732f",
+          "md5": "c88b36a67c630a9c13d73dc564ea3ec0"
         }
       ]
     }

@@ -3,7 +3,7 @@
   "component": {
     "group": "com.highcapable.yukihookapi",
     "module": "yukihook-runtime-xposed82",
-    "version": "1.5.0-beta.4",
+    "version": "1.5.0-beta.5",
     "attributes": {
       "org.gradle.status": "release"
     }
@@ -33,13 +33,13 @@
       ],
       "files": [
         {
-          "name": "yukihook-runtime-xposed82-1.5.0-beta.4.aar",
-          "url": "yukihook-runtime-xposed82-1.5.0-beta.4.aar",
-          "size": 50064,
-          "sha512": "6579fb1643acce1a353b93f917302761208a9c0f62b381fc56786872fcc0bd45f17acefa44f86e9682050295cebe27625bbd1a2578ffad8b5a746019d8c19719",
-          "sha256": "704a42525e2a6a653963b71d6e168aa280dd7fb71f60a474a66bd86327fece32",
-          "sha1": "d8ee19d02cd7d05d289dde5f6a3a7217ef8de366",
-          "md5": "ca987f4e9f079bb3abe55bf46245dd59"
+          "name": "yukihook-runtime-xposed82-1.5.0-beta.5.aar",
+          "url": "yukihook-runtime-xposed82-1.5.0-beta.5.aar",
+          "size": 50294,
+          "sha512": "4c4849d0ed0508d697a909cc78864532f8020f23b7a8809217964851cfda8cbad83a9224791b715c7bfe5884fed524f403f0a89d1d71c417edc605fc9aa73637",
+          "sha256": "58b6c8f1fe7efb2590f1511f8eff9ae154157cde785338a1b034407c01926751",
+          "sha1": "a4a8062ab261cd477c40023ea150f7ce1efdd769",
+          "md5": "39bbc54d255f3b6f36b99f262b49471d"
         }
       ]
     },
@@ -56,7 +56,7 @@
           "group": "com.highcapable.yukihookapi",
           "module": "yukihook-core",
           "version": {
-            "requires": "1.5.0-beta.4"
+            "requires": "1.5.0-beta.5"
           }
         },
         {
@@ -98,13 +98,13 @@
       ],
       "files": [
         {
-          "name": "yukihook-runtime-xposed82-1.5.0-beta.4.aar",
-          "url": "yukihook-runtime-xposed82-1.5.0-beta.4.aar",
-          "size": 50064,
-          "sha512": "6579fb1643acce1a353b93f917302761208a9c0f62b381fc56786872fcc0bd45f17acefa44f86e9682050295cebe27625bbd1a2578ffad8b5a746019d8c19719",
-          "sha256": "704a42525e2a6a653963b71d6e168aa280dd7fb71f60a474a66bd86327fece32",
-          "sha1": "d8ee19d02cd7d05d289dde5f6a3a7217ef8de366",
-          "md5": "ca987f4e9f079bb3abe55bf46245dd59"
+          "name": "yukihook-runtime-xposed82-1.5.0-beta.5.aar",
+          "url": "yukihook-runtime-xposed82-1.5.0-beta.5.aar",
+          "size": 50294,
+          "sha512": "4c4849d0ed0508d697a909cc78864532f8020f23b7a8809217964851cfda8cbad83a9224791b715c7bfe5884fed524f403f0a89d1d71c417edc605fc9aa73637",
+          "sha256": "58b6c8f1fe7efb2590f1511f8eff9ae154157cde785338a1b034407c01926751",
+          "sha1": "a4a8062ab261cd477c40023ea150f7ce1efdd769",
+          "md5": "39bbc54d255f3b6f36b99f262b49471d"
         }
       ]
     },
@@ -118,13 +118,13 @@
       },
       "files": [
         {
-          "name": "yukihook-runtime-xposed82-1.5.0-beta.4-sources.jar",
-          "url": "yukihook-runtime-xposed82-1.5.0-beta.4-sources.jar",
-          "size": 16856,
-          "sha512": "86091d4c1ae4e7977ddc9f8f342efc37975de445a7ead85b9e596aa6359a9ef70b9b08076aaf2e2a55131902ff7ed4643392b2861f53451c2eaa39b9f50903c0",
-          "sha256": "d08eca3094a9a762d410f36154c31842761cdd31b73cd45569518f994999a432",
-          "sha1": "7eb50d2cc03755bdd8138d472d9dbdc851b38787",
-          "md5": "70c1137417658667b617972d6c59e92d"
+          "name": "yukihook-runtime-xposed82-1.5.0-beta.5-sources.jar",
+          "url": "yukihook-runtime-xposed82-1.5.0-beta.5-sources.jar",
+          "size": 15645,
+          "sha512": "4821cd13b835d744031e4a2aca876e770ed3bbbdffc26516346608daeda0a31db51fa75eed86d640381548c2a5b11746bc12490aeb795f007047c6d263f6340f",
+          "sha256": "71abd0de03bbf95917b7bf92068b78369c82ca0333df531f94d5abc178cd4c7d",
+          "sha1": "3ca24d17cf690afcf4c2863a120df3f77914b2de",
+          "md5": "98d6b920471792d8b2728c950781bd7c"
         }
       ]
     }

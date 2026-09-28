@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+<project xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd" xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <!-- This module was also published with a richer model, Gradle metadata,  -->
   <!-- which should be used instead. Do not delete the following line which  -->
   <!-- is to indicate to Gradle or any Gradle module metadata file consumer  -->
@@ -7,8 +8,9 @@
   <!-- do_not_remove: published-with-gradle-metadata -->
   <modelVersion>4.0.0</modelVersion>
   <groupId>com.highcapable.yukihookapi</groupId>
-  <artifactId>yukihook-compiler</artifactId>
-  <version>1.5.0-beta.4</version>
+  <artifactId>yukihook-runtime-xposed82</artifactId>
+  <version>1.5.0-beta.5</version>
+  <packaging>aar</packaging>
   <name>YukiHook</name>
   <description>A modern hook API and Xposed module solution.</description>
   <url>https://github.com/HighCapable/YukiHook</url>
@@ -32,6 +34,17 @@
     <developerConnection>scm:git:ssh://github.com/HighCapable/YukiHook.git</developerConnection>
     <url>https://github.com/HighCapable/YukiHook</url>
   </scm>
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>com.highcapable.kavaref</groupId>
+        <artifactId>kavaref-bom</artifactId>
+        <version>1.1.0</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
   <dependencies>
     <dependency>
       <groupId>org.jetbrains.kotlin</groupId>
@@ -40,21 +53,30 @@
       <scope>compile</scope>
     </dependency>
     <dependency>
-      <groupId>com.google.auto.service</groupId>
-      <artifactId>auto-service-annotations</artifactId>
-      <version>1.1.1</version>
+      <groupId>com.highcapable.yukihookapi</groupId>
+      <artifactId>yukihook-core</artifactId>
+      <version>1.5.0-beta.5</version>
       <scope>runtime</scope>
     </dependency>
     <dependency>
-      <groupId>com.squareup</groupId>
-      <artifactId>kotlinpoet-jvm</artifactId>
-      <version>2.3.0</version>
+      <groupId>com.highcapable.kavaref</groupId>
+      <artifactId>kavaref-core</artifactId>
       <scope>runtime</scope>
     </dependency>
     <dependency>
-      <groupId>com.squareup</groupId>
-      <artifactId>kotlinpoet-ksp</artifactId>
-      <version>2.3.0</version>
+      <groupId>com.highcapable.kavaref</groupId>
+      <artifactId>kavaref-android</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.highcapable.kavaref</groupId>
+      <artifactId>kavaref-extension</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+    <dependency>
+      <groupId>androidx.annotation</groupId>
+      <artifactId>annotation</artifactId>
+      <version>1.10.0</version>
       <scope>runtime</scope>
     </dependency>
   </dependencies>
