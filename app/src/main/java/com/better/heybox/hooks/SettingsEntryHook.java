@@ -59,6 +59,7 @@ import com.better.heybox.VersionUtils;
 import com.better.heybox.VideoDownloadManager;
 import com.better.heybox.liquidglass.GlassSettingsSheet;
 import com.better.heybox.liquidglass.LiquidGlassInstaller;
+import com.better.heybox.log.LogWriterStats;
 import com.better.heybox.MainModule;
 import com.better.heybox.PreferenceReceiver;
 
@@ -119,7 +120,8 @@ public final class SettingsEntryHook {
     enum Action {
         NONE, EDIT_LINK, CLEAR_DAILY, CHANNEL, EXPORT, IMPORT,
         EXPORT_LOG, CLEAR_LOG, VIEW_LOG, RUNTIME_STATUS, TARGET_STATUS, OPEN_WEB, PICK_DIR, RESET_GLASS, CHOOSE_GLASS,GLASS_SHEET,
-        POST_LEVEL, POST_KEYWORDS, COMMENT_KEYWORDS, COMMENT_FILTER_DIAG, AI_PROVIDER, AI_PROMPT, AI_TEST, AI_MAX_TOKENS,
+        TEST_CRASH,
+        POST_LEVEL, POST_KEYWORDS, POST_TAGS, COMMENT_KEYWORDS, COMMENT_FILTER_DIAG, AI_PROVIDER, AI_PROMPT, AI_TEST, AI_MAX_TOKENS,
         POST_MIN_LIKE, POST_MIN_COMMENT, POST_MIN_FAVOUR,
         REDIRECT_FORCE, REDIRECT_BLOCK, REDIRECT_TARGET, WEB_LOG, ABOUT,
         WATCH_USERS, WATCH_KEYWORDS, WATCH_IMPORT_FOLLOW, WATCH_TEST_PUSH, WATCH_CHECK,
@@ -982,6 +984,12 @@ public final class SettingsEntryHook {
                 kwCount++;
             }
         }
+        int tagCount = 0;
+        for (String s : module.getString(App.KEY_POST_TAGS, "").split("\n")) {
+            if (!s.trim().isEmpty()) {
+                tagCount++;
+            }
+        }
         String providerId = module.getString(App.KEY_AI_PROVIDER, "");
         int minLike = currentThreshold(App.KEY_POST_MIN_LIKE);
         int minComment = currentThreshold(App.KEY_POST_MIN_COMMENT);
@@ -1011,6 +1019,10 @@ public final class SettingsEntryHook {
                         kwCount > 0 ? "已配置 " + kwCount + " 个"
                                 : "命中标题或正文即屏蔽",
                         null, false, false, true, null, Action.POST_KEYWORDS),
+                new SwitchDef("标签屏蔽",
+                        tagCount > 0 ? "已配置 " + tagCount + " 个"
+                                : "命中帖子话题/标签即屏蔽",
+                        null, false, false, true, null, Action.POST_TAGS),
                 new SwitchDef("AI 标题党识别",
                         "标题会发送给 AI 服务商",
                         App.KEY_POST_AI_ENABLED, false, false),
@@ -2048,6 +2060,9 @@ public final class SettingsEntryHook {
                     case VIEW_LOG:
                         setRowClick(itemCls, item, v -> showLogPreview(activity));
                         break;
+                    case TEST_CRASH:
+                        setRowClick(itemCls, item, v -> confirmTestCrash(activity));
+                        break;
                     case OPEN_WEB:
                         setRowClick(itemCls, item, v -> showOpenWebDialog(activity));
                         break;
@@ -2077,6 +2092,9 @@ public final class SettingsEntryHook {
                         break;
                     case POST_KEYWORDS:
                         setRowClick(itemCls, item, v -> showPostKeywordsDialog(activity));
+                        break;
+                    case POST_TAGS:
+                        setRowClick(itemCls, item, v -> showPostTagsDialog(activity));
                         break;
                     case COMMENT_KEYWORDS:
                         setRowClick(itemCls, item, v -> showCommentKeywordsDialog(activity));
@@ -2659,6 +2677,11 @@ public final class SettingsEntryHook {
                 "一行一个，命中标题或正文即屏蔽；regex: 前缀为正则", false);
     }
 
+    private void showPostTagsDialog(Activity activity) {
+        showMultilineEditDialog(activity, "屏蔽标签", App.KEY_POST_TAGS,
+                "一行一个，可带 #；命中帖子话题/标签即屏蔽；regex: 前缀为正则", false);
+    }
+
     private void showCommentKeywordsDialog(Activity activity) {
         showMultilineEditDialog(activity, "评论关键词", App.KEY_COMMENT_KEYWORDS,
                 "一行一个，命中评论正文即屏蔽；regex: 前缀为正则", false);
@@ -2907,7 +2930,7 @@ public final class SettingsEntryHook {
 
     private void saveMultiline(Activity activity, String key, String raw, String title) {
         String normalized;
-        if (App.KEY_POST_KEYWORDS.equals(key)) {
+        if (App.KEY_POST_KEYWORDS.equals(key) || App.KEY_POST_TAGS.equals(key)) {
             StringBuilder sb = new StringBuilder();
             for (String line : raw.split("\n")) {
                 String k = line.trim();
@@ -3646,10 +3669,17 @@ public final class SettingsEntryHook {
     }
 
     private TextView buildLogPreviewText(Activity activity) {
+        LogWriterStats stats = LogRecorder.stats();
         String tail = LogRecorder.readTail(200);
-        TextView text = buildDialogMessage(activity, tail == null
+        String body = tail == null
                 ? "暂无日志：请先开启「记录日志」；关闭「详细日志」时只会记录错误日志"
-                : "当前日志：" + LogRecorder.sizeInfo() + "（以下为最近 200 行）\n\n" + tail);
+                : "当前日志：" + LogRecorder.sizeInfo() + "（以下为最近 200 行）\n\n" + tail;
+        String statsLine = stats == null ? null
+                : "队列 " + stats.queueSize + " / 待落盘 " + stats.pendingCount
+                + " / 已写入 " + stats.writtenCount + " / 丢弃 " + stats.droppedCount
+                + " / 写入线程 " + (stats.writerAlive ? "运行中" : "未启动");
+        TextView text = buildDialogMessage(activity,
+                statsLine == null ? body : statsLine + "\n\n" + body);
         text.setTextIsSelectable(true);
         return text;
     }
@@ -3762,6 +3792,27 @@ public final class SettingsEntryHook {
             refreshEmbeddedPanel(activity);
         } catch (Throwable t) {
             module.logd(Log.WARN, module.TAG, "清除日志失败: " + t);
+        }
+    }
+
+    private void confirmTestCrash(final Activity activity) {
+        try {
+            new AlertDialog.Builder(activity)
+                    .setTitle("触发测试崩溃")
+                    .setMessage("将在主线程抛出一个未捕获异常，宿主进程会立即崩溃退出。"
+                            + "用于验证。确定继续？")
+                    .setPositiveButton("触发崩溃", (d, w) -> {
+                        d.dismiss();
+                        Toast.makeText(activity, "3 秒后触发测试崩溃…", Toast.LENGTH_SHORT).show();
+                        activity.getWindow().getDecorView().postDelayed(() -> {
+                            throw new RuntimeException(
+                                    "BetterHeybox 测试崩溃");
+                        }, 3000L);
+                    })
+                    .setNegativeButton("取消", null)
+                    .show();
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "触发测试崩溃弹窗失败: " + t);
         }
     }
 

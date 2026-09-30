@@ -65,6 +65,7 @@ public final class GeneralHook {
                     Activity activity = (Activity) self;
                     // Debug 构建：每次应用打开到前台记录检查点（划到后台不记录）
                     ForegroundTracker.onActivityResumed(activity);
+                    com.better.heybox.SessionGuard.heartbeat();
                     View decor = activity.getWindow().getDecorView();
                     decor.postDelayed(() -> showVersionNotice(activity, cl), 600L);
                 }

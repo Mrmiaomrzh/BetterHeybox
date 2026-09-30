@@ -6,7 +6,6 @@ import java.lang.reflect.Method;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
-import com.better.heybox.App;
 import com.better.heybox.HeyboxTargets;
 import com.better.heybox.MainModule;
 
@@ -37,11 +36,12 @@ public final class PromotePostHook {
         List<Object> args = chain.getArgs();
         Object bbsLink = findBbsLink(args);
         Object viewHolder = findViewHolder(args);
+        PostFilterHook postFilter = PostFilterHook.get();
         try {
-            if (bbsLink != null && module.isEnabled(App.KEY_PROMOTE_AD, true)
+            if (bbsLink != null && postFilter != null && postFilter.promoteFilterEnabled()
                     && PromoteDetector.isPromote(bbsLink)) {
                 String reason = PromoteDetector.matchReason(bbsLink);
-                String detail = module.isEnabled(App.KEY_VERBOSE_LOG, false)
+                String detail = postFilter.verboseLogEnabled()
                         ? " | " + PromoteDetector.describe(bbsLink) : "";
                 module.logd(Log.INFO, module.TAG,
                         "\u5c4f\u853d\u5185\u5bb9[\u65e7 BBS \u5217\u8868] \u539f\u56e0=" + (reason == null ? "\u63a8\u5e7f\u5185\u5bb9" : reason)
@@ -52,7 +52,6 @@ public final class PromotePostHook {
         } catch (Throwable t) {
             module.logd(Log.WARN, module.TAG, "\u63a8\u5e7f\u5e16\u5224\u65ad\u5f02\u5e38\uff0c\u653e\u884c: " + t);
         }
-        PostFilterHook postFilter = PostFilterHook.get();
         if (postFilter != null && bbsLink != null
                 && postFilter.onRenderBind(bbsLink, viewHolder)) {
             return null;

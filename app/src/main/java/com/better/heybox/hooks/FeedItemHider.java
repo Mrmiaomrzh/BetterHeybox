@@ -3,7 +3,9 @@ package com.better.heybox.hooks;
 import android.view.View;
 import android.view.ViewGroup;
 
+import java.lang.reflect.Field;
 import java.util.WeakHashMap;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** 信息流条目隐藏与复用恢复 */
 public final class FeedItemHider {
@@ -11,12 +13,36 @@ public final class FeedItemHider {
     /** 被隐藏 itemView 的原始高度，WeakHashMap 防泄漏 */
     private static final WeakHashMap<View, Integer> HIDDEN_HEIGHTS = new WeakHashMap<>();
 
+    private static final ConcurrentHashMap<Class<?>, Object> ITEM_VIEW_FIELDS =
+            new ConcurrentHashMap<>();
+    private static final Object NO_FIELD = new Object();
+
+    private static final ConcurrentHashMap<Class<?>, Boolean> RECYCLER_VIEW_CLASSES =
+            new ConcurrentHashMap<>();
+
     private FeedItemHider() {
     }
 
     public static View getItemView(Object viewHolder) {
+        if (viewHolder == null) {
+            return null;
+        }
         try {
-            Object v = viewHolder.getClass().getField("itemView").get(viewHolder);
+            Class<?> cls = viewHolder.getClass();
+            Object cached = ITEM_VIEW_FIELDS.get(cls);
+            if (cached == null) {
+                Field found = null;
+                try {
+                    found = cls.getField("itemView");
+                } catch (Throwable ignored) {
+                }
+                Object prev = ITEM_VIEW_FIELDS.putIfAbsent(cls, found == null ? NO_FIELD : found);
+                cached = prev != null ? prev : (found == null ? NO_FIELD : found);
+            }
+            if (cached == NO_FIELD) {
+                return null;
+            }
+            Object v = ((Field) cached).get(viewHolder);
             return v instanceof View ? (View) v : null;
         } catch (Throwable t) {
             return null;
@@ -39,12 +65,20 @@ public final class FeedItemHider {
     }
 
     private static boolean isRecyclerView(android.view.ViewParent parent) {
-        for (Class<?> c = parent.getClass(); c != null; c = c.getSuperclass()) {
+        Class<?> cls = parent.getClass();
+        Boolean cached = RECYCLER_VIEW_CLASSES.get(cls);
+        if (cached != null) {
+            return cached;
+        }
+        boolean found = false;
+        for (Class<?> c = cls; c != null; c = c.getSuperclass()) {
             if ("androidx.recyclerview.widget.RecyclerView".equals(c.getName())) {
-                return true;
+                found = true;
+                break;
             }
         }
-        return false;
+        RECYCLER_VIEW_CLASSES.put(cls, found);
+        return found;
     }
 
     public static void hide(View itemView) {

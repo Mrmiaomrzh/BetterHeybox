@@ -178,6 +178,9 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     /** 发帖过滤：关键词，一行一个 */
     public static final String KEY_POST_KEYWORDS = "post_filter_keywords";
 
+    /** 发帖过滤：话题/标签，一行一个 */
+    public static final String KEY_POST_TAGS = "post_filter_tags";
+
     /** 发帖过滤：AI 标题党识别 */
     public static final String KEY_POST_AI_ENABLED = "post_filter_ai_enabled";
 
@@ -382,6 +385,10 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
         LogRecorder.setContext(this);
         Checkpoint.mark("模块进程启动 (pid=%d)", android.os.Process.myPid());
         Logs.i(TAG, "App.onCreate: pid=" + android.os.Process.myPid());
+
+        // 启动会话守护，用于检测异常退出
+        SessionGuard.onProcessStart(this);
+
         XposedServiceHelper.registerListener(this);
         Logs.i(TAG, "已注册 XposedService 监听器");
     }
@@ -419,7 +426,9 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
             SharedPreferences prefs = service.getRemotePreferences(PREFS_GROUP);
             if (prefs == null) {
                 Logs.e(TAG, "获取 RemotePreferences 失败: service 返回 null, group=" + PREFS_GROUP);
-            } else {
+            } else if (BuildFlags.DEBUG) {
+                // 这条挂在 isEnabled/getString 的慢路径上（#44）：release 下 Logs.i 是 no-op，
+                // 但实参已经拼好了。挪进 DEBUG 分支，免得每 bind 白分配一次。
                 Logs.i(TAG, "获取 RemotePreferences 成功: group=" + PREFS_GROUP);
             }
             return prefs;

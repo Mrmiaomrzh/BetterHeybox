@@ -49,6 +49,7 @@ Thumbs.db
 # 本地 release 产物与脚本
 dist/
 scripts/
+*.log
 
 # TG Notify
 !.github/scripts/

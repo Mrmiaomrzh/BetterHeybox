@@ -197,6 +197,12 @@ public class MainModule extends XposedModule {
         ClassLoader cl = param.getClassLoader();
         // crash evidence first: later install/runtime crashes still leave a trace (#37)
         CrashGuard.install();
+        // 结算上一次会话：区分「有 Java 堆栈的崩溃」与 native/ANR/LMK 类无堆栈退出
+        try {
+            SessionGuard.onProcessStart(App.resolveAppContext());
+        } catch (Throwable t) {
+            logv(TAG, "会话结算失败: " + t);
+        }
         LiquidGlassHookBridge.setModule(this);
         Checkpoint.mark(">>> 开始安装 Hook");
         long t0 = SystemClock.elapsedRealtime();
@@ -220,7 +226,7 @@ public class MainModule extends XposedModule {
         registerHook("发帖过滤", postFilter::install, cl,
                 App.KEY_PROMOTE_AD, App.KEY_BLOCK_VIDEO_POST, App.KEY_POST_NO_LEVEL,
                 App.KEY_POST_AI_ENABLED, App.KEY_FLOW_DIAGNOSE,
-                App.KEY_POST_MIN_LEVEL, App.KEY_POST_KEYWORDS,
+                App.KEY_POST_MIN_LEVEL, App.KEY_POST_KEYWORDS, App.KEY_POST_TAGS,
                 App.KEY_POST_MIN_LIKE, App.KEY_POST_MIN_COMMENT, App.KEY_POST_MIN_FAVOUR);
         registerHook("失效收藏清理", new FavourAutoCleanHook(this)::install, cl,
                 App.KEY_FAVOUR_AUTO_CLEAN);
@@ -258,6 +264,9 @@ public class MainModule extends XposedModule {
         Checkpoint.mark(">>> Hook 安装完成，总耗时 %d ms", SystemClock.elapsedRealtime() - t0);
         logd(Log.INFO, TAG, "Hook 安装流程结束（因开关关闭延迟安装 "
                 + pendingHookCount.get() + " 个）");
+        // 在所有Hook安装完成后，重新安装崩溃处理器，确保它在框架处理器之后
+        // 这样即使LSPosed等框架在我们之后设置了自己的处理器，我们也能覆盖它
+        CrashGuard.installLate();
         stashRuntimeStatus();
     }
     private interface HookInstaller {
@@ -546,6 +555,17 @@ public class MainModule extends XposedModule {
     /** Called after a panel toggle so the next log call sees the new state. */
     public void invalidateLogSwitches() {
         logSwitchAt = 0L;
+    }
+
+    /**
+     * 面板改动过滤设置后调用，让首页过滤的配置快照立刻作废。
+     * 不依赖它也能生效（快照按 {@code CFG_TTL_MS} 自然过期），只是要多等至多 1 秒。
+     */
+    public void invalidatePostFilterConfig() {
+        PostFilterHook hook = PostFilterHook.get();
+        if (hook != null) {
+            hook.invalidateConfig();
+        }
     }
 
     private boolean logSwitchEnabled() {

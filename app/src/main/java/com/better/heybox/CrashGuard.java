@@ -22,6 +22,8 @@ public final class CrashGuard {
         }
         sInstalled = true;
         try {
+            LogRecorder.setEnabled(true);
+
             final Thread.UncaughtExceptionHandler previous =
                     Thread.getDefaultUncaughtExceptionHandler();
             Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {
@@ -33,9 +35,16 @@ public final class CrashGuard {
                     previous.uncaughtException(thread, throwable);
                 }
             });
+            Logs.i(TAG, "CrashGuard installed: previous_handler=" +
+                   (previous == null ? "none" : previous.getClass().getSimpleName()));
         } catch (Throwable t) {
-            Logs.w(TAG, "崩溃取证安装失败: " + t);
+            Logs.w(TAG, "CrashGuard install failed: " + t);
         }
+    }
+
+    public static void installLate() {
+        sInstalled = false;
+        install();
     }
 
     private static void report(Thread thread, Throwable throwable) {
@@ -43,12 +52,38 @@ public final class CrashGuard {
             return;
         }
         try {
-            String head = "💥 未捕获异常（进程=" + App.currentProcessName()
+            String head = "Uncaught exception: process=" + App.currentProcessName()
                     + " pid=" + Process.myPid()
-                    + " 线程=" + (thread == null ? "?" : thread.getName()) + "）";
-            LogRecorder.record(Log.ERROR, TAG, head, throwable);
-            LogRecorder.record(Log.ERROR, TAG, "模块统计: " + ModuleStats.snapshot());
+                    + " thread=" + (thread == null ? "unknown" : thread.getName());
+            LogRecorder.recordBlocking(Log.ERROR, TAG, head, throwable);
+            LogRecorder.recordBlocking(Log.ERROR, TAG,
+                    "Module stats: " + ModuleStats.crashSnapshot());
+            LogRecorder.recordBlocking(Log.ERROR, TAG, "Memory: " + memorySnapshot());
+            SessionGuard.noteJavaCrash();
         } catch (Throwable ignored) {
         }
+    }
+
+    public static String memorySnapshot() {
+        StringBuilder sb = new StringBuilder(160);
+        try {
+            Runtime rt = Runtime.getRuntime();
+            long max = rt.maxMemory();
+            long total = rt.totalMemory();
+            long free = rt.freeMemory();
+            sb.append("heapUsed=").append((total - free) / 1024L / 1024L).append("MB")
+                    .append(" heapTotal=").append(total / 1024L / 1024L).append("MB")
+                    .append(" heapMax=").append(max / 1024L / 1024L).append("MB");
+        } catch (Throwable ignored) {
+        }
+        try {
+            android.os.Debug.MemoryInfo mi = new android.os.Debug.MemoryInfo();
+            android.os.Debug.getMemoryInfo(mi);
+            sb.append(" pss=").append(mi.getTotalPss() / 1024L).append("MB")
+                    .append(" javaHeap=").append(mi.dalvikPss / 1024L).append("MB")
+                    .append(" nativeHeap=").append(mi.nativePss / 1024L).append("MB");
+        } catch (Throwable ignored) {
+        }
+        return sb.toString();
     }
 }

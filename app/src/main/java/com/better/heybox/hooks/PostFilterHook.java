@@ -29,12 +29,6 @@ public final class PostFilterHook {
     /** itemView → 当前绑定帖子的缓存键（AI 判定返回时校验该 view 是否仍显示同一帖子） */
     private final WeakHashMap<View, String> boundPostKeys = new WeakHashMap<>();
 
-    /** 关键词编译缓存：原始串未变则不重解析（bind 高频调用） */
-    private final Object keywordLock = new Object();
-
-    private String keywordRaw;
-    private List<Object> keywordMatchers;
-
     /** AI 判定返回（主线程）：命中且 view 仍绑定同一帖子时回补隐藏 */
     private final AIClickbaitChecker.VerdictCallback aiCallback;
 
@@ -96,6 +90,162 @@ public final class PostFilterHook {
         hookBbsLinkListGetter(cl);
         hookFeedsModelDeserializer(cl);
         hookRecommendFlowController(cl);
+    }
+
+
+    private static final long CFG_TTL_MS = 1_000L;
+
+    private static final class FilterConfig {
+        boolean promoteAd;
+        boolean blockVideo;
+        boolean noLevel;
+        boolean aiEnabled;
+        boolean verbose;
+        boolean flowDiagnose;
+        boolean singleColumn;
+        int minLevel;
+        String aiBaseUrl;
+        String aiModel;
+        List<Object> keywords;
+        List<Object> tags;
+        boolean anyRule;
+    }
+
+    private static final class CfgHolder {
+        final FilterConfig cfg;
+        final long at;
+
+        CfgHolder(FilterConfig cfg, long at) {
+            this.cfg = cfg;
+            this.at = at;
+        }
+    }
+
+    private final Object cfgLock = new Object();
+    private volatile CfgHolder sCfg;
+
+    private FilterConfig cfg() {
+        CfgHolder h = sCfg;
+        if (h != null && android.os.SystemClock.uptimeMillis() - h.at < CFG_TTL_MS) {
+            return h.cfg;
+        }
+        return rebuildCfg();
+    }
+
+    private volatile String keywordRaw;
+    private volatile List<Object> keywordCache;
+    private volatile String tagRaw;
+    private volatile List<Object> tagCache;
+
+    private FilterConfig rebuildCfg() {
+        long now = android.os.SystemClock.uptimeMillis();
+        CfgHolder h = sCfg;
+        if (h != null && now - h.at < CFG_TTL_MS) {
+            return h.cfg;
+        }
+        FilterConfig next;
+        List<String> badRegex;
+        synchronized (cfgLock) {
+            now = android.os.SystemClock.uptimeMillis();
+            h = sCfg;
+            if (h != null && now - h.at < CFG_TTL_MS) {
+                return h.cfg;
+            }
+            next = new FilterConfig();
+            next.promoteAd = module.isEnabled(App.KEY_PROMOTE_AD, true);
+            next.blockVideo = module.isEnabled(App.KEY_BLOCK_VIDEO_POST, false);
+            next.noLevel = module.isEnabled(App.KEY_POST_NO_LEVEL, false);
+            next.aiEnabled = module.isEnabled(App.KEY_POST_AI_ENABLED, false);
+            next.verbose = module.isEnabled(App.KEY_VERBOSE_LOG, false);
+            next.flowDiagnose = module.isEnabled(App.KEY_FLOW_DIAGNOSE, false);
+            next.singleColumn = module.isEnabled(App.KEY_SINGLE_COLUMN_FEED, false);
+            next.minLevel = parseIntSafe(module.getString(App.KEY_POST_MIN_LEVEL, "0"));
+            next.aiBaseUrl = module.getString(App.KEY_AI_BASE_URL, "").trim();
+            next.aiModel = module.getString(App.KEY_AI_MODEL, "").trim();
+            badRegex = new ArrayList<>(2);
+            next.keywords = compileKeywords(
+                    module.getString(App.KEY_POST_KEYWORDS, ""), badRegex);
+            next.tags = compileTags(module.getString(App.KEY_POST_TAGS, ""), badRegex);
+            String thr = module.getString(App.KEY_POST_MIN_LIKE, "0") + "|"
+                    + module.getString(App.KEY_POST_MIN_COMMENT, "0") + "|"
+                    + module.getString(App.KEY_POST_MIN_FAVOUR, "0");
+            if (!thr.equals(thresholdsRaw)) {
+                String[] parts = thr.split("\\|", -1);
+                minLike = parseIntSafe(parts.length > 0 ? parts[0] : "0");
+                minComment = parseIntSafe(parts.length > 1 ? parts[1] : "0");
+                minFavour = parseIntSafe(parts.length > 2 ? parts[2] : "0");
+                thresholdsRaw = thr;
+            }
+            next.anyRule = next.promoteAd || next.blockVideo || next.noLevel
+                    || next.minLevel > 0 || hasEngagementRule()
+                    || !next.keywords.isEmpty() || !next.tags.isEmpty();
+            sCfg = new CfgHolder(next, android.os.SystemClock.uptimeMillis());
+            com.better.heybox.ModuleStats.feedConfigRebuilds.incrementAndGet();
+        }
+        for (String bad : badRegex) {
+            module.logd(Log.WARN, module.TAG, "无效正则已忽略: " + bad);
+        }
+        return next;
+    }
+
+    public void invalidateConfig() {
+        synchronized (cfgLock) {
+            sCfg = null;
+        }
+    }
+
+    private List<Object> compileKeywords(String raw, List<String> badRegex) {
+        List<Object> cached = keywordCache;
+        if (cached != null && raw != null && raw.equals(keywordRaw)) {
+            return cached;
+        }
+        List<Object> list = compileLines(raw, badRegex, false);
+        keywordRaw = raw;
+        keywordCache = list;
+        return list;
+    }
+
+    private List<Object> compileTags(String raw, List<String> badRegex) {
+        List<Object> cached = tagCache;
+        if (cached != null && raw != null && raw.equals(tagRaw)) {
+            return cached;
+        }
+        List<Object> list = compileLines(raw, badRegex, true);
+        tagRaw = raw;
+        tagCache = list;
+        return list;
+    }
+
+    private static List<Object> compileLines(String raw, List<String> badRegex, boolean stripHash) {
+        List<Object> list = new ArrayList<>();
+        if (raw != null && !raw.isEmpty()) {
+            for (String line : raw.split("\n")) {
+                String kw = line.trim();
+                if (stripHash && !kw.startsWith("regex:")) {
+                    while (kw.startsWith("#") || kw.startsWith("＃")) {
+                        kw = kw.substring(1);
+                    }
+                    while (kw.endsWith("#") || kw.endsWith("＃")) {
+                        kw = kw.substring(0, kw.length() - 1);
+                    }
+                    kw = kw.trim();
+                }
+                if (kw.isEmpty()) {
+                    continue;
+                }
+                if (kw.startsWith("regex:")) {
+                    try {
+                        list.add(Pattern.compile(kw.substring(6).trim(), Pattern.CASE_INSENSITIVE));
+                        continue;
+                    } catch (Throwable t) {
+                        badRegex.add(kw);
+                        continue;
+                    }
+                }
+                list.add(kw.toLowerCase());
+            }
+        }
+        return list;
     }
 
     // ---------- BBS post lists ----------
@@ -161,9 +311,11 @@ public final class PostFilterHook {
 
     /** Drops blocked entries. */
     private List<?> filterBbsLinks(List<?> raw) {
+        long t0 = android.os.SystemClock.uptimeMillis();
         List<Object> keep = new ArrayList<>(raw.size());
         int blocked = 0;
         com.better.heybox.ModuleStats.bbsListItemsSeen.addAndGet(raw.size());
+        com.better.heybox.ModuleStats.feedFlowListItems.addAndGet(raw.size());
         for (Object item : raw) {
             if (!isPostLike(item)) {
                 keep.add(item);
@@ -178,7 +330,9 @@ public final class PostFilterHook {
             com.better.heybox.ModuleStats.bbsListItemsDropped.incrementAndGet();
             logBlocked("社区列表(数据层)", item, reason);
         }
-        if (module.isEnabled(App.KEY_VERBOSE_LOG, false)) {
+        com.better.heybox.ModuleStats.slow("社区列表数据层过滤",
+                android.os.SystemClock.uptimeMillis() - t0);
+        if (cfg().verbose) {
             module.logd(Log.INFO, module.TAG, "[#41] 社区列表 数据层 页内条目=" + raw.size()
                     + " 删除=" + blocked + " 可见=" + (raw.size() - blocked));
         }
@@ -240,14 +394,7 @@ public final class PostFilterHook {
 
     /** True when at least one filter is on. */
     private boolean hasSyncRule() {
-        if (module.isEnabled(App.KEY_PROMOTE_AD, true)
-                || module.isEnabled(App.KEY_BLOCK_VIDEO_POST, false)
-                || module.isEnabled(App.KEY_POST_NO_LEVEL, false)) {
-            return true;
-        }
-        return parseIntSafe(module.getString(App.KEY_POST_MIN_LEVEL, "0")) > 0
-                || hasEngagementRule()
-                || !keywordMatchers().isEmpty();
+        return cfg().anyRule;
     }
 
     private void hookRecommendFlowController(ClassLoader cl) {
@@ -295,6 +442,8 @@ public final class PostFilterHook {
             clearBlockedIndex();
             return null;
         }
+        long t0 = android.os.SystemClock.uptimeMillis();
+        com.better.heybox.ModuleStats.feedFlowListItems.addAndGet(((List<?>) listObj).size());
         for (Object item : (List<?>) listObj) {
             if (item == null) {
                 continue;
@@ -303,13 +452,17 @@ public final class PostFilterHook {
                 String reason = blockReason(item, true);
                 if (reason != null) {
                     logBlocked("首页流列表", item, reason);
-                    probe("登记", "reason=" + reason + " 键=" + cut(PromoteDetector.title(item)));
+                    if (probeActive()) {
+                        probe("登记", "reason=" + reason + " 键=" + cut(PromoteDetector.title(item)));
+                    }
                     markBlocked(item);
                 }
             } catch (Throwable t) {
                 module.logd(Log.WARN, module.TAG, "首页流列表判定异常，忽略该条: " + t);
             }
         }
+        com.better.heybox.ModuleStats.slow("首页流列表过滤",
+                android.os.SystemClock.uptimeMillis() - t0);
         return null;
     }
 
@@ -391,7 +544,7 @@ public final class PostFilterHook {
 
     private void probe(String where, String detail) {
         try {
-            if (probeCount.get() >= PROBE_LIMIT || !module.isEnabled(App.KEY_VERBOSE_LOG, false)) {
+            if (!probeActive()) {
                 return;
             }
             int n = probeCount.incrementAndGet();
@@ -401,6 +554,10 @@ public final class PostFilterHook {
             }
         } catch (Throwable ignored) {
         }
+    }
+
+    private boolean probeActive() {
+        return probeCount.get() < PROBE_LIMIT && cfg().verbose;
     }
 
     private String cut(String s) {
@@ -468,14 +625,18 @@ public final class PostFilterHook {
             if (result == null) {
                 return result;
             }
-            if (module.isEnabled(App.KEY_FLOW_DIAGNOSE, false)) {
+            if (cfg().flowDiagnose) {
                 module.logd(Log.INFO, module.TAG, "首页流条目 " + PromoteDetector.describe(result));
             }
             if (!hasSyncRule()) {
                 clearBlockedIndex();
                 return result;
             }
+            long t0 = android.os.SystemClock.uptimeMillis();
+            com.better.heybox.ModuleStats.feedBinds.incrementAndGet();
             String reason = blockReason(result, true);
+            com.better.heybox.ModuleStats.slow("首页流判定",
+                    android.os.SystemClock.uptimeMillis() - t0);
             if (reason != null) {
                 logBlocked("首页流", result, reason);
                 markBlocked(result);
@@ -486,7 +647,7 @@ public final class PostFilterHook {
             }
             Object link = safeInvoke(result, "getLinkContent");
             String title = link == null ? "" : safeGet(link, "getTitle");
-            if (module.isEnabled(App.KEY_POST_AI_ENABLED, false) && !title.isEmpty()) {
+            if (cfg().aiEnabled && !title.isEmpty()) {
                 Boolean verdict = AIClickbaitChecker.getCached(title);
                 if (verdict != null && verdict) {
                     module.logd(Log.INFO, module.TAG, "AI 判定标题党（缓存）: " + abbreviate(title));
@@ -532,9 +693,8 @@ public final class PostFilterHook {
 
     // ---------- 视频帖过滤 ----------
 
-    /** 视频帖开关开启时判定条目是否为视频帖 */
     private boolean videoBlocked(Object item) {
-        if (item == null || !module.isEnabled(App.KEY_BLOCK_VIDEO_POST, false)) {
+        if (item == null || !cfg().blockVideo) {
             return false;
         }
         return isPostFlowModel(item) ? isVideoModel(item) : isVideoLegacy(item);
@@ -657,11 +817,17 @@ public final class PostFilterHook {
             if (model == null) {
                 return result;
             }
+            long t0 = android.os.SystemClock.uptimeMillis();
+            com.better.heybox.ModuleStats.feedBinds.incrementAndGet();
             Object link = safeInvoke(model, "getLinkContent");
             String title = link == null ? "" : safeGet(link, "getTitle");
             String reason = blockReason(model, false);
-            probe("瀑布卡", "model=" + model.getClass().getSimpleName() + " 判定=" + reason
-                    + " 索引=" + blockedTitles.size() + " title=" + cut(title));
+            if (probeActive()) {
+                probe("瀑布卡", "model=" + model.getClass().getSimpleName() + " 判定=" + reason
+                        + " 索引=" + blockedTitles.size() + " title=" + cut(title));
+            }
+            com.better.heybox.ModuleStats.slow("首页卡片判定",
+                    android.os.SystemClock.uptimeMillis() - t0);
             if (reason != null) {
                 logBlocked("首页卡片", model, reason);
                 markBlocked(model);
@@ -673,7 +839,7 @@ public final class PostFilterHook {
                 FeedItemHider.hide(cardView);
                 return result;
             }
-            if (!module.isEnabled(App.KEY_POST_AI_ENABLED, false) || title.isEmpty()) {
+            if (!cfg().aiEnabled || title.isEmpty()) {
                 return result;
             }
             Boolean verdict = AIClickbaitChecker.getCached(title);
@@ -693,6 +859,8 @@ public final class PostFilterHook {
     }
 
     private Class<?> pairCardInterface;
+
+    private static final String PAIR_EMPTY_NAME = "WaterfallPairEmptyItemView";
 
     private void hookWaterfallRowContainer(ClassLoader cl) {
         try {
@@ -724,10 +892,19 @@ public final class PostFilterHook {
         if (!(obj instanceof android.view.ViewGroup)) {
             return;
         }
-        if (module.isEnabled(App.KEY_SINGLE_COLUMN_FEED, false)) {
+        if (cfg().singleColumn) {
             return;
         }
-        android.view.ViewGroup row = (android.view.ViewGroup) obj;
+        long t0 = android.os.SystemClock.uptimeMillis();
+        try {
+            fixWaterfallRowInternal((android.view.ViewGroup) obj);
+        } finally {
+            com.better.heybox.ModuleStats.slow("首页成对行排版",
+                    android.os.SystemClock.uptimeMillis() - t0);
+        }
+    }
+
+    private void fixWaterfallRowInternal(android.view.ViewGroup row) {
         int childCount = row.getChildCount();
         if (childCount == 0) {
             return;
@@ -764,7 +941,9 @@ public final class PostFilterHook {
             return;
         }
         FeedItemHider.restore(rowItem);
-        if (row instanceof android.widget.LinearLayout) {
+        if (row instanceof android.widget.LinearLayout
+                && ((android.widget.LinearLayout) row).getOrientation()
+                != android.widget.LinearLayout.VERTICAL) {
             ((android.widget.LinearLayout) row).setOrientation(
                     android.widget.LinearLayout.VERTICAL);
         }
@@ -777,7 +956,7 @@ public final class PostFilterHook {
     }
 
     private boolean isPairCard(View child) {
-        if (child.getClass().getName().endsWith("WaterfallPairEmptyItemView")) {
+        if (child.getClass().getName().endsWith(PAIR_EMPTY_NAME)) {
             return false;
         }
         return pairCardInterface == null || pairCardInterface.isInstance(child);
@@ -831,9 +1010,11 @@ public final class PostFilterHook {
         try {
             Object raw = chain.getArg(0);
             String title = raw instanceof String ? (String) raw : null;
-            probe("全宽卡", "view=" + (itemView == null ? "null" : itemView.getClass().getSimpleName())
-                    + " 索引=" + blockedTitles.size() + " 命中=" + isBlockedTitle(title)
-                    + " title=" + cut(title));
+            if (probeActive()) {
+                probe("全宽卡", "view=" + (itemView == null ? "null" : itemView.getClass().getSimpleName())
+                        + " 索引=" + blockedTitles.size() + " 命中=" + isBlockedTitle(title)
+                        + " title=" + cut(title));
+            }
             if (itemView == null || title == null || title.trim().length() < 4) {
                 return result;
             }
@@ -843,8 +1024,7 @@ public final class PostFilterHook {
                 FeedItemHider.hide(itemView);
                 return result;
             }
-            if (module.isEnabled(App.KEY_POST_AI_ENABLED, false)
-                    && AIClickbaitChecker.getCached(title) == null) {
+            if (cfg().aiEnabled && AIClickbaitChecker.getCached(title) == null) {
                 boundPostKeys.put(itemView, title);
                 AIClickbaitChecker.requestVerdicts(module, title, title, aiCallback);
             }
@@ -905,10 +1085,16 @@ public final class PostFilterHook {
             if (itemView == null || model == null) {
                 return result;
             }
+            long t0 = android.os.SystemClock.uptimeMillis();
+            com.better.heybox.ModuleStats.feedBinds.incrementAndGet();
             String reason = blockReason(model, true);
-            probe("配置卡", "model=" + model.getClass().getSimpleName() + " 判定=" + reason
-                    + " 行=" + itemView.getClass().getSimpleName()
-                    + " title=" + cut(PromoteDetector.title(model)));
+            if (probeActive()) {
+                probe("配置卡", "model=" + model.getClass().getSimpleName() + " 判定=" + reason
+                        + " 行=" + itemView.getClass().getSimpleName()
+                        + " title=" + cut(PromoteDetector.title(model)));
+            }
+            com.better.heybox.ModuleStats.slow("首页配置卡判定",
+                    android.os.SystemClock.uptimeMillis() - t0);
             if (reason != null) {
                 logBlocked("首页配置卡", model, reason);
                 markBlocked(model);
@@ -960,7 +1146,11 @@ public final class PostFilterHook {
     }
 
     private boolean applySyncFilters(Object item, String where) {
+        long t0 = android.os.SystemClock.uptimeMillis();
+        com.better.heybox.ModuleStats.feedBinds.incrementAndGet();
         String reason = blockReason(item, false);
+        com.better.heybox.ModuleStats.slow("列表绑定判定",
+                android.os.SystemClock.uptimeMillis() - t0);
         if (reason == null) {
             return false;
         }
@@ -969,11 +1159,12 @@ public final class PostFilterHook {
     }
 
     private void aiCheck(Object bbsLink, String cacheKey, View boundView) {
-        if (!module.isEnabled(App.KEY_POST_AI_ENABLED, false) || cacheKey == null) {
+        FilterConfig c = cfg();
+        if (!c.aiEnabled || cacheKey == null) {
             return;
         }
-        String baseUrl = module.getString(App.KEY_AI_BASE_URL, "").trim();
-        String model = module.getString(App.KEY_AI_MODEL, "").trim();
+        String baseUrl = c.aiBaseUrl;
+        String model = c.aiModel;
         if (baseUrl.isEmpty() || model.isEmpty()) {
             return;
         }
@@ -1003,13 +1194,13 @@ public final class PostFilterHook {
     }
 
     private boolean levelBlocked(Object item) {
-        int min = parseIntSafe(module.getString(App.KEY_POST_MIN_LEVEL, "0"));
+        int min = cfg().minLevel;
         if (min <= 0) {
             return false;
         }
         Integer level = readUserLevel(item);
         if (level == null) {
-            if (!module.isEnabled(App.KEY_POST_NO_LEVEL, false)) {
+            if (!cfg().noLevel) {
                 return false;
             }
             if (isPostFlowModel(item)) {
@@ -1106,17 +1297,23 @@ public final class PostFilterHook {
         return null;
     }
 
-    private boolean promoteBlocked(Object item) {
-        return module.isEnabled(App.KEY_PROMOTE_AD, true) && PromoteDetector.isPromote(item);
+    public boolean promoteFilterEnabled() {
+        return cfg().promoteAd;
+    }
+
+    public boolean verboseLogEnabled() {
+        return cfg().verbose;
     }
 
     private String blockReason(Object item, boolean postOnly) {
         if (item == null) {
             return null;
         }
-        if (promoteBlocked(item)) {
-            String reason = PromoteDetector.matchReason(item);
-            return reason == null ? "\u63a8\u5e7f\u5185\u5bb9" : reason;
+        if (cfg().promoteAd) {
+            String promote = PromoteDetector.matchReason(item);
+            if (promote != null) {
+                return promote;
+            }
         }
         if (postOnly && !isPostFlowModel(item)) {
             return null;
@@ -1132,11 +1329,108 @@ public final class PostFilterHook {
             return engagement;
         }
         String keyword = keywordHit(item);
-        return keyword == null ? null : "\u547d\u4e2d\u5173\u952e\u8bcd " + keyword;
+        if (keyword != null) {
+            return "\u547d\u4e2d\u5173\u952e\u8bcd " + keyword;
+        }
+        String tag = tagHit(item);
+        return tag == null ? null : "\u547d\u4e2d\u6807\u7b7e " + tag;
+    }
+
+
+    private static final String[] TAG_GETTERS = {
+            "getHashtags", "getAct_hashtags", "getContent_tags", "getTopics", "getTopic",
+            "getTopic_name", "getPost_tag", "getRecTags", "getLink_tag", "getSpecial_tag",
+    };
+    private static final String[] TAG_NAME_GETTERS = {
+            "getName", "getDisplay_name", "getTitle", "getTag",
+    };
+
+    private String tagHit(Object item) {
+        List<Object> matchers = cfg().tags;
+        if (item == null || matchers == null || matchers.isEmpty()) {
+            return null;
+        }
+        List<String> names = new ArrayList<>();
+        collectTags(item, names);
+        Object link = safeInvoke(item, "getLinkContent");
+        if (link != null) {
+            collectTags(link, names);
+        }
+        if (!names.isEmpty()) {
+            String hit = matchAny(matchers, names.toArray(new String[0]));
+            if (hit != null) {
+                return hit;
+            }
+        }
+        String text = joinNonNull(safeTitle(item), safeText(item), safeGet(item, "getDescription"),
+                link == null ? null : safeGet(link, "getTitle"),
+                link == null ? null : safeGet(link, "getDescription"));
+        if (text.indexOf('#') < 0 && text.indexOf('\uff03') < 0) {
+            return null;
+        }
+        String lower = text.toLowerCase().replace('\uff03', '#');
+        for (Object m : matchers) {
+            if (m instanceof String && lower.contains("#" + m)) {
+                return (String) m;
+            }
+        }
+        return null;
+    }
+
+    private void collectTags(Object owner, List<String> out) {
+        for (String getter : TAG_GETTERS) {
+            Object value = safeInvoke(owner, getter);
+            if (value == null) {
+                continue;
+            }
+            if (value instanceof Iterable) {
+                int n = 0;
+                for (Object element : (Iterable<?>) value) {
+                    addTagName(element, out);
+                    if (++n >= 32) {
+                        break;
+                    }
+                }
+            } else {
+                addTagName(value, out);
+            }
+        }
+    }
+
+    private void addTagName(Object element, List<String> out) {
+        if (element == null) {
+            return;
+        }
+        if (element instanceof CharSequence) {
+            String s = element.toString().trim();
+            if (!s.isEmpty()) {
+                out.add(s);
+            }
+            return;
+        }
+        if (element instanceof Number || element instanceof Boolean) {
+            return;
+        }
+        for (String getter : TAG_NAME_GETTERS) {
+            Object name = safeInvoke(element, getter);
+            if (name instanceof CharSequence && name.toString().trim().length() > 0) {
+                out.add(name.toString().trim());
+            }
+        }
+    }
+
+    private static String joinNonNull(String... parts) {
+        StringBuilder sb = new StringBuilder();
+        for (String p : parts) {
+            if (p != null && !p.isEmpty()) {
+                sb.append(p).append('\n');
+            }
+        }
+        return sb.toString();
     }
 
     private void logBlocked(String where, Object item, String reason) {
-        String detail = module.isEnabled(App.KEY_VERBOSE_LOG, false)
+        String detail = cfg().verbose
                 ? " | " + describeItem(item) : "";
         module.logd(Log.INFO, module.TAG,
                 "\u5c4f\u853d\u5185\u5bb9[" + where + "] \u539f\u56e0=" + reason + detail);
@@ -1186,7 +1480,7 @@ public final class PostFilterHook {
     }
 
     private String levelReason(Object item) {
-        int min = parseIntSafe(module.getString(App.KEY_POST_MIN_LEVEL, "0"));
+        int min = cfg().minLevel;
         Integer level = readUserLevel(item);
         if (level == null) {
             return "\u65e0\u7b49\u7ea7\u6570\u636e < \u9608\u503c Lv" + min;
@@ -1199,22 +1493,7 @@ public final class PostFilterHook {
     private volatile int minComment;
     private volatile int minFavour;
 
-    private void refreshThresholds() {
-        String raw = module.getString(App.KEY_POST_MIN_LIKE, "0") + "|"
-                + module.getString(App.KEY_POST_MIN_COMMENT, "0") + "|"
-                + module.getString(App.KEY_POST_MIN_FAVOUR, "0");
-        if (raw.equals(thresholdsRaw)) {
-            return;
-        }
-        String[] parts = raw.split("\\|", -1);
-        minLike = parseIntSafe(parts.length > 0 ? parts[0] : "0");
-        minComment = parseIntSafe(parts.length > 1 ? parts[1] : "0");
-        minFavour = parseIntSafe(parts.length > 2 ? parts[2] : "0");
-        thresholdsRaw = raw;
-    }
-
     private boolean hasEngagementRule() {
-        refreshThresholds();
         return minLike > 0 || minComment > 0 || minFavour > 0;
     }
 
@@ -1246,36 +1525,8 @@ public final class PostFilterHook {
         return null;
     }
 
-    /** 条目为小写子串或预编译正则 */
     private List<Object> keywordMatchers() {
-        String raw = module.getString(App.KEY_POST_KEYWORDS, "");
-        synchronized (keywordLock) {
-            if (keywordMatchers != null && raw.equals(keywordRaw)) {
-                return keywordMatchers;
-            }
-        }
-        List<Object> list = new ArrayList<>();
-        for (String line : raw.split("\n")) {
-            String kw = line.trim();
-            if (kw.isEmpty()) {
-                continue;
-            }
-            if (kw.startsWith("regex:")) {
-                try {
-                    list.add(Pattern.compile(kw.substring(6).trim(), Pattern.CASE_INSENSITIVE));
-                    continue;
-                } catch (Throwable t) {
-                    module.logd(Log.WARN, module.TAG, "无效正则已忽略: " + kw);
-                    continue;
-                }
-            }
-            list.add(kw.toLowerCase());
-        }
-        synchronized (keywordLock) {
-            keywordRaw = raw;
-            keywordMatchers = list;
-        }
-        return list;
+        return cfg().keywords;
     }
 
     // ---------- 通用工具 ----------

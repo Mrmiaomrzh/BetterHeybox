@@ -38,8 +38,9 @@ public final class PromoteDetector {
     private static final Set<String> FALLBACK_CONTENT_TYPES = Collections.unmodifiableSet(
             new HashSet<>(Arrays.asList("23", "26", "27", "28", "29")));
 
-    private static final ConcurrentHashMap<String, Method> GETTERS = new ConcurrentHashMap<>();
-    private static final Set<String> GETTER_MISS = ConcurrentHashMap.newKeySet();
+    private static final ConcurrentHashMap<Class<?>, ConcurrentHashMap<String, Object>> GETTERS =
+            new ConcurrentHashMap<>();
+    private static final Object NO_METHOD = new Object();
 
     private static volatile Set<String> sContentTypes;
     private static volatile String sContentTypeSource = "\u5185\u7f6e\u8868";
@@ -342,13 +343,15 @@ public final class PromoteDetector {
     }
 
     private static Method findGetter(Class<?> cls, String name) {
-        String key = cls.getName() + "#" + name;
-        Method hit = GETTERS.get(key);
-        if (hit != null) {
-            return hit;
+        ConcurrentHashMap<String, Object> byName = GETTERS.get(cls);
+        if (byName == null) {
+            ConcurrentHashMap<String, Object> created = new ConcurrentHashMap<>();
+            ConcurrentHashMap<String, Object> prev = GETTERS.putIfAbsent(cls, created);
+            byName = prev == null ? created : prev;
         }
-        if (GETTER_MISS.contains(key)) {
-            return null;
+        Object cached = byName.get(name);
+        if (cached != null) {
+            return cached == NO_METHOD ? null : (Method) cached;
         }
         Class<?> walk = cls;
         while (walk != null && walk != Object.class) {
@@ -356,14 +359,14 @@ public final class PromoteDetector {
                 Method method = walk.getDeclaredMethod(name);
                 if (method.getParameterCount() == 0) {
                     method.setAccessible(true);
-                    GETTERS.put(key, method);
+                    byName.put(name, method);
                     return method;
                 }
             } catch (Throwable ignored) {
             }
             walk = walk.getSuperclass();
         }
-        GETTER_MISS.add(key);
+        byName.put(name, NO_METHOD);
         return null;
     }
 }

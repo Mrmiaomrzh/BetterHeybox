@@ -38,6 +38,7 @@ public final class ConfigBackup {
             App.KEY_POST_MIN_COMMENT,
             App.KEY_POST_MIN_FAVOUR,
             App.KEY_POST_KEYWORDS,
+            App.KEY_POST_TAGS,
             App.KEY_COMMENT_KEYWORDS,
             App.KEY_GAME_LIB_HIDE_TYPES,
             App.KEY_GAME_LIB_HIDE_ENTRIES,

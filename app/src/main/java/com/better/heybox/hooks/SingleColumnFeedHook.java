@@ -47,8 +47,20 @@ public final class SingleColumnFeedHook {
         installEpoxyPairHook(cl);
     }
 
+    private static final long SWITCH_TTL_MS = 1_000L;
+
+    private volatile boolean sEnabled;
+    private volatile long sEnabledAt;
+
     private boolean enabled() {
-        return module.isEnabled(App.KEY_SINGLE_COLUMN_FEED, false);
+        long now = android.os.SystemClock.uptimeMillis();
+        if (now - sEnabledAt < SWITCH_TTL_MS) {
+            return sEnabled;
+        }
+        boolean value = module.isEnabled(App.KEY_SINGLE_COLUMN_FEED, false);
+        sEnabled = value;
+        sEnabledAt = now;
+        return value;
     }
 
     private void installLegacyWaterfallHook(ClassLoader cl) {
