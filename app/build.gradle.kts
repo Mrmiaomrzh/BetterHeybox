@@ -52,6 +52,12 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    testOptions {
+        unitTests {
+            isReturnDefaultValues = true
+        }
+    }
+
     packaging {
         jniLibs {
             excludes += "lib/x86/**"
@@ -68,4 +74,7 @@ dependencies {
     implementation(libs.libxposed.service)
     implementation(libs.dexkit)
     implementation("com.github.QWEA0:liquidglass:90f4ea28e3")
+
+    testImplementation(libs.junit)
+    testImplementation(libs.mockito.core)
 }
