@@ -128,7 +128,9 @@ public final class SettingsEntryHook {
         WATCH_DEBUG_PUSH3,WATCH_V2,OPEN_PAGE,
         WATCH_TOPICS, WATCH_IMPORT_TOPICS, WATCH_WINDOW, WATCH_INTERVAL, WATCH_SUGGEST_KEYWORDS,
         WATCH_TOPIC_SEARCH,GAME_LIB_TYPES, GAME_LIB_ENTRIES,GAME_LIB_SECTIONS,GAME_LIB_DIAG,
-        MESSAGE_BADGE_ENTRIES, MESSAGE_FULL_HIDE_ENTRIES, MESSAGE_BADGE_DIAG
+        MESSAGE_BADGE_ENTRIES, MESSAGE_FULL_HIDE_ENTRIES, MESSAGE_BADGE_DIAG,
+        POST_DETAIL_HIDE_IDS, POST_DETAIL_DIAG, FAKE_USAGE_DIAG,
+        MY_TASK_RUN, MY_TASK_REFRESH, MY_TASK_VIEW, MY_TASK_CLEAR
     }
 
     static class SwitchDef {
@@ -218,6 +220,30 @@ public final class SettingsEntryHook {
                     new SwitchDef("游戏评价链接", "任务三：分享游戏评价", null, false, false, true, App.KEY_DAILY_TASK_CHANNEL),
                     new SwitchDef("分享渠道", null, App.KEY_SHARE_CHANNEL, false, false, true, null, Action.CHANNEL),
                     new SwitchDef("清除今日打卡", null, null, false, false, true, null, Action.CLEAR_DAILY),
+            }),
+            new SettingsGroup("我的任务（限时任务）", new SwitchDef[]{
+                    new SwitchDef("自动完成我的任务", "每天自动处理一条发帖类限时任务",
+                            App.KEY_MY_TASK_ENABLED, false, false),
+                    new SwitchDef("全自动发帖", "关闭则用户按「发布」",
+                            App.KEY_MY_TASK_AUTO_POST, false, false),
+                    new SwitchDef("只做限时任务", "只处理带倒计时的任务", App.KEY_MY_TASK_URGENT_ONLY, true, false),
+                    new SwitchDef("完成后删帖", "任务进度确认推进后删掉刚发的帖子",
+                            App.KEY_MY_TASK_DELETE_AFTER, true, false),
+                    new SwitchDef("自动领奖", "任务变成可领取时打开领奖入口", App.KEY_MY_TASK_CLAIM, true, false),
+                    new SwitchDef("发帖内容", "默认「扣1」，可改成自己的内容",
+                            null, false, false, true, App.KEY_MY_TASK_TEXT),
+                    new SwitchDef("匹配关键词", "标题/描述命中任一关键词",
+                            null, false, false, true, App.KEY_MY_TASK_KEYWORDS),
+                    new SwitchDef("每天最多", "每天最多自动发几条",
+                            null, false, false, true, App.KEY_MY_TASK_MAX_PER_DAY),
+                    new SwitchDef("立即执行", "不等自动时机，立刻检查一次",
+                            null, false, false, true, null, Action.MY_TASK_RUN),
+                    new SwitchDef("刷新任务状态", "重新读取「我的任务」列表",
+                            null, false, false, true, null, Action.MY_TASK_REFRESH),
+                    new SwitchDef("查看任务状态", "查看读取任务",
+                            null, false, false, true, null, Action.MY_TASK_VIEW),
+                    new SwitchDef("清除今日记录", "允许今天再自动做一次",
+                            null, false, false, true, null, Action.MY_TASK_CLEAR),
             }),
             new SettingsGroup("通用", new SwitchDef[]{
                     new SwitchDef("伪装通知权限", "伪装通知已开启，获得签到加成", App.KEY_FAKE_NOTIFICATION, false, false),
@@ -420,6 +446,7 @@ public final class SettingsEntryHook {
         }
         if (PAGE_TASK.equals(pageId)) {
             addBase(groups, "每日任务");
+            addBase(groups, "我的任务（限时任务）");
             return groups;
         }
         addBase(groups, TITLE_GENERAL);
@@ -2221,6 +2248,30 @@ public final class SettingsEntryHook {
                             Toast.makeText(activity, "已触发检查，结果见日志", Toast.LENGTH_SHORT).show();
                         });
                         break;
+                    case MY_TASK_RUN:
+                        setRowClick(itemCls, item, v -> {
+                            module.startMyTaskNow(activity);
+                            Toast.makeText(activity, "已触发检查，进度见模块日志",
+                                    Toast.LENGTH_SHORT).show();
+                        });
+                        break;
+                    case MY_TASK_REFRESH:
+                        setRowClick(itemCls, item, v -> {
+                            module.refreshMyTaskReport(activity);
+                            Toast.makeText(activity, "正在重新读取任务列表…",
+                                    Toast.LENGTH_SHORT).show();
+                        });
+                        break;
+                    case MY_TASK_VIEW:
+                        setRowClick(itemCls, item, v ->
+                                showMultilineInfo(activity, "我的任务状态", module.myTaskReport()));
+                        break;
+                    case MY_TASK_CLEAR:
+                        setRowClick(itemCls, item, v -> {
+                            module.clearMyTaskToday();
+                            Toast.makeText(activity, "已清除今日完成记录", Toast.LENGTH_SHORT).show();
+                        });
+                        break;
                     case EDIT_LINK:
                     default:
                         setRowClick(itemCls, item, v -> showEditLinkDialog(activity, def.title, editKey));
@@ -2288,6 +2339,10 @@ public final class SettingsEntryHook {
                                 Toast.makeText(activity, "版本降级限制将在下次启动重新生效",
                                         Toast.LENGTH_SHORT).show();
                             }
+                        }
+                        if (App.KEY_MY_TASK_AUTO_POST.equals(def.key) && isChecked
+                                && !readEmbeddedBoolean(App.KEY_MY_TASK_AUTO_WARNED, false)) {
+                            showMyTaskAutoWarn(activity);
                         }
                         if (!mutexApplying) {
                             applySwitchMutex(activity, def.key, isChecked);
@@ -2694,6 +2749,46 @@ public final class SettingsEntryHook {
 
     private void showGameLibDiagnostics(final Activity activity) {
         showMultilineInfo(activity, "游戏库精简状态", GameLibraryCleanHook.diagnostics());
+    }
+
+    private String postDetailDiagnostics() {
+        try {
+            return PostDetailCleanHook.diagnostics();
+        } catch (Throwable t) {
+            return "帖子详情精简 Hook 尚未安装，"
+                    + "请打开任意帖子详情页后再查看\n\n" + t;
+        }
+    }
+
+    private String fakeUsageDiagnostics() {
+        try {
+            return FakeUsageAccessHook.diagnostics();
+        } catch (Throwable t) {
+            return "伪装使用情况权限 Hook 尚未安装，"
+                    + "请先打开小黑盒主界面后再查看\n\n" + t;
+        }
+    }
+
+    private void showMyTaskAutoWarn(final Activity activity) {
+        try {
+            StringBuilder msg = new StringBuilder();
+            msg.append("模块「发布」，并在任务进度确认后删掉刚发的帖子。\n\n");
+            msg.append("· 自定义短内容，可能被限流、屏蔽甚至处罚\n");
+            msg.append("· 每天最多发条数量\n");
+            new AlertDialog.Builder(activity)
+                    .setTitle("确认开启全自动发帖")
+                    .setMessage(msg.toString())
+                    .setNegativeButton("保持半自动", (d, w) ->
+                            setSwitchPref(activity, App.KEY_MY_TASK_AUTO_POST, false))
+                    .setPositiveButton("我已知晓风险", (d, w) -> {
+                        writeEmbeddedBoolean(activity, App.KEY_MY_TASK_AUTO_WARNED, true);
+                        Toast.makeText(activity, "已开启全自动发帖，请留意模块日志",
+                                Toast.LENGTH_SHORT).show();
+                    })
+                    .show();
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "我的任务风险提示弹窗失败: " + t);
+        }
     }
     private void showMultilineInfo(Activity activity, String title, String text) {
         try {

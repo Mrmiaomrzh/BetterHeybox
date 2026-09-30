@@ -184,42 +184,13 @@ public final class WatchHook {
     /**
      * 捕获宿主的 HTTP 客户端。
      *
-     * <p><b>不按类名</b>找 OkHttpClient —— 实测小黑盒 1.3.395 的 R8 已把
-     * {@code okhttp3.OkHttpClient} 改名（类定义里没有这个名字，方法名也不再是 newCall），
-     * 所以改为 hook {@code okhttp3.internal.connection.RealCall} 的构造函数：
-     * R8 能改名字，但<b>改不了参数顺序</b>，第一个参数就是客户端实例。
      */
     private void hookOkHttp(ClassLoader cl) {
-        int installed = 0;
-        for (String cn : HttpBridge.CLIENT_HOLDERS) {
-            try {
-                Class<?> holder = Class.forName(cn, false, cl);
-                for (java.lang.reflect.Constructor<?> ctor : holder.getDeclaredConstructors()) {
-                    if (ctor.getParameterTypes().length < 2) {
-                        continue;
-                    }
-                    module.hook(ctor).intercept(chain -> {
-                        Object result = chain.proceed();
-                        try {
-                            // 不在这里判 ready()：captureIfClient 自己会短路，
-                            // 而它同时负责把宿主请求 URL 记进日志（诊断端点参数用）
-                            HttpBridge.captureIfClient(chain.getArg(0), chain.getArg(1), cl);
-                        } catch (Throwable ignored) {
-                        }
-                        return result;
-                    });
-                    installed++;
-                    break;
-                }
-                if (installed > 0) {
-                    hit("网络栈", cn);
-                    module.logd(Log.INFO, module.TAG, "✔ 动态推送：HTTP 客户端捕获 Hook 已安装 (" + cn + ")");
-                    break;
-                }
-            } catch (Throwable ignored) {
-            }
-        }
-        if (installed == 0) {
+        if (HttpBridge.installCapture(module, cl)) {
+            hit("网络栈", HttpBridge.describe());
+            module.logd(Log.INFO, module.TAG,
+                    "✔ 动态推送：HTTP 客户端捕获 Hook 已安装（" + HttpBridge.describe() + "）");
+        } else {
             module.logd(Log.WARN, module.TAG, "✘ 动态推送：未找到可用的 OkHttp 载体类，主动拉取将不可用");
         }
     }

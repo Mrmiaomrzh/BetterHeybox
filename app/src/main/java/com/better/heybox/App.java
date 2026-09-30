@@ -88,6 +88,38 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     /** 每日任务：三种分享全部完成后自动退回首页（默认开） */
     public static final String KEY_DAILY_TASK_BACK_HOME = "daily_task_back_home";
 
+    // ------------------------------------------------------------ 我的任务（限时任务，#42）
+
+    /** 我的任务：自动完成「我的任务」限时任务总开关（默认关） */
+    public static final String KEY_MY_TASK_ENABLED = "my_task_enabled";
+
+    /** 我的任务：全自动（模块自己点「发布」）；关闭=半自动，模块填好内容由用户点发布 */
+    public static final String KEY_MY_TASK_AUTO_POST = "my_task_auto_post";
+
+    /** 我的任务：已确认过全自动风险提示（首次开启全自动时弹一次） */
+    public static final String KEY_MY_TASK_AUTO_WARNED = "my_task_auto_warned";
+
+    /** 我的任务：发帖正文（默认「扣1」） */
+    public static final String KEY_MY_TASK_TEXT = "my_task_text";
+
+    /** 我的任务：任务匹配关键词（逗号分隔，默认 发布,发帖,帖子,内容） */
+    public static final String KEY_MY_TASK_KEYWORDS = "my_task_keywords";
+
+    /** 我的任务：只处理带倒计时的限时任务（默认开） */
+    public static final String KEY_MY_TASK_URGENT_ONLY = "my_task_urgent_only";
+
+    /** 我的任务：任务完成后自动删帖（默认开） */
+    public static final String KEY_MY_TASK_DELETE_AFTER = "my_task_delete_after";
+
+    /** 我的任务：任务变成可领取时自动打开领奖入口（默认开） */
+    public static final String KEY_MY_TASK_CLAIM = "my_task_claim";
+
+    /** 我的任务：每天最多自动发几条（默认 1） */
+    public static final String KEY_MY_TASK_MAX_PER_DAY = "my_task_max_per_day";
+
+    /** 我的任务：今日已完成记录（yyyy-MM-dd|任务指纹，逗号分隔；运行态不进备份） */
+    public static final String KEY_MY_TASK_DONE = "my_task_done";
+
     /** 伪装授予通知权限：让小黑盒认为通知已开启，获得签到加成（不真正申请权限） */
     public static final String KEY_FAKE_NOTIFICATION = "fake_notification";
 
@@ -333,6 +365,12 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
         m.put(KEY_BLOCK_UPDATE, false);
         m.put(KEY_DAILY_TASK_ENABLED, false);
         m.put(KEY_DAILY_TASK_BACK_HOME, true);
+        m.put(KEY_MY_TASK_ENABLED, false);
+        m.put(KEY_MY_TASK_AUTO_POST, false);
+        m.put(KEY_MY_TASK_AUTO_WARNED, false);
+        m.put(KEY_MY_TASK_URGENT_ONLY, true);
+        m.put(KEY_MY_TASK_DELETE_AFTER, true);
+        m.put(KEY_MY_TASK_CLAIM, true);
         m.put(KEY_FAKE_NOTIFICATION, false);
         m.put(KEY_LOG, false);
         m.put(KEY_WEBVIEW_DEVTOOLS, false);

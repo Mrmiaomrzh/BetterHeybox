@@ -25,6 +25,7 @@ import com.better.heybox.hooks.GameLibraryCleanHook;
 import com.better.heybox.hooks.GeneralHook;
 import com.better.heybox.hooks.ImageShareHook;
 import com.better.heybox.hooks.MessageRedDotHook;
+import com.better.heybox.hooks.MyTaskHook;
 import com.better.heybox.hooks.PromotePostHook;
 import com.better.heybox.hooks.PostFilterHook;
 import com.better.heybox.hooks.WatchHook;
@@ -48,6 +49,7 @@ public class MainModule extends XposedModule {
     public static final String TAG = "BetterHeybox";
 
     private com.better.heybox.hooks.DailyTaskHook dailyTaskHook;
+    private MyTaskHook myTaskHook;
 
     /** host classloader: needed to install hooks that were skipped at startup */
     private volatile ClassLoader targetClassLoader;
@@ -257,6 +259,10 @@ public class MainModule extends XposedModule {
             dailyTaskHook = new DailyTaskHook(this);
             dailyTaskHook.install(ignored);
         }, cl, App.KEY_DAILY_TASK_ENABLED);
+        registerHook("我的任务", ignored -> {
+            myTaskHook = new MyTaskHook(this);
+            myTaskHook.install(ignored);
+        }, cl, App.KEY_MY_TASK_ENABLED);
         registerHook("动态推送", new WatchHook(this)::install, cl,
                 App.KEY_WATCH_ENABLED, App.KEY_LOG);
 
@@ -597,6 +603,37 @@ public class MainModule extends XposedModule {
         forceInstallHook(App.KEY_DAILY_TASK_ENABLED);
         if (dailyTaskHook != null) {
             dailyTaskHook.clearTodayAndRetry(activity);
+        }
+    }
+
+    /** 设置页「立即执行」：装上 Hook（即使总开关关着）并跑一轮 */
+    public void startMyTaskNow(android.app.Activity activity) {
+        forceInstallHook(App.KEY_MY_TASK_ENABLED);
+        if (myTaskHook == null) {
+            logd(Log.WARN, TAG, "我的任务 Hook 尚未安装（宿主 classloader 未就绪），请稍后再试");
+            return;
+        }
+        myTaskHook.runNow(activity);
+    }
+
+    /** 设置页「刷新任务状态」：后台拉一次任务列表，结果进缓存报告 */
+    public void refreshMyTaskReport(android.app.Activity activity) {
+        forceInstallHook(App.KEY_MY_TASK_ENABLED);
+        if (myTaskHook != null) {
+            myTaskHook.refreshReport(activity);
+        }
+    }
+
+    /** 设置页「查看任务状态」：纯缓存，不发请求 */
+    public String myTaskReport() {
+        return myTaskHook == null ? "我的任务 Hook 尚未安装" : myTaskHook.report();
+    }
+
+    /** 设置页「清除今日记录」 */
+    public void clearMyTaskToday() {
+        forceInstallHook(App.KEY_MY_TASK_ENABLED);
+        if (myTaskHook != null) {
+            myTaskHook.clearToday();
         }
     }
 }

@@ -10,32 +10,80 @@ import java.util.Map;
 
 public final class HttpBridge {
 
+    public static final String BASE = "https://api.xiaoheihe.cn/";
+
     public static final String[] CLIENT_HOLDERS = {
             "okhttp3.internal.connection.RealCall",
             "okhttp3.RealCall",
     };
 
-    private static volatile Object sClient;      // 宿主的 HTTP 客户端实例
-    private static volatile Method sNewCall;     // Client#newCall(Request)
-    private static volatile Method sExecute;     // Call#execute()
-    private static volatile Method sCode;        // Response#code()
-    private static volatile Method sBody;        // Response#body()
-    private static volatile Method sString;      // ResponseBody#string()
-    private static volatile Method sNewBuilder;  // Request#newBuilder()
-    private static volatile Method sUrl;         // Builder#url(String)
-    private static volatile Method sBuild;       // Builder#build()
-    private static volatile Method sMethod;      // Builder#method(String, RequestBody)
-    private static volatile Object sTemplate;    // 捕获到的原始 Request（用于派生 Builder）
+    private static volatile Object sClient;
+    private static volatile Method sNewCall;
+    private static volatile Method sExecute;
+    private static volatile Method sCode;
+    private static volatile Method sBody;
+    private static volatile Method sString;
+    private static volatile Method sNewBuilder;
+    private static volatile Method sUrl;
+    private static volatile Method sBuild;
+    private static volatile Method sMethod;
+    private static volatile Object sTemplate;
+    private static volatile Method sAddHeader;
 
     private static volatile String sDescribe = "未捕获";
     private static volatile MainModule sModule;
     private static volatile boolean sDiagLogged;
+    private static volatile boolean sCaptureInstalled;
 
     private HttpBridge() {
     }
 
     public static void init(MainModule module) {
         sModule = module;
+    }
+
+    public static boolean installCapture(MainModule module, ClassLoader cl) {
+        if (module == null || cl == null) {
+            return false;
+        }
+        init(module);
+        if (sCaptureInstalled) {
+            return true;
+        }
+        synchronized (HttpBridge.class) {
+            if (sCaptureInstalled) {
+                return true;
+            }
+            for (String cn : CLIENT_HOLDERS) {
+                try {
+                    Class<?> holder = Class.forName(cn, false, cl);
+                    for (Constructor<?> ctor : holder.getDeclaredConstructors()) {
+                        if (ctor.getParameterTypes().length < 2) {
+                            continue;
+                        }
+                        module.hook(ctor).intercept(chain -> {
+                            Object result = chain.proceed();
+                            try {
+                                HttpBridge.captureIfClient(chain.getArg(0), chain.getArg(1), cl);
+                            } catch (Throwable ignored) {
+                            }
+                            return result;
+                        });
+                        sCaptureInstalled = true;
+                        log(Log.INFO, "宿主 HTTP 客户端捕获 Hook 已安装 (" + cn + ")");
+                        return true;
+                    }
+                } catch (Throwable ignored) {
+                }
+            }
+            log(Log.WARN, "未找到可用的 OkHttp 载体类（候选 " + String.join(" / ", CLIENT_HOLDERS)
+                    + " 全部落空），主动拉取不可用");
+            return false;
+        }
+    }
+
+    public static boolean captureInstalled() {
+        return sCaptureInstalled;
     }
 
     public static boolean ready() {
@@ -387,6 +435,14 @@ public final class HttpBridge {
             sUrl = urlSetter;
             sBuild = build;
             sMethod = methodSetter;
+            for (Method m : t.getMethods()) {
+                Class<?>[] ps = m.getParameterTypes();
+                if (ps.length == 2 && ps[0] == String.class && ps[1] == String.class
+                        && m.getReturnType() == t) {
+                    sAddHeader = m;
+                    break;
+                }
+            }
             return true;
         }
         return false;
@@ -506,6 +562,15 @@ public final class HttpBridge {
             log(Log.WARN, "HTTP 客户端尚未捕获，跳过请求 " + shortUrl(url));
             return null;
         }
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            log(Log.WARN, "【严重】HttpBridge.request() 在主线程被调用，会卡死 UI！"
+                    + " url=" + shortUrl(url) + " 调用栈见日志");
+            try {
+                throw new IllegalStateException("HttpBridge.request on main thread");
+            } catch (IllegalStateException e) {
+                log(Log.WARN, "主线程调用栈：" + android.util.Log.getStackTraceString(e));
+            }
+        }
         Object client = sClient;
         Object template = sTemplate;
         Object req;
@@ -518,20 +583,9 @@ public final class HttpBridge {
                 }
             }
             sUrl.invoke(builder, url);
-            if (headers != null) {
-                Method addHeader = null;
-                for (Method m : builder.getClass().getMethods()) {
-                    Class<?>[] ps = m.getParameterTypes();
-                    if (ps.length == 2 && ps[0] == String.class && ps[1] == String.class
-                            && m.getReturnType() == builder.getClass()) {
-                        addHeader = m;
-                        break;
-                    }
-                }
-                if (addHeader != null) {
-                    for (Map.Entry<String, String> e : headers.entrySet()) {
-                        addHeader.invoke(builder, e.getKey(), e.getValue());
-                    }
+            if (headers != null && sAddHeader != null) {
+                for (Map.Entry<String, String> e : headers.entrySet()) {
+                    sAddHeader.invoke(builder, e.getKey(), e.getValue());
                 }
             }
             req = sBuild.invoke(builder);

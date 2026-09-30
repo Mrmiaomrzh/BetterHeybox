@@ -92,6 +92,8 @@ public final class DailyTaskHook {
 
     private final MainModule module;
 
+    private static volatile boolean sBusy;
+
     /** 宿主进程 classloader（打开页面用） */
     private volatile ClassLoader targetCl;
 
@@ -1323,6 +1325,7 @@ public final class DailyTaskHook {
             return;
         }
         autoActive = true;
+        sBusy = true;
         autoContext = activity.getApplicationContext();
         currentStep = STEP_PICTURE;
         stepTriggered = false;
@@ -1615,10 +1618,15 @@ public final class DailyTaskHook {
 
     private void reset() {
         autoActive = false;
+        sBusy = false;
         currentStep = -1;
         stepTriggered = false;
         completedStep = -1;
         stepToken++;
+    }
+
+    public static boolean isAutoActive() {
+        return sBusy;
     }
 
     private void writeDoneDate(String value) {
