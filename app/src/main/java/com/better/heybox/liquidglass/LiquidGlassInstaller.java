@@ -280,14 +280,26 @@ public final class LiquidGlassInstaller {
      * navPad 并同步内边距，让底栏背景延伸进手势区而内容仍避开小白条
      */
     private static void applyClassicImmersive(final Activity activity) {
+        applyClassicImmersive(activity, 0);
+    }
+
+    private static final int CLASSIC_IMMERSIVE_MAX_RETRY = 10;
+
+    private static void applyClassicImmersive(final Activity activity, final int attempt) {
         try {
             ViewGroup root = findViewByName(activity, ID_ROOT);
             ViewGroup bar = findViewByName(activity, ID_BAR);
             if (root == null || bar == null) {
+                if (attempt >= CLASSIC_IMMERSIVE_MAX_RETRY) {
+                    LiquidGlassLog.log(android.util.Log.WARN,
+                            "classic immersive: view not ready after "
+                                    + CLASSIC_IMMERSIVE_MAX_RETRY + " retries, giving up");
+                    return;
+                }
                 activity.getWindow().getDecorView().postDelayed(() -> {
                     if (!activity.isFinishing() && !activity.isDestroyed()
                             && sHostRef == null) {
-                        applyClassicImmersive(activity);
+                        applyClassicImmersive(activity, attempt + 1);
                     }
                 }, 200L);
                 return;
@@ -642,7 +654,7 @@ public final class LiquidGlassInstaller {
     private static void applyQwea0Params(com.example.liquidglass.LiquidGlassView glass,
                                          ViewGroup content, float density, boolean adaptiveTint) {
         glass.setCornerRadius(999f);
-        glass.setEnableDynamicBackground(true);
+        glass.setEnableDynamicBackground(false);
         glass.setBackdropSource(content);
         glass.setMaterial(com.example.liquidglass.GlassMaterial.REGULAR);
         glass.setRefractionHeight(60f * density);
@@ -777,6 +789,7 @@ public final class LiquidGlassInstaller {
         sMidTabRef = new java.lang.ref.WeakReference<>(
                 midTab != null ? midTab : centerHost);
         if (midTab != null) {
+            removeMidPreDraw(midTab);
             sMidPreDraw = new android.view.ViewTreeObserver.OnPreDrawListener() {
                 @Override
                 public boolean onPreDraw() {
@@ -797,6 +810,7 @@ public final class LiquidGlassInstaller {
                 }
             };
             midTab.getViewTreeObserver().addOnPreDrawListener(sMidPreDraw);
+            sMidPreDrawView = new java.lang.ref.WeakReference<>(midTab);
         }
     }
 
@@ -1180,7 +1194,7 @@ public final class LiquidGlassInstaller {
             com.example.liquidglass.LiquidGlassView glass =
                     new com.example.liquidglass.LiquidGlassView(context, null, 0);
             glass.setCornerRadius(999f);
-            glass.setEnableDynamicBackground(true);
+            glass.setEnableDynamicBackground(false);
             if (content != null) {
                 glass.setBackdropSource(content);
             }
@@ -2294,6 +2308,7 @@ public final class LiquidGlassInstaller {
     private static android.widget.RadioGroup.OnCheckedChangeListener sOriginalCheckedListener;
     private static android.widget.RadioGroup.OnCheckedChangeListener sWrappedListener;
     private static android.view.ViewTreeObserver.OnPreDrawListener sMidPreDraw;
+    private static java.lang.ref.WeakReference<View> sMidPreDrawView;
 
     private static void wrapCheckedListener(final android.widget.RadioGroup bar,
                                             final OnCheckedExtra extra) {
@@ -2347,16 +2362,22 @@ public final class LiquidGlassInstaller {
         sOriginalCheckedListener = null;
     }
 
-    /** 卸载玻璃时移除加号的 PreDraw 可见性强制，避免与经典路径拉锯 */
     private static void removeMidPreDraw(View midTab) {
-        if (midTab == null || sMidPreDraw == null) {
+        if (sMidPreDraw == null) {
             return;
         }
-        try {
-            midTab.getViewTreeObserver().removeOnPreDrawListener(sMidPreDraw);
-        } catch (Throwable ignored) {
+        View attachedTo = sMidPreDrawView != null ? sMidPreDrawView.get() : null;
+        if (attachedTo == null) {
+            attachedTo = midTab;
+        }
+        if (attachedTo != null) {
+            try {
+                attachedTo.getViewTreeObserver().removeOnPreDrawListener(sMidPreDraw);
+            } catch (Throwable ignored) {
+            }
         }
         sMidPreDraw = null;
+        sMidPreDrawView = null;
     }
 
     private static void setupTabSelectionSync(final android.widget.RadioGroup bar,

@@ -46,11 +46,20 @@ public final class HeyboxPrefs {
         if (prefs == null) {
             return false;
         }
-        boolean ok = prefs.edit().putBoolean(key, value).commit();
+        prefs.edit().putBoolean(key, value).apply();
         if (isWatchKey(key)) {
             com.better.heybox.watch.WatchConfig.invalidate();
         }
-        return ok;
+        if (isFeedFilterKey(key)) {
+            com.better.heybox.hooks.PostFilterHook hook = com.better.heybox.hooks.PostFilterHook.get();
+            if (hook != null) {
+                hook.invalidateConfig();
+            }
+        }
+        if (isPostDetailKey(key)) {
+            com.better.heybox.hooks.PostDetailCleanHook.refresh();
+        }
+        return true;
     }
 
     public static String getString(String key, String defaultValue) {
@@ -63,14 +72,38 @@ public final class HeyboxPrefs {
         if (prefs == null) {
             return false;
         }
-        boolean ok = prefs.edit().putString(key, value).commit();
+        prefs.edit().putString(key, value).apply();
         if (isWatchKey(key)) {
             com.better.heybox.watch.WatchConfig.invalidate();
         }
-        return ok;
+        if (isFeedFilterKey(key)) {
+            com.better.heybox.hooks.PostFilterHook hook = com.better.heybox.hooks.PostFilterHook.get();
+            if (hook != null) {
+                hook.invalidateConfig();
+            }
+        }
+        if (isPostDetailKey(key)) {
+            com.better.heybox.hooks.PostDetailCleanHook.refresh();
+        }
+        return true;
     }
     
     private static boolean isWatchKey(String key) {
         return key != null && key.startsWith("watch_");
+    }
+
+    private static boolean isFeedFilterKey(String key) {
+        if (key == null) {
+            return false;
+        }
+        return key.startsWith("post_filter_") || key.startsWith("post_min_")
+                || "promote_ad".equals(key) || "block_video_post".equals(key)
+                || "flow_diagnose".equals(key) || "verbose_log".equals(key)
+                || "single_column_feed".equals(key)
+                || "ai_base_url".equals(key) || "ai_model".equals(key);
+    }
+
+    private static boolean isPostDetailKey(String key) {
+        return key != null && key.startsWith("post_detail_");
     }
 }

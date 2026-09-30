@@ -204,6 +204,20 @@ public final class SettingsEntryHook {
                     new SwitchDef("隐藏「黑盒热榜」", "搜索页的热榜标签页与热词卡片",
                             App.KEY_SEARCH_HIDE_HOT_RANK, false, false),
             }),
+            new SettingsGroup("帖子详情精简", new SwitchDef[]{
+                    new SwitchDef("屏蔽帖子下无关内容",
+                            "相关搜索、文字配图横幅、小程序、合集、活动等",
+                            App.KEY_POST_DETAIL_CLEAN, false, false),
+                    new SwitchDef("话题行防误触", "最下方话题行禁用点击跳转",
+                            App.KEY_POST_DETAIL_TOPIC_NO_CLICK, false, false),
+                    new SwitchDef("隐藏话题栏", "整行隐藏帖子最下方的 #话题 标签",
+                            App.KEY_POST_DETAIL_TOPIC_HIDE, false, false),
+                    new SwitchDef("额外隐藏的视图名", "一行一个资源名",
+                            null, false, false, true, App.KEY_POST_DETAIL_HIDE_IDS,
+                            Action.POST_DETAIL_HIDE_IDS),
+                    new SwitchDef("诊断：帖子详情精简状态", "资源解析 / 命中的区块 / 观察到的候选",
+                            null, false, false, true, null, Action.POST_DETAIL_DIAG),
+            }),
             new SettingsGroup("分享净化", new SwitchDef[]{
                     new SwitchDef("净化分享链接", null, App.KEY_PURIFY_SHARE_LINK, true, false),
             }),
@@ -247,6 +261,14 @@ public final class SettingsEntryHook {
             }),
             new SettingsGroup("通用", new SwitchDef[]{
                     new SwitchDef("伪装通知权限", "伪装通知已开启，获得签到加成", App.KEY_FAKE_NOTIFICATION, false, false),
+                    new SwitchDef("伪装使用情况权限",
+                            "伪装「使用情况访问」已开启",
+                            App.KEY_FAKE_USAGE_ACCESS, false, false),
+                    new SwitchDef("返回空使用情况数据",
+                            "游戏时长等统计返回空，并阻止后台上传",
+                            App.KEY_FAKE_USAGE_EMPTY_DATA, false, false),
+                    new SwitchDef("诊断：使用情况权限伪装", "开关状态 / 命中次数 / DexKit 解析",
+                            null, false, false, true, null, Action.FAKE_USAGE_DIAG),
                     new SwitchDef("屏蔽更新", "屏蔽小黑盒更新入口", App.KEY_BLOCK_UPDATE, false, false),
                     new SwitchDef("记录日志", null, App.KEY_LOG, false, false),
                     new SwitchDef("详细日志", "关闭时只记错误日志；开启后记录全部并附带帖子信息",
@@ -414,6 +436,7 @@ public final class SettingsEntryHook {
             insertPostFilterGroup(groups);
             insertCommentFilterGroup(groups);
             addBase(groups, "搜索页精简");
+            addBase(groups, "帖子详情精简");
             groups.add(buildGameLibGroup());
             addBase(groups, TITLE_SHARE_PURIFY);
             return groups;
@@ -2157,6 +2180,20 @@ public final class SettingsEntryHook {
                         setRowClick(itemCls, item, v -> showMultilineInfo(activity,
                                 "消息红点状态", MessageRedDotHook.diagnostics()));
                         break;
+                    case POST_DETAIL_HIDE_IDS:
+                        setRowClick(itemCls, item, v -> showMultilineEditDialog(activity,
+                                "额外隐藏的视图名", App.KEY_POST_DETAIL_HIDE_IDS,
+                                "一行一个资源名，例如 vg_gongfang；只有诊断页观察到候选时才需要填",
+                                false));
+                        break;
+                    case POST_DETAIL_DIAG:
+                        setRowClick(itemCls, item, v -> showMultilineInfo(activity,
+                                "帖子详情精简状态", postDetailDiagnostics()));
+                        break;
+                    case FAKE_USAGE_DIAG:
+                        setRowClick(itemCls, item, v -> showMultilineInfo(activity,
+                                "使用情况权限伪装状态", fakeUsageDiagnostics()));
+                        break;
                     case AI_PROVIDER:
                         setRowClick(itemCls, item, v -> showAiProviderDialog(activity));
                         break;
@@ -2316,6 +2353,16 @@ public final class SettingsEntryHook {
                                 || App.KEY_GAME_LIB_HIDE_MENU.equals(def.key)
                                 || App.KEY_GAME_LIB_HIDE_SECTIONS.equals(def.key)) {
                             GameLibraryCleanHook.refresh();
+                        }
+                        if (App.KEY_POST_DETAIL_CLEAN.equals(def.key)
+                                || App.KEY_POST_DETAIL_TOPIC_NO_CLICK.equals(def.key)
+                                || App.KEY_POST_DETAIL_TOPIC_HIDE.equals(def.key)
+                                || App.KEY_POST_DETAIL_HIDE_IDS.equals(def.key)) {
+                            PostDetailCleanHook.refresh();
+                        }
+                        if (App.KEY_FAKE_USAGE_ACCESS.equals(def.key)
+                                || App.KEY_FAKE_USAGE_EMPTY_DATA.equals(def.key)) {
+                            FakeUsageAccessHook.refresh();
                         }
                         if (App.KEY_HIDE_MSG_DOT.equals(def.key)
                                 || App.KEY_HIDE_MSG_BADGE.equals(def.key)) {
@@ -3063,12 +3110,28 @@ public final class SettingsEntryHook {
                 }
             }
             normalized = sb.toString();
+        } else if (App.KEY_POST_DETAIL_HIDE_IDS.equals(key)) {
+            StringBuilder sb = new StringBuilder();
+            java.util.Set<String> seen = new java.util.HashSet<>();
+            for (String token : raw.split("[\\s,，;；]+")) {
+                String name = token.trim();
+                if (!name.isEmpty() && seen.add(name)) {
+                    if (sb.length() > 0) {
+                        sb.append('\n');
+                    }
+                    sb.append(name);
+                }
+            }
+            normalized = sb.toString();
         } else {
             normalized = raw.trim();
         }
         HeyboxPrefs.setString(key, normalized);
         if (App.KEY_COMMENT_KEYWORDS.equals(key)) {
             CommentFilterHook.refresh();
+        }
+        if (App.KEY_POST_DETAIL_HIDE_IDS.equals(key)) {
+            PostDetailCleanHook.refresh();
         }
         LogRecorder.recordEvent(title + " 已保存");
         Toast.makeText(activity, "已保存，立即生效", Toast.LENGTH_SHORT).show();

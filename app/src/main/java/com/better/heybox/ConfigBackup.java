@@ -46,6 +46,7 @@ public final class ConfigBackup {
             App.KEY_GAME_LIB_HIDE_TYPES,
             App.KEY_GAME_LIB_HIDE_ENTRIES,
             App.KEY_GAME_LIB_HIDE_SECTION_NAMES,
+            App.KEY_POST_DETAIL_HIDE_IDS,
             App.KEY_MSG_BADGE_ENTRIES,
             App.KEY_MSG_FULL_HIDE_ENTRIES,
             App.KEY_BROWSER_REDIRECT_FORCE,

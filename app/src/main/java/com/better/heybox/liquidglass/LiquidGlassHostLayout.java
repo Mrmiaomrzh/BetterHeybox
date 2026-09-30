@@ -29,6 +29,7 @@ final class LiquidGlassHostLayout extends FrameLayout {
     private static final float SAMPLE_SCALE_LEGACY = 0.4f;
     private static final int BLUR_RADIUS_LEGACY = 3;
     private static final float SATURATION_BOOST = 1.08f;
+    private static final long MIN_CAPTURE_INTERVAL_MS = 100L;
 
     private final ViewGroup mSampleRoot;
     private final float mDensity;
@@ -48,6 +49,7 @@ final class LiquidGlassHostLayout extends FrameLayout {
     private float mCornerRadius;
     private Bitmap mRegionBuf;
     private boolean mCapturing;
+    private long mLastCaptureAt;
 
     private ViewTreeObserver.OnPreDrawListener mPreDrawListener;
 
@@ -115,10 +117,10 @@ final class LiquidGlassHostLayout extends FrameLayout {
             return true;
         };
         mSampleRoot.getViewTreeObserver().addOnPreDrawListener(mPreDrawListener);
+        mLastCaptureAt = 0L;
         invalidate();
         playRevealAnimation();
     }
-
     void detach() {
         if (mPreDrawListener != null) {
             mSampleRoot.getViewTreeObserver().removeOnPreDrawListener(mPreDrawListener);
@@ -140,9 +142,11 @@ final class LiquidGlassHostLayout extends FrameLayout {
         if (mExternalRenderer) {
             return;
         }
+        mLastCaptureAt = 0L;
         if (!mUseAgsl) {
             updateGlossShader(h);
         }
+        invalidate();
     }
 
     private float sampleScale() {
@@ -151,11 +155,16 @@ final class LiquidGlassHostLayout extends FrameLayout {
 
     private void capture() {
         try {
-            mCapturing = true;
-            maybeRefreshTheme();
             if (mExternalRenderer) {
                 return;
             }
+            long now = android.os.SystemClock.uptimeMillis();
+            if (now - mLastCaptureAt < MIN_CAPTURE_INTERVAL_MS) {
+                return;
+            }
+            mLastCaptureAt = now;
+            mCapturing = true;
+            maybeRefreshTheme();
             int w = getWidth();
             int h = getHeight();
             if (w <= 0 || h <= 0 || mSampleRoot.getWidth() <= 0) {

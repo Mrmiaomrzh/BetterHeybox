@@ -239,6 +239,38 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     /** 详细屏蔽日志：屏蔽日志附带标题、作者、等级等帖子信息 */
     public static final String KEY_VERBOSE_LOG = "verbose_log";
 
+    // ------------------------------------------------------------ 帖子详情精简（#43）
+
+    /** 帖子详情精简：屏蔽帖子正文下方的无关区块（相关搜索 / 文字配图横幅 / 小程序 / 合集 / 活动等） */
+    public static final String KEY_POST_DETAIL_CLEAN = "post_detail_clean";
+
+    /** 帖子详情精简：最下方话题行只禁用点击跳转（防误触），不隐藏 */
+    public static final String KEY_POST_DETAIL_TOPIC_NO_CLICK = "post_detail_topic_no_click";
+
+    /** 帖子详情精简：整行隐藏最下方的 #话题 标签行 */
+    public static final String KEY_POST_DETAIL_TOPIC_HIDE = "post_detail_topic_hide";
+
+    /**
+     * 帖子详情精简：额外要隐藏的视图资源名，一行一个。
+     * 主要用于服务端下发、静态分析无法确定的区块（如「工坊」），
+     * 也是诊断页把运行期观察到的 id 固化下来的落点。
+     */
+    public static final String KEY_POST_DETAIL_HIDE_IDS = "post_detail_hide_ids";
+
+    // ------------------------------------------------------------ 伪装使用情况访问（#43）
+
+    /**
+     * 伪装已授予「使用情况访问」权限：让小黑盒认为权限已给，
+     * 不再弹「游戏时长统计」权限框，也不读取真实使用情况数据。
+     */
+    public static final String KEY_FAKE_USAGE_ACCESS = "fake_usage_access";
+
+    /**
+     * 连带返回空的使用情况数据：游戏时长等统计返回空列表，并阻止后台上传。
+     * 依赖 {@link #KEY_FAKE_USAGE_ACCESS} 开启。
+     */
+    public static final String KEY_FAKE_USAGE_EMPTY_DATA = "fake_usage_empty_data";
+
     /** 收藏：打开收藏列表发现失效内容时自动清理 */
     public static final String KEY_FAVOUR_AUTO_CLEAN = "favour_auto_clean";
 
@@ -388,6 +420,11 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
         m.put(KEY_RELAY_IGNORE_EMOJI, false);
         m.put(KEY_FLOW_DIAGNOSE, false);
         m.put(KEY_VERBOSE_LOG, false);
+        m.put(KEY_POST_DETAIL_CLEAN, false);
+        m.put(KEY_POST_DETAIL_TOPIC_NO_CLICK, false);
+        m.put(KEY_POST_DETAIL_TOPIC_HIDE, false);
+        m.put(KEY_FAKE_USAGE_ACCESS, false);
+        m.put(KEY_FAKE_USAGE_EMPTY_DATA, false);
         m.put(KEY_FAVOUR_AUTO_CLEAN, false);
         m.put(KEY_HIDE_MSG_DOT, false);
         m.put(KEY_HIDE_MSG_BADGE, false);

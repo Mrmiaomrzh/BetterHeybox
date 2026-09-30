@@ -149,20 +149,46 @@ public final class WatchSeen {
         if (userId == null || userId.isEmpty()) {
             return;
         }
-        String joined;
         synchronized (LOCK) {
             Set<String> set = baselined();
             set.add(userId);
-            joined = String.join(",", set);
+            sDirty = true;
         }
-        HeyboxPrefs.setString(App.KEY_WATCH_BASELINED, joined);   // 锁外写盘
+        schedulePersistBaseline();
+    }
+
+    private static final java.util.concurrent.atomic.AtomicBoolean sBaselinePersistScheduled =
+            new java.util.concurrent.atomic.AtomicBoolean();
+
+    private static void schedulePersistBaseline() {
+        if (sBaselinePersistScheduled.compareAndSet(false, true)) {
+            try {
+                sWriter.schedule(() -> {
+                    sBaselinePersistScheduled.set(false);
+                    flushBaseline();
+                }, PERSIST_DELAY_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+            } catch (Throwable t) {
+                sBaselinePersistScheduled.set(false);
+            }
+        }
+    }
+
+    private static void flushBaseline() {
+        String joined;
+        synchronized (LOCK) {
+            if (sBaselined == null) {
+                return;
+            }
+            joined = String.join(",", sBaselined);
+        }
+        HeyboxPrefs.setString(App.KEY_WATCH_BASELINED, joined);
     }
 
     public static void clearBaselines() {
         synchronized (LOCK) {
             sBaselined = new LinkedHashSet<>();
         }
-        HeyboxPrefs.setString(App.KEY_WATCH_BASELINED, "");
+        flushBaseline();
     }
 
     public static void touchCheck() {

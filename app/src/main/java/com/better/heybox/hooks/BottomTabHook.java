@@ -6,6 +6,8 @@ import android.view.View;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.Collections;
+import java.util.Set;
 
 import com.better.heybox.App;
 import com.better.heybox.MainModule;
@@ -86,13 +88,61 @@ public final class BottomTabHook {
         }
     }
 
+    private static final Set<android.widget.RadioGroup> sLayoutListenerAttached =
+            Collections.synchronizedSet(
+                    Collections.newSetFromMap(
+                            new java.util.WeakHashMap<android.widget.RadioGroup, Boolean>()));
+
+    private static volatile boolean sApplying;
+    private static final java.util.Set<java.lang.ref.WeakReference<Object>> sApplyPending =
+            Collections.newSetFromMap(
+                    new java.util.concurrent.ConcurrentHashMap<
+                            java.lang.ref.WeakReference<Object>, Boolean>());
+    private static final int MAX_CATCH_UP = 3;
+
     /** 隐藏 tab 与加号 */
     private void applyBottomTabSettings(Object activityObj) {
         applyBottomTabSettings(activityObj, true);
     }
 
     private void applyBottomTabSettings(Object activityObj, boolean reschedule) {
+        if (sApplying) {
+            if (activityObj != null) {
+                sApplyPending.add(new java.lang.ref.WeakReference<>(activityObj));
+            }
+            com.better.heybox.ModuleStats.bottomTabReentrySkips.incrementAndGet();
+            return;
+        }
+        sApplying = true;
         try {
+            applyBottomTabSettingsLocked(activityObj, reschedule);
+            for (int guard = 0; guard < MAX_CATCH_UP && !sApplyPending.isEmpty(); guard++) {
+                Object next = pollPending();
+                if (next == null) {
+                    break;
+                }
+                applyBottomTabSettingsLocked(next, false);
+            }
+        } finally {
+            sApplying = false;
+        }
+    }
+
+    private static Object pollPending() {
+        java.util.Iterator<java.lang.ref.WeakReference<Object>> it = sApplyPending.iterator();
+        while (it.hasNext()) {
+            Object target = it.next().get();
+            it.remove();
+            if (target != null) {
+                return target;
+            }
+        }
+        return null;
+    }
+
+    private void applyBottomTabSettingsLocked(Object activityObj, boolean reschedule) {
+        try {
+            com.better.heybox.ModuleStats.bottomTabApplies.incrementAndGet();
             Activity activity = activityObj instanceof Activity ? (Activity) activityObj : null;
             Object binding = findViewBinding(activityObj);
             android.widget.RadioGroup group = findTabGroup(activity, binding);
@@ -128,9 +178,12 @@ public final class BottomTabHook {
                 alignPlusToPlaceholder(activity, binding, group, plus);
             }
             normalizeVisibleTabs(group);
-            if (reschedule) {
+            if (reschedule && sLayoutListenerAttached.add(group)) {
+                com.better.heybox.ModuleStats.bottomTabLayoutListeners.incrementAndGet();
                 group.addOnLayoutChangeListener((v, left, top, right, bottom,
                         oldLeft, oldTop, oldRight, oldBottom) -> normalizeVisibleTabs(group));
+            }
+            if (reschedule) {
                 retryDelayed(group, () -> applyBottomTabSettings(activityObj, false),
                         100, 500, 1500, 3000);
             }
@@ -240,6 +293,11 @@ public final class BottomTabHook {
         if (v == null) {
             return;
         }
+        if (v.getVisibility() == View.GONE) {
+            com.better.heybox.ModuleStats.bottomTabHideNoops.incrementAndGet();
+            return;
+        }
+        com.better.heybox.ModuleStats.bottomTabHides.incrementAndGet();
         v.setVisibility(View.GONE);
         retryDelayed(v, () -> v.setVisibility(View.GONE), 500, 1500, 3000);
         module.logd(Log.INFO, module.TAG, "隐藏 " + label + ": " + v.getVisibility());
@@ -288,14 +346,23 @@ public final class BottomTabHook {
             int visible = 0;
             for (int i = 0; i < group.getChildCount(); i++) if (group.getChildAt(i).getVisibility() == View.VISIBLE) visible++;
             if (visible == 0) return;
+            boolean changed = false;
             for (int i = 0; i < group.getChildCount(); i++) {
                 View child = group.getChildAt(i);
                 if (child.getVisibility() != View.VISIBLE) continue;
                 android.widget.LinearLayout.LayoutParams lp = child.getLayoutParams() instanceof android.widget.LinearLayout.LayoutParams
                         ? (android.widget.LinearLayout.LayoutParams) child.getLayoutParams() : null;
-                if (lp != null && (lp.width != 0 || lp.weight != 1f)) { lp.width = 0; lp.weight = 1f; child.setLayoutParams(lp); }
+                if (lp != null && (lp.width != 0 || lp.weight != 1f)) {
+                    lp.width = 0;
+                    lp.weight = 1f;
+                    child.setLayoutParams(lp);
+                    changed = true;
+                }
             }
-            group.requestLayout();
+            if (changed) {
+                com.better.heybox.ModuleStats.bottomTabLayoutFixes.incrementAndGet();
+                group.requestLayout();
+            }
         } catch (Throwable ignored) { }
     }
 
@@ -344,22 +411,5 @@ public final class BottomTabHook {
             module.logd(Log.WARN, module.TAG, "查找 ViewBinding 失败: " + t);
         }
         return null;
-    }
-
-    private void hideTabField(Object binding, String fieldName, String label) {
-        try {
-            Field field = binding.getClass().getDeclaredField(fieldName);
-            field.setAccessible(true);
-            Object obj = field.get(binding);
-            if (obj instanceof View) {
-                final View v = (View) obj;
-                v.setVisibility(View.GONE);
-                retryDelayed(v, () -> v.setVisibility(View.GONE), 500, 1500, 3000);
-                module.logd(Log.INFO, module.TAG, "隐藏 " + label + ": " + v.getVisibility());
-            }
-        } catch (Throwable t) {
-            module.logd(Log.WARN, module.TAG,
-                    "隐藏 tab 失败 (" + label + ")，字段 " + fieldName + " 可能被 Robust 重命名");
-        }
     }
 }

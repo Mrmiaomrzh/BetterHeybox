@@ -13,6 +13,12 @@ final class InWindowTipWatcher {
 
     private static final String TIP_ID_NAME = "vg_update_tips";
     private static final long SCAN_INTERVAL_MS = 2000L;
+
+    private static final long RESCAN_MIN_INTERVAL_MS = 1000L;
+
+    private static final int SCAN_NODE_BUDGET = 2000;
+
+    private static volatile long sLastScanAt;
     private static final java.lang.ref.WeakReference<View> EMPTY_DECOR_REF =
             new java.lang.ref.WeakReference<>(null);
     /** 扫描循环当前绑定的 decor：Activity 重建后要起自己的循环，而不是继承死掉的 */
@@ -50,6 +56,7 @@ final class InWindowTipWatcher {
                 return;
             }
             sTipRef = EMPTY_TIP_REF;
+            sLastScanAt = 0L;
             scan(decor);
             decor.getViewTreeObserver().addOnGlobalLayoutListener(
                     new android.view.ViewTreeObserver.OnGlobalLayoutListener() {
@@ -69,6 +76,11 @@ final class InWindowTipWatcher {
                                 if (known != null && known.isAttachedToWindow()) {
                                     return;
                                 }
+                                long now = android.os.SystemClock.uptimeMillis();
+                                if (now - sLastScanAt < RESCAN_MIN_INTERVAL_MS) {
+                                    return;
+                                }
+                                sLastScanAt = now;
                                 scan(decor);
                             } catch (Throwable ignored) {
                             }
@@ -83,6 +95,7 @@ final class InWindowTipWatcher {
                         if (activity.isFinishing() || activity.isDestroyed()) {
                             return;
                         }
+                        sLastScanAt = android.os.SystemClock.uptimeMillis();
                         scan(decor);
                     } catch (Throwable ignored) {
                     }
@@ -96,17 +109,27 @@ final class InWindowTipWatcher {
         }
     }
 
-    private static void scan(View view) {
+    private static void scan(View root) {
+        com.better.heybox.ModuleStats.tipWatcherScans.incrementAndGet();
+        scan(root, SCAN_NODE_BUDGET);
+    }
+
+    private static int scan(View view, int budget) {
+        if (budget < 0) {
+            return budget;
+        }
         if (view.getId() == sTipId) {
             watch(view);
         }
         if (!(view instanceof ViewGroup)) {
-            return;
+            return budget - 1;
         }
         ViewGroup group = (ViewGroup) view;
-        for (int i = 0; i < group.getChildCount(); i++) {
-            scan(group.getChildAt(i));
+        int left = budget - 1;
+        for (int i = 0; i < group.getChildCount() && left >= 0; i++) {
+            left = scan(group.getChildAt(i), left);
         }
+        return left;
     }
 
     private static void watch(final View tip) {

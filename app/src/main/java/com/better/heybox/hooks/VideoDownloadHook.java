@@ -52,12 +52,23 @@ public final class VideoDownloadHook {
 
     public static void setGlassSettingsVisible(boolean visible) {
         glassSettingsVisible = visible;
+        java.util.List<EntryController> live = new java.util.ArrayList<>();
         synchronized (EntryController.CONTROLLERS) {
-            for (EntryController controller : EntryController.CONTROLLERS.values()) {
-                if (controller != null) {
-                    controller.sync();
+            java.util.Iterator<java.util.Map.Entry<ViewGroup,
+                    java.lang.ref.WeakReference<EntryController>>> it =
+                    EntryController.CONTROLLERS.entrySet().iterator();
+            while (it.hasNext()) {
+                java.lang.ref.WeakReference<EntryController> ref = it.next().getValue();
+                EntryController controller = ref == null ? null : ref.get();
+                if (controller == null) {
+                    it.remove();
+                    continue;
                 }
+                live.add(controller);
             }
+        }
+        for (EntryController controller : live) {
+            controller.sync();
         }
     }
 
@@ -182,7 +193,7 @@ public final class VideoDownloadHook {
  */
     private static final class EntryController {
 
-        private static final Map<ViewGroup, EntryController> CONTROLLERS =
+        private static final Map<ViewGroup, WeakReference<EntryController>> CONTROLLERS =
                 new java.util.WeakHashMap<>();
 
         private static final class Candidate {
@@ -218,6 +229,21 @@ public final class VideoDownloadHook {
                 };
         private boolean listenersAttached;
 
+        private final View.OnAttachStateChangeListener decorAttachListener =
+                new View.OnAttachStateChangeListener() {
+                    @Override
+                    public void onViewAttachedToWindow(View v) {
+                        if (entry != null && entry.getParent() == decor) {
+                            attachListeners();
+                        }
+                    }
+
+                    @Override
+                    public void onViewDetachedFromWindow(View v) {
+                        detachListeners();
+                    }
+                };
+
         private DownloadFab entry;
         private DownloadSheet sheet;
         /** 当前参与竞选的候选（最新可见者），sync 中更新 */
@@ -226,17 +252,46 @@ public final class VideoDownloadHook {
         EntryController(MainModule module, ViewGroup decor) {
             this.module = module;
             this.decor = decor;
+            com.better.heybox.ModuleStats.videoControllersCreated.incrementAndGet();
+            try {
+                decor.addOnAttachStateChangeListener(decorAttachListener);
+            } catch (Throwable ignored) {
+            }
         }
 
         static EntryController get(ViewGroup decor) {
             synchronized (CONTROLLERS) {
-                return CONTROLLERS.get(decor);
+                WeakReference<EntryController> ref = CONTROLLERS.get(decor);
+                if (ref == null) {
+                    return null;
+                }
+                EntryController controller = ref.get();
+                if (controller == null) {
+                    CONTROLLERS.remove(decor);
+                }
+                return controller;
             }
         }
 
         static void put(ViewGroup decor, EntryController controller) {
             synchronized (CONTROLLERS) {
-                CONTROLLERS.put(decor, controller);
+                CONTROLLERS.put(decor, new WeakReference<>(controller));
+            }
+        }
+
+        private void detachListeners() {
+            if (!listenersAttached) {
+                return;
+            }
+            listenersAttached = false;
+            try {
+                ViewTreeObserver vto = decor.getViewTreeObserver();
+                if (vto != null && vto.isAlive()) {
+                    vto.removeOnScrollChangedListener(decorScrollListener);
+                    vto.removeOnDrawListener(decorDrawListener);
+                    com.better.heybox.ModuleStats.videoDecorListenersRemoved.incrementAndGet();
+                }
+            } catch (Throwable ignored) {
             }
         }
 
@@ -356,14 +411,21 @@ public final class VideoDownloadHook {
                 top = maxTop;
             }
             FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) entry.getLayoutParams();
-            if (entry.getVisibility() != View.VISIBLE
-                    || lp.leftMargin != left || lp.topMargin != top) {
+            boolean changed = false;
+            if (entry.getVisibility() != View.VISIBLE) {
                 entry.setVisibility(View.VISIBLE);
+                changed = true;
+            }
+            if (lp.leftMargin != left || lp.topMargin != top) {
                 lp.leftMargin = left;
                 lp.topMargin = top;
                 entry.setLayoutParams(lp);
+                changed = true;
             }
-            entry.invalidate();
+            changed |= entry.bind(chosen.url);
+            if (changed) {
+                entry.invalidate();
+            }
         }
 
         /** 向上找第一个自身有尺寸的祖先（AbsVideoView 宽高可为 0，锚点用其容器） */
@@ -465,6 +527,9 @@ public final class VideoDownloadHook {
         }
 
         private void attachListeners() {
+            if (listenersAttached) {
+                return;
+            }
             try {
                 ViewTreeObserver vto = decor.getViewTreeObserver();
                 vto.addOnScrollChangedListener(decorScrollListener);
@@ -635,9 +700,11 @@ public final class VideoDownloadHook {
             return d;
         }
 
-        void bind(String url) {
+        boolean bind(String url) {
+            boolean changed = !url.equals(this.boundUrl);
             this.boundUrl = url;
             refreshTaskState();
+            return changed;
         }
 
         @Override

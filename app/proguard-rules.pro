@@ -7,6 +7,15 @@
 
 -keep class com.better.heybox.** { *; }
 
+-keepclassmembers class com.example.liquidglass.LiquidGlassTabBar {
+    *** tabs;
+    *** overLightAppearance;
+    *** updateTabStyles();
+}
+-keepclassmembers class com.example.liquidglass.LiquidGlassView {
+    *** currentTintColor();
+}
+
 -dontwarn org.luckypray.**
 -dontwarn com.google.flatbuffers.**
 -dontwarn org.lsposed.**

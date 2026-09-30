@@ -172,8 +172,11 @@ public final class TextSelectHook {
             return;
         }
         synchronized (sRegisteredRoots) {
-            for (WeakReference<View> ref : sRegisteredRoots) {
-                if (ref.get() == root) {
+            for (int i = sRegisteredRoots.size() - 1; i >= 0; i--) {
+                View alive = sRegisteredRoots.get(i).get();
+                if (alive == null) {
+                    sRegisteredRoots.remove(i);
+                } else if (alive == root) {
                     return;
                 }
             }
@@ -183,9 +186,10 @@ public final class TextSelectHook {
 
     private void refreshAll() {
         synchronized (sRegisteredRoots) {
-            for (WeakReference<View> ref : sRegisteredRoots) {
-                View root = ref.get();
+            for (int i = sRegisteredRoots.size() - 1; i >= 0; i--) {
+                View root = sRegisteredRoots.get(i).get();
                 if (root == null) {
+                    sRegisteredRoots.remove(i);
                     continue;
                 }
                 try {

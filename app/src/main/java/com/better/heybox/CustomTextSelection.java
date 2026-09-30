@@ -48,10 +48,27 @@ public final class CustomTextSelection {
 
     private static final String TAG = "BetterHeybox";
     private static final int DEFAULT_ACCENT = 0xFF1677FF;
-    private static final Map<TextView, Controller> CONTROLLERS =
-            Collections.synchronizedMap(new WeakHashMap<TextView, Controller>());
+
+    private static final Map<TextView, WeakReference<Controller>> CONTROLLERS =
+            Collections.synchronizedMap(
+                    new WeakHashMap<TextView, WeakReference<Controller>>());
+
+    private static final java.util.concurrent.atomic.AtomicInteger sRegisteredApprox =
+            new java.util.concurrent.atomic.AtomicInteger();
 
     private CustomTextSelection() {
+    }
+
+    private static Controller controllerOf(TextView tv) {
+        WeakReference<Controller> ref = CONTROLLERS.get(tv);
+        if (ref == null) {
+            return null;
+        }
+        Controller controller = ref.get();
+        if (controller == null) {
+            CONTROLLERS.remove(tv);
+        }
+        return controller;
     }
 
     /**
@@ -100,10 +117,7 @@ public final class CustomTextSelection {
             return false;
         }
         attach(tv, true, overlayHost);
-        Controller controller;
-        synchronized (CONTROLLERS) {
-            controller = CONTROLLERS.get(tv);
-        }
+        Controller controller = controllerOf(tv);
         return controller != null && controller.beginSelectionNow(x, y);
     }
 
@@ -112,14 +126,15 @@ public final class CustomTextSelection {
             return;
         }
         synchronized (CONTROLLERS) {
-            Controller existing = CONTROLLERS.get(tv);
+            Controller existing = controllerOf(tv);
             if (existing != null) {
                 existing.updateOverlayHost(overlayHost);
                 existing.rebind(takeLongPress);
                 return;
             }
             Controller controller = new Controller(tv, takeLongPress, overlayHost);
-            CONTROLLERS.put(tv, controller);
+            CONTROLLERS.put(tv, new WeakReference<Controller>(controller));
+            sRegisteredApprox.incrementAndGet();
             controller.attach();
         }
     }
@@ -137,10 +152,7 @@ public final class CustomTextSelection {
         if (tv == null || tv.getWindowToken() == null || !tv.isShown()) {
             return false;
         }
-        Controller controller;
-        synchronized (CONTROLLERS) {
-            controller = CONTROLLERS.get(tv);
-        }
+        Controller controller = controllerOf(tv);
         if (controller == null) {
             return false;
         }
@@ -152,10 +164,7 @@ public final class CustomTextSelection {
         if (tv == null || out == null || out.length < 2) {
             return false;
         }
-        Controller controller;
-        synchronized (CONTROLLERS) {
-            controller = CONTROLLERS.get(tv);
-        }
+        Controller controller = controllerOf(tv);
         if (controller == null || !controller.hasDownPoint()) {
             return false;
         }
@@ -163,27 +172,70 @@ public final class CustomTextSelection {
         out[1] = controller.downY;
         return true;
     }
+
     public static void detach(TextView tv) {
         if (tv == null) {
             return;
         }
         Controller controller;
         synchronized (CONTROLLERS) {
-            controller = CONTROLLERS.remove(tv);
+            WeakReference<Controller> ref = CONTROLLERS.remove(tv);
+            controller = ref == null ? null : ref.get();
+            if (controller != null) {
+                sRegisteredApprox.decrementAndGet();
+            }
         }
         if (controller != null) {
             controller.detach();
         }
     }
     static void cancelAll() {
+        java.util.List<Controller> live = new java.util.ArrayList<>();
         synchronized (CONTROLLERS) {
-            for (Controller controller : CONTROLLERS.values()) {
-                try {
-                    controller.cancel();
-                } catch (Throwable ignored) {
+            java.util.Iterator<Map.Entry<TextView, WeakReference<Controller>>> it =
+                    CONTROLLERS.entrySet().iterator();
+            while (it.hasNext()) {
+                WeakReference<Controller> ref = it.next().getValue();
+                Controller controller = ref == null ? null : ref.get();
+                if (controller == null) {
+                    it.remove();
+                    continue;
                 }
+                live.add(controller);
             }
         }
+        for (Controller controller : live) {
+            try {
+                controller.cancel();
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
+    public static int liveControllerCount() {
+        int live = 0;
+        int swept = 0;
+        synchronized (CONTROLLERS) {
+            java.util.Iterator<WeakReference<Controller>> it = CONTROLLERS.values().iterator();
+            while (it.hasNext()) {
+                WeakReference<Controller> ref = it.next();
+                if (ref == null || ref.get() == null) {
+                    it.remove();
+                    swept++;
+                    continue;
+                }
+                live++;
+            }
+        }
+        if (swept > 0) {
+            sRegisteredApprox.addAndGet(-swept);
+            com.better.heybox.ModuleStats.textSelectionSwept.addAndGet(swept);
+        }
+        return live;
+    }
+
+    public static int liveControllerCountReadOnly() {
+        return Math.max(0, sRegisteredApprox.get());
     }
 
     private static final class Controller implements View.OnTouchListener, View.OnLongClickListener,
@@ -217,6 +269,7 @@ public final class CustomTextSelection {
         private View selectAllDivider;
         private boolean menuAbove;
         private int draggingHandle;
+        private boolean layoutListenerAttached;
 
         private final ViewTreeObserver.OnScrollChangedListener scrollListener =
                 new ViewTreeObserver.OnScrollChangedListener() {
@@ -279,7 +332,10 @@ public final class CustomTextSelection {
                 // must come last or long-press would never fire
                 tv.setOnLongClickListener(this);
             }
-            tv.addOnLayoutChangeListener(layoutListener);
+            if (!layoutListenerAttached) {
+                tv.addOnLayoutChangeListener(layoutListener);
+                layoutListenerAttached = true;
+            }
         }
 
         /**
@@ -301,7 +357,10 @@ public final class CustomTextSelection {
 
         void detach() {
             cancel();
-            tv.removeOnLayoutChangeListener(layoutListener);
+            if (layoutListenerAttached) {
+                tv.removeOnLayoutChangeListener(layoutListener);
+                layoutListenerAttached = false;
+            }
             tv.setOnTouchListener(prevTouch);
             if (takeLongPress) {
                 // restore only if we took over long-press (never clobber the host's own listener)

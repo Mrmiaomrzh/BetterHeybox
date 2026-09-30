@@ -29,6 +29,7 @@ import org.luckypray.dexkit.query.matchers.MethodMatcher;
 import org.luckypray.dexkit.result.ClassData;
 import org.luckypray.dexkit.result.MethodData;
 
+import com.better.heybox.hooks.FakeUsageAccessHook;
 import com.better.heybox.hooks.GameLibraryCleanHook;
 import com.better.heybox.hooks.PromoteDetector;
 
@@ -791,7 +792,53 @@ public final class HeyboxTargets {
                         new String[0],
                         0, 0,
                         HeyboxTargets::isLinksGetter),
+
+                new Target(FakeUsageAccessHook.TARGET_FAKE_USAGE_GRANTED,
+                        new String[]{FakeUsageAccessHook.GRANT_CLASS},
+                        new String[]{"i", "a"},
+                        new String[]{"usagestats"},
+                        new String[]{"usagestats", "queryUsageStats"},
+                        1, 1,
+                        HeyboxTargets::isContextBoolean),
+
+                new Target(FakeUsageAccessHook.TARGET_FAKE_USAGE_LIST,
+                        new String[]{FakeUsageAccessHook.USAGE_CLASS},
+                        new String[]{"r"},
+                        new String[]{"UsageManager"},
+                        new String[]{"queryUsageStats", "queryEvents"},
+                        1, 1,
+                        HeyboxTargets::isContextList),
+
+                new Target(FakeUsageAccessHook.TARGET_FAKE_USAGE_UPLOAD,
+                        new String[]{FakeUsageAccessHook.USAGE_CLASS},
+                        new String[]{"h"},
+                        new String[]{"UsageManager"},
+                        new String[]{"getAndUploadUsageInfoInWhiteList", "mobileapp_white_list_version"},
+                        5, 5,
+                        HeyboxTargets::isUsageUpload),
         };
+    }
+
+    private static boolean isContextBoolean(Method method) {
+        return method.getParameterCount() == 1
+                && method.getParameterTypes()[0] == Context.class
+                && method.getReturnType() == boolean.class;
+    }
+
+    private static boolean isContextList(Method method) {
+        return method.getParameterCount() == 1
+                && method.getParameterTypes()[0] == Context.class
+                && java.util.List.class.isAssignableFrom(method.getReturnType());
+    }
+
+    private static boolean isUsageUpload(Method method) {
+        if (method.getParameterCount() != 5 || method.getReturnType() != void.class) {
+            return false;
+        }
+        Class<?>[] types = method.getParameterTypes();
+        return types[0] == Context.class
+                && types[2] == boolean.class
+                && types[3] == boolean.class;
     }
 
     private static void LOG(String message) {

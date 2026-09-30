@@ -83,6 +83,14 @@ public final class WatchFetcher {
 
     private static volatile MainModule sModule;
 
+    private static final Map<String, String> BASE_HEADERS;
+    static {
+        Map<String, String> h = new LinkedHashMap<>();
+        h.put("Accept", "application/json");
+        h.put("Referer", "https://www.xiaoheihe.cn/");
+        BASE_HEADERS = java.util.Collections.unmodifiableMap(h);
+    }
+
     private WatchFetcher() {
     }
 
@@ -102,10 +110,9 @@ public final class WatchFetcher {
         if (userId == null || userId.isEmpty()) {
             return out;
         }
-        Map<String, String> headers = baseHeaders();
         String body = null;
         for (String path : USER_POSTS_PATHS) {
-            body = HttpBridge.get(BASE + path + "?userid=" + userId + "&offset=0&limit=" + limit, headers);
+            body = HttpBridge.get(BASE + path + "?userid=" + userId + "&offset=0&limit=" + limit, BASE_HEADERS);
             if (body != null && !body.isEmpty() && body.contains("link")) {
                 break;
             }
@@ -133,11 +140,10 @@ public final class WatchFetcher {
      */
     public static List<String[]> fetchFollowing(int limit) {
         List<String[]> out = new ArrayList<>();
-        Map<String, String> headers = baseHeaders();
         String body = null;
         String usedPath = null;
         for (String path : FOLLOWING_PATHS) {
-            body = HttpBridge.get(BASE + path + "?offset=0&limit=50", headers);
+            body = HttpBridge.get(BASE + path + "?offset=0&limit=50", BASE_HEADERS);
             if (body != null && body.length() > 20) {
                 usedPath = path;
                 break;
@@ -182,8 +188,7 @@ public final class WatchFetcher {
      * @return 每个元素 {话题id, 话题名}，id 可能为 null
      */
     public static List<String[]> fetchFollowedTopics(int limit) {
-        Map<String, String> headers = baseHeaders();
-        String body = HttpBridge.get(BASE + TOPIC_LIST_PATHS[0] + "?offset=0&limit=50", headers);
+        String body = HttpBridge.get(BASE + TOPIC_LIST_PATHS[0] + "?offset=0&limit=50", BASE_HEADERS);
         List<String[]> out = new ArrayList<>();
         if (body != null && body.length() > 20) {
             out.addAll(parseTopicPairs(body, limit));
@@ -231,7 +236,7 @@ public final class WatchFetcher {
             }
             sb.append(ids.get(i));
         }
-        String body = HttpBridge.get(BASE + TOPIC_INFO_PATH + "?topic_ids=" + sb, baseHeaders());
+        String body = HttpBridge.get(BASE + TOPIC_INFO_PATH + "?topic_ids=" + sb, BASE_HEADERS);
         if (body == null || body.isEmpty()) {
             log(Log.WARN, "话题名解析无响应");
             return out;
@@ -272,7 +277,7 @@ public final class WatchFetcher {
         String q = java.net.URLEncoder.encode(keyword.trim());
         for (String path : TOPIC_SEARCH_PATHS) {
             String body = HttpBridge.get(BASE + path + "?q=" + q + "&keyword=" + q
-                    + "&offset=0&limit=" + limit, baseHeaders());
+                    + "&offset=0&limit=" + limit, BASE_HEADERS);
             if (body != null && body.length() > 20) {
                 out.addAll(parseTopicPairs(body, limit));
             }
@@ -322,7 +327,6 @@ public final class WatchFetcher {
     /** 按话题取最新帖（id 优先，退化为话题名搜索） */
     public static List<WatchItem> fetchTopicPosts(String topicId, String topicName, int limit) {
         List<WatchItem> out = new ArrayList<>();
-        Map<String, String> headers = baseHeaders();
         String body = null;
         if (topicId != null && !topicId.isEmpty()) {
             String[] queries = {
@@ -334,7 +338,7 @@ public final class WatchFetcher {
             };
             for (String path : TOPIC_FEED_PATHS) {
                 for (String q : queries) {
-                    body = HttpBridge.get(BASE + path + q, headers);
+                    body = HttpBridge.get(BASE + path + q, BASE_HEADERS);
                     if (body != null && body.length() > 50) {
                         try {
                             collect(new JSONObject(body), out, 0);
@@ -365,11 +369,10 @@ public final class WatchFetcher {
             return out;
         }
         String q = java.net.URLEncoder.encode(keyword.trim());
-        Map<String, String> headers = baseHeaders();
         for (String path : SEARCH_PATHS) {
             // 实测：general/search/v1 必须带 search_type/type 才会返回帖子（不带就是空 items）
             String body = HttpBridge.get(BASE + path + "?q=" + q + "&query=" + q
-                    + "&offset=0&limit=" + limit + "&search_type=link&type=link", headers);
+                    + "&offset=0&limit=" + limit + "&search_type=link&type=link", BASE_HEADERS);
             if (body == null || body.length() < 50) {
                 sleepQuiet(400);
                 continue;
@@ -392,9 +395,8 @@ public final class WatchFetcher {
     /** 推荐关键词候选：热搜词 + 联想词（seed 可为空） */
     public static List<String> fetchHotWords(String seed, int limit) {
         List<String> out = new ArrayList<>();
-        Map<String, String> headers = baseHeaders();
         for (String path : HOT_WORD_PATHS) {
-            String body = HttpBridge.get(BASE + path, headers);
+            String body = HttpBridge.get(BASE + path, BASE_HEADERS);
             if (body != null && body.length() > 10) {
                 collectWords(body, out, limit);
             }
@@ -405,7 +407,7 @@ public final class WatchFetcher {
         if (seed != null && !seed.trim().isEmpty() && out.size() < limit) {
             String q = java.net.URLEncoder.encode(seed.trim());
             for (String path : SUGGEST_PATHS) {
-                String body = HttpBridge.get(BASE + path + "?q=" + q + "&query=" + q, headers);
+                String body = HttpBridge.get(BASE + path + "?q=" + q + "&query=" + q, BASE_HEADERS);
                 if (body != null && body.length() > 10) {
                     collectWords(body, out, limit);
                 }
@@ -728,13 +730,6 @@ public final class WatchFetcher {
             }
         }
         return null;
-    }
-
-    private static Map<String, String> baseHeaders() {
-        Map<String, String> h = new HashMap<>();
-        h.put("Accept", "application/json");
-        h.put("Referer", "https://www.xiaoheihe.cn/");
-        return h;
     }
 
     private static String nz(String s) {

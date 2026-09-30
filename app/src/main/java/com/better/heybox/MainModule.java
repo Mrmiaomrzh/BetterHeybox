@@ -19,6 +19,7 @@ import com.better.heybox.hooks.CommentCopyHook;
 import com.better.heybox.hooks.CommentFilterHook;
 import com.better.heybox.hooks.LiquidGlassBottomBarHook;
 import com.better.heybox.hooks.DailyTaskHook;
+import com.better.heybox.hooks.FakeUsageAccessHook;
 import com.better.heybox.hooks.FavourAutoCleanHook;
 import com.better.heybox.hooks.FeedBannerHook;
 import com.better.heybox.hooks.GameLibraryCleanHook;
@@ -27,6 +28,7 @@ import com.better.heybox.hooks.ImageShareHook;
 import com.better.heybox.hooks.MessageRedDotHook;
 import com.better.heybox.hooks.MyTaskHook;
 import com.better.heybox.hooks.PromotePostHook;
+import com.better.heybox.hooks.PostDetailCleanHook;
 import com.better.heybox.hooks.PostFilterHook;
 import com.better.heybox.hooks.WatchHook;
 import com.better.heybox.hooks.SearchPageCleanHook;
@@ -238,6 +240,11 @@ public class MainModule extends XposedModule {
                 App.KEY_SEARCH_HIDE_BANNER, App.KEY_SEARCH_HIDE_DISCOVER, App.KEY_SEARCH_HIDE_HOT_RANK);
         registerHook("游戏库精简", new GameLibraryCleanHook(this)::install, cl,
                 App.KEY_GAME_LIB_HIDE_BANNER, App.KEY_GAME_LIB_HIDE_MENU, App.KEY_GAME_LIB_HIDE_SECTIONS);
+        registerHook("帖子详情精简", new PostDetailCleanHook(this)::install, cl,
+                App.KEY_POST_DETAIL_CLEAN, App.KEY_POST_DETAIL_TOPIC_NO_CLICK, App.KEY_POST_DETAIL_TOPIC_HIDE,
+                App.KEY_POST_DETAIL_HIDE_IDS);
+        registerHook("伪装使用情况权限", new FakeUsageAccessHook(this)::install, cl,
+                App.KEY_FAKE_USAGE_ACCESS, App.KEY_FAKE_USAGE_EMPTY_DATA);
         registerHook("文本选择", new TextSelectHook(this)::install, cl,
                 App.KEY_COPY_POST, App.KEY_CUSTOM_TEXT_SELECT);
         registerHook("评论自由复制", new CommentCopyHook(this)::install, cl,
@@ -362,7 +369,20 @@ public class MainModule extends XposedModule {
 
     /** Called on a settings change: install hooks skipped at startup so a switch takes effect at once (#37). */
     public void onSettingChanged(String key) {
-        if (key == null || pendingHookCount.get() == 0) {
+        if (key == null) {
+            return;
+        }
+        // 远端偏好（LSPosed 面板）改动也要让首页过滤的配置快照立刻重读（#44）。
+        // 本机面板那半边由 HeyboxPrefs.setBoolean/setString 负责。
+        invalidatePostFilterConfig();
+        // 帖子详情精简已经装好 Hook 时也要重读开关：它是按「当前值」决定隐藏还是还原的（#43）
+        if (key.startsWith("post_detail_")) {
+            com.better.heybox.hooks.PostDetailCleanHook.refresh();
+        }
+        if (App.KEY_FAKE_USAGE_ACCESS.equals(key) || App.KEY_FAKE_USAGE_EMPTY_DATA.equals(key)) {
+            com.better.heybox.hooks.FakeUsageAccessHook.refresh();
+        }
+        if (pendingHookCount.get() == 0) {
             return;
         }
         ClassLoader cl = targetClassLoader;
@@ -411,9 +431,11 @@ public class MainModule extends XposedModule {
                 return;
             }
             settingsListener = (p, key) -> {
-                if (key == null || pendingHookCount.get() == 0) {
+                if (key == null) {
                     return;
                 }
+                // 不再因 pendingHookCount==0 早退：onSettingChanged 还要给
+                // 「已装好但要重读开关」的功能（帖子详情精简 / 使用情况权限伪装，#43）做热更新。
                 try {
                     mainHandler().post(() -> onSettingChanged(key));
                 } catch (Throwable ignored) {
