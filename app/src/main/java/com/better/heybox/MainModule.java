@@ -31,6 +31,7 @@ import com.better.heybox.hooks.PromotePostHook;
 import com.better.heybox.hooks.PostDetailCleanHook;
 import com.better.heybox.hooks.PostFilterHook;
 import com.better.heybox.hooks.WatchHook;
+import com.better.heybox.hooks.ScreenshotCaptureHook;
 import com.better.heybox.hooks.SearchPageCleanHook;
 import com.better.heybox.hooks.SettingsEntryHook;
 import com.better.heybox.hooks.ShareLinkPurifyHook;
@@ -261,6 +262,8 @@ public class MainModule extends XposedModule {
         registerHook("视频下载", new VideoDownloadHook(this)::install, cl, App.KEY_VIDEO_DOWNLOAD);
         registerHook("网页 DevTools", new WebViewDevToolsHook(this)::install, cl,
                 App.KEY_WEBVIEW_DEVTOOLS);
+        registerHook("截图捕获", new ScreenshotCaptureHook(this)::install, cl,
+                App.KEY_SCREENSHOT_ENABLED);
         registerHook("目标提示", new TargetHintHook(this)::install, cl);
         registerHook("每日任务", ignored -> {
             dailyTaskHook = new DailyTaskHook(this);

@@ -784,6 +784,18 @@ public final class CommentCopyHook {
                         }
                     }));
         }
+        // Add screenshot option if enabled
+        if (module.isEnabled(App.KEY_SCREENSHOT_ENABLED, true)) {
+            container.addView(sheetDivider(activity, dividerColor));
+            container.addView(sheetRow(activity, "截图此评论", primary, ripple,
+                    new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            dialog.dismiss();
+                            screenshotComment(activity, commentView);
+                        }
+                    }));
+        }
         container.addView(sheetDivider(activity, dividerColor));
         container.addView(sheetRow(activity, "取消", secondary, ripple,
                 new View.OnClickListener() {
@@ -1220,5 +1232,20 @@ public final class CommentCopyHook {
     private static String summarize(String text) {
         String one = text.replace('\n', ' ');
         return one.length() <= 24 ? one : one.substring(0, 24) + "…";
+    }
+
+    private void screenshotComment(Activity activity, TextView commentView) {
+        try {
+            com.better.heybox.hooks.ScreenshotCaptureHook screenshotHook =
+                com.better.heybox.hooks.ScreenshotCaptureHook.getInstance();
+            if (screenshotHook != null) {
+                screenshotHook.captureCommentDirectly(activity, commentView);
+            } else {
+                Toast.makeText(activity, "截图功能未启用", Toast.LENGTH_SHORT).show();
+            }
+        } catch (Throwable t) {
+            module.logd(Log.WARN, module.TAG, "评论截图失败: " + t);
+            Toast.makeText(activity, "截图失败", Toast.LENGTH_SHORT).show();
+        }
     }
 }

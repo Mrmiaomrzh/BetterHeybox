@@ -130,6 +130,7 @@ public final class SettingsEntryHook {
         WATCH_TOPIC_SEARCH,GAME_LIB_TYPES, GAME_LIB_ENTRIES,GAME_LIB_SECTIONS,GAME_LIB_DIAG,
         MESSAGE_BADGE_ENTRIES, MESSAGE_FULL_HIDE_ENTRIES, MESSAGE_BADGE_DIAG,
         POST_DETAIL_HIDE_IDS, POST_DETAIL_DIAG, FAKE_USAGE_DIAG,
+        SCREENSHOT_HIDE_CUSTOM,
         MY_TASK_RUN, MY_TASK_REFRESH, MY_TASK_VIEW, MY_TASK_CLEAR
     }
 
@@ -189,6 +190,25 @@ public final class SettingsEntryHook {
                     new SwitchDef("下载视频", "视频上显示下载入口", App.KEY_VIDEO_DOWNLOAD, true, false),
                     new SwitchDef("保存位置", "选择保存文件夹", null, false, false, true, null, Action.PICK_DIR),
                     new SwitchDef("转存 MP4", "合并后转为 MP4", App.KEY_VIDEO_TO_MP4, true, false),
+            }),
+            new SettingsGroup("截图功能", new SwitchDef[]{
+                    new SwitchDef("启用截图功能", "贴文与留言截图，可多选", App.KEY_SCREENSHOT_ENABLED, true, false),
+                    new SwitchDef("隐藏用户标签", "截图时隐藏标签", App.KEY_SCREENSHOT_HIDE_TAGS, true, false),
+                    new SwitchDef("隐藏时间戳", "截图时隐藏时间", App.KEY_SCREENSHOT_HIDE_TIMESTAMPS, false, false),
+                    new SwitchDef("隐藏操作按钮", "截图时隐藏按钮", App.KEY_SCREENSHOT_HIDE_ACTIONS, true, false),
+                    new SwitchDef("隐藏无关内容", "相关搜索、小程序、合集、活动", App.KEY_SCREENSHOT_HIDE_IRRELEVANT, true, false),
+                    new SwitchDef("隐藏关闭图标", "截图时隐藏 ✕ / 关闭 / 取消 图标",
+                            App.KEY_SCREENSHOT_HIDE_CLOSE, true, false),
+                    new SwitchDef("隐藏关注按钮", "截图时隐藏作者行的「关注」",
+                            App.KEY_SCREENSHOT_HIDE_FOLLOW, true, false),
+                    new SwitchDef("隐藏点赞数", "帖子与评论的点赞图标和数字",
+                            App.KEY_SCREENSHOT_HIDE_LIKE_COUNT, true, false),
+                    new SwitchDef("隐藏图片数量角标", "图片右上角的数量标识",
+                            App.KEY_SCREENSHOT_HIDE_IMAGE_COUNT, true, false),
+                    new SwitchDef("自定义隐藏内容", "资源名或 text:关键词",
+                            null, false, false, true, App.KEY_SCREENSHOT_HIDE_CUSTOM,
+                            Action.SCREENSHOT_HIDE_CUSTOM),
+                    new SwitchDef("添加水印", "BetterHeybox 水印", App.KEY_SCREENSHOT_ADD_WATERMARK, false, false),
             }),
             new SettingsGroup("解除复制", new SwitchDef[]{
                     new SwitchDef("解除复制", "恢复系统文本选择", App.KEY_COPY_POST, true, false),
@@ -385,7 +405,7 @@ public final class SettingsEntryHook {
                 entry(PAGE_UI, "界面与外观",
                         "液态玻璃、底栏隐藏、单列信息流"),
                 entry(PAGE_BROWSE, "浏览与下载",
-                        "解除复制、链接重定向、视频下载"),
+                        "解除复制、链接重定向、视频下载、截图功能"),
                 entry(PAGE_WATCH, "动态推送",
                         "关注 " + cfg.users.size() + " · 话题 " + cfg.topics.size()
                                 + " · 关键词 " + cfg.keywords.size() + " · 时间窗 "
@@ -462,6 +482,7 @@ public final class SettingsEntryHook {
             addBase(groups, "解除复制");
             insertBrowserRedirectGroup(activity, groups);
             addBase(groups, "视频下载");
+            addBase(groups, "截图功能");
             return groups;
         }
         if (PAGE_WATCH.equals(pageId)) {
@@ -2190,6 +2211,12 @@ public final class SettingsEntryHook {
                         setRowClick(itemCls, item, v -> showMultilineInfo(activity,
                                 "帖子详情精简状态", postDetailDiagnostics()));
                         break;
+                    case SCREENSHOT_HIDE_CUSTOM:
+                        setRowClick(itemCls, item, v -> showMultilineEditDialog(activity,
+                                "自定义隐藏内容", App.KEY_SCREENSHOT_HIDE_CUSTOM,
+                                "一行一个，资源名或 text:关键词，# 开头忽略",
+                                false));
+                        break;
                     case FAKE_USAGE_DIAG:
                         setRowClick(itemCls, item, v -> showMultilineInfo(activity,
                                 "使用情况权限伪装状态", fakeUsageDiagnostics()));
@@ -3107,6 +3134,19 @@ public final class SettingsEntryHook {
                         sb.append('\n');
                     }
                     sb.append(d);
+                }
+            }
+            normalized = sb.toString();
+        } else if (App.KEY_SCREENSHOT_HIDE_CUSTOM.equals(key)) {
+            StringBuilder sb = new StringBuilder();
+            java.util.Set<String> seen = new java.util.HashSet<>();
+            for (String token : raw.split("[\\n,，;；]+")) {
+                String item = token.trim();
+                if (!item.isEmpty() && seen.add(item)) {
+                    if (sb.length() > 0) {
+                        sb.append('\n');
+                    }
+                    sb.append(item);
                 }
             }
             normalized = sb.toString();

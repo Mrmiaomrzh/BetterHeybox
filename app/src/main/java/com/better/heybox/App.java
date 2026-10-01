@@ -132,6 +132,39 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
     /** 视频下载：HLS/TS 下载完成后自动转封装为 MP4（默认开，失败保留 ts） */
     public static final String KEY_VIDEO_TO_MP4 = "video_download_to_mp4";
 
+    /** 截图功能：贴文与留言截图（默认开） */
+    public static final String KEY_SCREENSHOT_ENABLED = "screenshot_enabled";
+
+    /** 截图功能：截图时隐藏用户标签（默认开） */
+    public static final String KEY_SCREENSHOT_HIDE_TAGS = "screenshot_hide_tags";
+
+    /** 截图功能：截图时隐藏时间戳（默认关） */
+    public static final String KEY_SCREENSHOT_HIDE_TIMESTAMPS = "screenshot_hide_timestamps";
+
+    /** 截图功能：截图时隐藏操作按钮（默认开） */
+    public static final String KEY_SCREENSHOT_HIDE_ACTIONS = "screenshot_hide_actions";
+
+    /** 截图功能：添加 BetterHeybox 水印（默认关） */
+    public static final String KEY_SCREENSHOT_ADD_WATERMARK = "screenshot_add_watermark";
+
+    /** 截图功能：截图时隐藏无关内容（相关搜索、小程序、合集、活动等，默认开） */
+    public static final String KEY_SCREENSHOT_HIDE_IRRELEVANT = "screenshot_hide_irrelevant";
+
+    /** 截图功能：截图时隐藏关闭 / 取消图标（默认开） */
+    public static final String KEY_SCREENSHOT_HIDE_CLOSE = "screenshot_hide_close";
+
+    /** 截图功能：截图时隐藏「关注」按钮（默认开） */
+    public static final String KEY_SCREENSHOT_HIDE_FOLLOW = "screenshot_hide_follow";
+
+    /** 截图功能：截图时隐藏点赞数与其图标（默认开） */
+    public static final String KEY_SCREENSHOT_HIDE_LIKE_COUNT = "screenshot_hide_like_count";
+
+    /** 截图功能：用户自定义隐藏 */
+    public static final String KEY_SCREENSHOT_HIDE_CUSTOM = "screenshot_hide_custom";
+
+    /** 截图功能：截图时隐藏图片右上角的数量角标（默认开） */
+    public static final String KEY_SCREENSHOT_HIDE_IMAGE_COUNT = "screenshot_hide_image_count";
+
     /** 净化分享链接：复制链接 / 系统分享时去掉 sid、share_app_id 等追踪参数（默认开） */
     public static final String KEY_PURIFY_SHARE_LINK = "purify_share_link";
 
@@ -390,6 +423,16 @@ public class App extends Application implements XposedServiceHelper.OnServiceLis
         m.put(KEY_SYSTEM_SHARE, true);
         m.put(KEY_VIDEO_DOWNLOAD, true);
         m.put(KEY_VIDEO_TO_MP4, true);
+        m.put(KEY_SCREENSHOT_ENABLED, true);
+        m.put(KEY_SCREENSHOT_HIDE_TAGS, true);
+        m.put(KEY_SCREENSHOT_HIDE_TIMESTAMPS, false);
+        m.put(KEY_SCREENSHOT_HIDE_ACTIONS, true);
+        m.put(KEY_SCREENSHOT_ADD_WATERMARK, false);
+        m.put(KEY_SCREENSHOT_HIDE_IRRELEVANT, true);
+        m.put(KEY_SCREENSHOT_HIDE_CLOSE, true);
+        m.put(KEY_SCREENSHOT_HIDE_FOLLOW, true);
+        m.put(KEY_SCREENSHOT_HIDE_LIKE_COUNT, true);
+        m.put(KEY_SCREENSHOT_HIDE_IMAGE_COUNT, true);
         m.put(KEY_PURIFY_SHARE_LINK, true);
         m.put(KEY_BROWSER_REDIRECT, false);
         m.put(KEY_BROWSER_REDIRECT_KNOWN, false);
