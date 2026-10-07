@@ -1342,8 +1342,25 @@ public final class PostFilterHook {
             "getTopic_name", "getPost_tag", "getRecTags", "getLink_tag", "getSpecial_tag",
     };
     private static final String[] TAG_NAME_GETTERS = {
-            "getName", "getDisplay_name", "getTitle", "getTag",
+            // getText 是 PostContentTagObj（content_tags[]，新版内容标签/话题 chip）唯一的文本 getter
+            "getName", "getDisplay_name", "getTitle", "getText", "getTag",
     };
+
+    /**
+     * 新版流载体（LinkFeedsFlowItemModel 族）自身没有任何话题 getter，
+     * 只能逐段下钻。每段用 safeInvoke 走，任一段返回 null 即放弃该通路；
+     * findGetter 已按 (Class, getter) 缓存，缺失的方法只是一次查表。
+     */
+    private static final String[][] TAG_PATHS = {
+            // 首页/推荐/资讯新流：内容标签（含话题 chip），文本在 PostContentTagObj.getText()
+            {"getCommunityPostPreload", "getPostContentSection", "getContent", "getContentTags"},
+            // 瀑布流卡片上的话题/标签 chip
+            {"getWaterfallTags"},
+    };
+
+    /** 宿主自己的话题标记正则（与 ExpressionEditText 等三处同字面量） */
+    private static final Pattern HASHTAG_PATTERN =
+            Pattern.compile("#(?!#|heybox:)(((?!heybox:|\\[.+?]).)*?)#(?!heybox:)");
 
     private String tagHit(Object item) {
         List<Object> matchers = cfg().tags;
@@ -1356,12 +1373,14 @@ public final class PostFilterHook {
         if (link != null) {
             collectTags(link, names);
         }
+        collectTagPaths(item, names);
         if (!names.isEmpty()) {
             String hit = matchAny(matchers, names.toArray(new String[0]));
             if (hit != null) {
                 return hit;
             }
         }
+        // 文本兜底：先从标题/正文里抽出 #话题# 标记，再按普通子串匹配（正则匹配器同样参与）
         String text = joinNonNull(safeTitle(item), safeText(item), safeGet(item, "getDescription"),
                 link == null ? null : safeGet(link, "getTitle"),
                 link == null ? null : safeGet(link, "getDescription"));
@@ -1369,31 +1388,68 @@ public final class PostFilterHook {
             return null;
         }
         String lower = text.toLowerCase().replace('\uff03', '#');
-        for (Object m : matchers) {
-            if (m instanceof String && lower.contains("#" + m)) {
-                return (String) m;
+        for (String tag : extractHashtags(lower)) {
+            String hit = matchAny(matchers, tag);
+            if (hit != null) {
+                return hit;
             }
         }
         return null;
     }
 
+    /** 抽出 #话题# 标记里的内容（不含 #），供文本兜底使用 */
+    private static List<String> extractHashtags(String text) {
+        List<String> out = new ArrayList<>();
+        java.util.regex.Matcher matcher = HASHTAG_PATTERN.matcher(text);
+        int n = 0;
+        while (matcher.find() && n < 32) {
+            String inner = matcher.group(1);
+            if (inner != null) {
+                inner = inner.trim();
+                if (!inner.isEmpty()) {
+                    out.add(inner);
+                }
+            }
+            n++;
+        }
+        return out;
+    }
+
+    /** 沿 TAG_PATHS 逐段下钻后收集话题/标签 */
+    private void collectTagPaths(Object item, List<String> out) {
+        for (String[] path : TAG_PATHS) {
+            Object owner = item;
+            for (String getter : path) {
+                owner = safeInvoke(owner, getter);
+                if (owner == null) {
+                    break;
+                }
+            }
+            addTagValue(owner, out);
+        }
+    }
+
     private void collectTags(Object owner, List<String> out) {
         for (String getter : TAG_GETTERS) {
-            Object value = safeInvoke(owner, getter);
-            if (value == null) {
-                continue;
-            }
-            if (value instanceof Iterable) {
-                int n = 0;
-                for (Object element : (Iterable<?>) value) {
-                    addTagName(element, out);
-                    if (++n >= 32) {
-                        break;
-                    }
+            addTagValue(safeInvoke(owner, getter), out);
+        }
+    }
+
+    /** Iterable 展开（上限 32）或单值收集 */
+    private void addTagValue(Object value, List<String> out) {
+        if (value == null) {
+            return;
+        }
+        if (value instanceof Iterable) {
+            int n = 0;
+            for (Object element : (Iterable<?>) value) {
+                addTagName(element, out);
+                if (++n >= 32) {
+                    break;
                 }
-            } else {
-                addTagName(value, out);
             }
+        } else {
+            addTagName(value, out);
         }
     }
 

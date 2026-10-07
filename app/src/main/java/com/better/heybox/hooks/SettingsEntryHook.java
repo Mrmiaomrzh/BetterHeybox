@@ -1090,9 +1090,9 @@ public final class SettingsEntryHook {
                         kwCount > 0 ? "已配置 " + kwCount + " 个"
                                 : "命中标题或正文即屏蔽",
                         null, false, false, true, null, Action.POST_KEYWORDS),
-                new SwitchDef("标签屏蔽",
+                new SwitchDef("话题/标签屏蔽",
                         tagCount > 0 ? "已配置 " + tagCount + " 个"
-                                : "命中帖子话题/标签即屏蔽",
+                                : "命中帖子话题 / 内容标签 / #话题# 即屏蔽",
                         null, false, false, true, null, Action.POST_TAGS),
                 new SwitchDef("AI 标题党识别",
                         "标题会发送给 AI 服务商",
@@ -2807,8 +2807,8 @@ public final class SettingsEntryHook {
     }
 
     private void showPostTagsDialog(Activity activity) {
-        showMultilineEditDialog(activity, "屏蔽标签", App.KEY_POST_TAGS,
-                "一行一个，可带 #；命中帖子话题/标签即屏蔽；regex: 前缀为正则", false);
+        showMultilineEditDialog(activity, "屏蔽话题/标签", App.KEY_POST_TAGS,
+                "一行一个，话题名直接写、不必带 #；命中帖子话题 / 内容标签 / #话题# 即屏蔽；regex: 前缀为正则", false);
     }
 
     private void showCommentKeywordsDialog(Activity activity) {
