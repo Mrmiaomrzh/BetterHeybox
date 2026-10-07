@@ -8,6 +8,7 @@
 ### 修复
 
 - **话题/标签屏蔽在新版帖子载体上静默失效**（#47）：首页推荐流 / 资讯流等新版载体（`LinkFeedsFlowItemModel` 族）自身没有任何话题 getter，取词只能拿到标题与正文，于是「标签屏蔽」配置了话题却一条也屏蔽不掉。现在补齐两条取词通路（内容的 `content_tags`、瀑布流卡片的话题 chip），并把正文 `#话题#` 兜底换成宿主同款话题正则、允许 `regex:` 规则一起参与。顺带把设置项改名为「话题/标签屏蔽」，输入话题名不必再带 `#`。
+- **截图分享不再往相册里留图**（#49）：以前「分享」复用了「保存」的导出通路（`ScreenshotExporter.saveScreenshot()` 写 `MediaStore` 的 `Pictures/Heybox`），于是每分享一次相册就多一张图，「只临时生图发图」做不到。现在分享改走缓存 + 宿主 `FileProvider`：PNG 写进应用内部缓存目录，再由宿主自带的 `com.max.xiaoheihe.fileprovider` 生成带读权限的 content:// URI，相册里不留图，临时文件按 1 小时 TTL 在下次分享时顺手回收；「保存到相册」按钮维持原样。宿主 dex 已把 `FileProvider.getUriForFile` 混淆成 `h`，新工具类改为按方法签名兜底查找，宿主换版本重新混淆也不会失效；万一 FileProvider 不可用则回退原相册通路，保证分享不会直接失败。
 
 ## 0.8.7
 

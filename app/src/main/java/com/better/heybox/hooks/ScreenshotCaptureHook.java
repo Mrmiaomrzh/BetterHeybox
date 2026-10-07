@@ -682,24 +682,41 @@ public final class ScreenshotCaptureHook {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                Uri saved = null;
+                Uri result = null;
+                boolean fellBackToGallery = false;
                 String failure = null;
                 try {
-                    saved = ScreenshotExporter.saveScreenshot(image, context);
+                    if (share) {
+                        result = ScreenshotExporter.prepareShareScreenshot(image, context);
+                        if (result == null) {
+                            fellBackToGallery = true;
+                            result = ScreenshotExporter.saveScreenshot(image, context);
+                        }
+                    } else {
+                        result = ScreenshotExporter.saveScreenshot(image, context);
+                    }
                 } catch (Throwable throwable) {
                     failure = String.valueOf(throwable);
                 }
-                final Uri uri = saved;
+                final Uri uri = result;
+                final boolean fellBack = fellBackToGallery;
                 final String error = failure;
                 mainHandler.post(new Runnable() {
                     @Override
                     public void run() {
                         if (uri == null) {
-                            module.logd(Log.ERROR, TAG, "保存截图失败: " + error);
-                            toast(context, "保存截图失败");
+                            module.logd(Log.ERROR, TAG,
+                                    (share ? "准备分享截图失败: " : "保存截图失败: ") + error);
+                            toast(context, share ? "分享截图失败" : "保存截图失败");
                             return;
                         }
                         if (share) {
+                            if (fellBack) {
+                                module.logd(Log.WARN, TAG,
+                                        "FileProvider 不可用，已回退相册并分享: " + uri);
+                            } else {
+                                module.logd(Log.INFO, TAG, "分享截图使用缓存临时文件: " + uri);
+                            }
                             try {
                                 ScreenshotExporter.shareScreenshot(context, uri);
                             } catch (Throwable throwable) {
@@ -712,7 +729,7 @@ public final class ScreenshotCaptureHook {
                     }
                 });
             }
-        }, "heybox-screenshot-save").start();
+        }, share ? "heybox-screenshot-share" : "heybox-screenshot-save").start();
     }
 
     public void captureCommentDirectly(final Activity activity, final View anyViewInComment) {

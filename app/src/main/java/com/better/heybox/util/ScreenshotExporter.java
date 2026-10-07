@@ -1,5 +1,6 @@
 package com.better.heybox.util;
 
+import android.content.ClipData;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
@@ -26,14 +27,36 @@ public final class ScreenshotExporter {
     private static final String FILE_PREFIX = "heybox_screenshot_";
     private static final String MIME_TYPE = "image/png";
 
+    private static final String SHARE_DIR_NAME = "share";
+    private static final long SHARE_FILE_TTL_MS = 60L * 60L * 1000L;
+
     private ScreenshotExporter() {
+    }
+
+    private interface BitmapSink {
+        Uri write(Bitmap bitmap) throws Exception;
     }
 
     public static Uri saveScreenshot(Bitmap screenshot, Context context) {
         if (screenshot == null || context == null || screenshot.isRecycled()) {
             return null;
         }
+        return exportWithWatermark(screenshot, context, bitmap -> {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                return saveToMediaStore(bitmap, context);
+            }
+            return saveToLegacyStorage(bitmap, context);
+        });
+    }
 
+    public static Uri prepareShareScreenshot(Bitmap screenshot, Context context) {
+        if (screenshot == null || context == null || screenshot.isRecycled()) {
+            return null;
+        }
+        return exportWithWatermark(screenshot, context, bitmap -> writeShareFile(bitmap, context));
+    }
+
+    private static Uri exportWithWatermark(Bitmap screenshot, Context context, BitmapSink sink) {
         Bitmap finalBitmap = screenshot;
         boolean watermarked = false;
         try {
@@ -41,17 +64,65 @@ public final class ScreenshotExporter {
                 finalBitmap = addWatermark(screenshot, context);
                 watermarked = finalBitmap != screenshot;
             }
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                return saveToMediaStore(finalBitmap, context);
-            }
-            return saveToLegacyStorage(finalBitmap, context);
+            return sink.write(finalBitmap);
         } catch (Throwable ignored) {
             return null;
         } finally {
             if (watermarked && finalBitmap != null && !finalBitmap.isRecycled()) {
                 finalBitmap.recycle();
             }
+        }
+    }
+
+    private static Uri writeShareFile(Bitmap bitmap, Context context) throws Exception {
+        File dir = shareDir(context);
+        if (dir == null) {
+            return null;
+        }
+        pruneShareDir(dir);
+
+        File outputFile = new File(dir, FILE_PREFIX + System.currentTimeMillis() + ".png");
+        boolean written;
+        try (OutputStream out = new FileOutputStream(outputFile)) {
+            written = bitmap.compress(Bitmap.CompressFormat.PNG, 100, out);
+        }
+        if (!written) {
+            outputFile.delete();
+            return null;
+        }
+
+        Uri uri = HostFileProvider.getUriForFile(context, outputFile);
+        if (uri == null) {
+            outputFile.delete();
+        }
+        return uri;
+    }
+
+    private static File shareDir(Context context) {
+        File base = context.getCacheDir();
+        if (base == null) {
+            return null;
+        }
+        File dir = new File(base, SHARE_DIR_NAME);
+        if (!dir.exists() && !dir.mkdirs()) {
+            return null;
+        }
+        return dir;
+    }
+
+    private static void pruneShareDir(File dir) {
+        try {
+            File[] files = dir.listFiles();
+            if (files == null) {
+                return;
+            }
+            long deadline = System.currentTimeMillis() - SHARE_FILE_TTL_MS;
+            for (File file : files) {
+                if (file.isFile() && file.lastModified() < deadline) {
+                    file.delete();
+                }
+            }
+        } catch (Throwable ignored) {
         }
     }
 
@@ -63,6 +134,7 @@ public final class ScreenshotExporter {
             Intent intent = new Intent(Intent.ACTION_SEND);
             intent.setType(MIME_TYPE);
             intent.putExtra(Intent.EXTRA_STREAM, uri);
+            intent.setClipData(ClipData.newRawUri("screenshot", uri));
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             Intent chooser = Intent.createChooser(intent, "分享截图");
             chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
