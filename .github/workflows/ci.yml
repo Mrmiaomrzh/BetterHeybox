@@ -123,10 +123,10 @@ jobs:
           author="$(printf '%s' "$COMMIT_AUTHOR" | escape_html)"
 
           {
-            printf '<b>新的 BetterHeybox Debug 已推送！</b>\n'
-            printf 'Commit SHA: <a href="%s/commit/%s"><code>%s</code></a>\n' "$repo_url" "$full_sha" "$short_sha"
-            printf '<blockquote expandable>%s</blockquote>\n' "$message"
-            printf '提交者: %s\n' "$author"
+            printf '<b>新的 BetterHeybox Debug 已推送！</b>\n\n'
+            printf 'Commit SHA: <a href="%s/commit/%s"><code>%s</code></a>\n\n' "$repo_url" "$full_sha" "$short_sha"
+            printf '<blockquote expandable>%s</blockquote>\n\n' "$message"
+            printf '提交者: %s\n\n' "$author"
             printf '<a href="%s">查看详情</a>\n' "$run_url"
           } > telegram-message.html
 
