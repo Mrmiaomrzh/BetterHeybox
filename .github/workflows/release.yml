@@ -1,0 +1,121 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Restore signing keystore from secrets
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            mkdir -p keystore
+            echo "$KEYSTORE_BASE64" | base64 --decode > keystore/release.jks
+            printf 'storeFile=keystore/release.jks\nstorePassword=%s\nkeyAlias=betterheybox\nkeyPassword=%s\n' \
+              "$KEYSTORE_PASSWORD" "$KEYSTORE_PASSWORD" > keystore.properties
+          else
+            echo "No KEYSTORE_BASE64 secret - building unsigned APK"
+          fi
+
+      - name: Validate release version and prepare notes
+        id: release_meta
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          version="${INPUT_VERSION#v}"
+          if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "版本号必须是 vX.X.X，例如 v0.3.1；实际收到: $INPUT_VERSION" >&2
+            exit 1
+          fi
+
+          tag="v${version}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "标签 ${tag} 已存在，请填写新的版本号" >&2
+            exit 1
+          fi
+
+          latest_tag="$(git tag --list 'v*' --sort=-version:refname | head -n 1)"
+          if [ -n "$latest_tag" ]; then
+            latest_version="${latest_tag#v}"
+            highest_version="$(printf '%s\n' "$latest_version" "$version" | sort -V | tail -n 1)"
+            if [ "$highest_version" != "$version" ]; then
+              echo "新版本 ${tag} 必须高于当前版本 ${latest_tag}" >&2
+              exit 1
+            fi
+          fi
+
+          previous_tag="$(git tag --list 'v*' --sort=-version:refname | head -n 1)"
+          {
+            echo "## 更新内容"
+            if [ -n "$previous_tag" ]; then
+              git log "${previous_tag}..HEAD" --pretty=format:'- %h %s'
+            else
+              git log -n 50 --pretty=format:'- %h %s'
+            fi
+            echo
+          } > release-notes.md
+
+          IFS='.' read -r major minor patch <<< "$version"
+          version_code=$((major * 1000000 + minor * 1000 + patch))
+          echo "version=v${version}" >> "$GITHUB_OUTPUT"
+          echo "version_name=v${version}" >> "$GITHUB_OUTPUT"
+          echo "version_code=${version_code}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Build release APK
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease \
+            --project-prop VERSION_NAME="${{ steps.release_meta.outputs.version_name }}" \
+            --project-prop VERSION_CODE="${{ steps.release_meta.outputs.version_code }}"
+
+      - name: Prepare release artifact
+        env:
+          RELEASE_VERSION: ${{ steps.release_meta.outputs.version }}
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/release/*.apk "dist/BetterHeybox-${RELEASE_VERSION}.apk"
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: BetterHeybox-${{ steps.release_meta.outputs.version }}
+          path: dist/
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v3.0.2
+        with:
+          tag_name: ${{ steps.release_meta.outputs.tag }}
+          name: ${{ steps.release_meta.outputs.version }}
+          body_path: release-notes.md
+          files: dist/*.apk
+          draft: false
+          prerelease: false

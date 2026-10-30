@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+
+concurrency:
+  group: ci-daily-build-number
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    name: Build CI APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Calculate CI version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: |
+          base_version="$(git tag --list 'v*' --sort=-version:refname | head -n 1)"
+          if [ -z "$base_version" ]; then
+            base_version="$(sed -n 's/^VERSION_NAME=//p' gradle.properties | head -n 1)"
+          fi
+          base_version="${base_version#v}"
+          if [[ ! "$base_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "VERSION_NAME must be numeric semver (x.y.z), got: $base_version" >&2
+            exit 1
+          fi
+
+          build_date="$(date -u +%y%m%d)"
+          build_date_iso="$(date -u +%Y-%m-%d)"
+          runs_today="$(gh api --paginate \
+            "/repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?event=push&created=${build_date_iso}..${build_date_iso}&per_page=100" \
+            --jq '.workflow_runs[].id' 2>/dev/null \
+            | grep -v "^${GITHUB_RUN_ID}$" \
+            | sort -u \
+            | wc -l \
+            | tr -d ' ')"
+          daily_build=$(( ${runs_today:-0} + 1 ))
+          ci_version="v${base_version}-${build_date}${daily_build}"
+
+          echo "version=${ci_version}" >> "$GITHUB_OUTPUT"
+          echo "version_name=${ci_version}" >> "$GITHUB_OUTPUT"
+          echo "version_code=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "CI version: ${ci_version}"
+
+      - name: Run unit tests
+        run: |
+          chmod +x gradlew
+          ./gradlew testDebugUnitTest
+
+      - name: Check migration discipline
+        if: hashFiles('tools/audit-kotlin-migration.ps1') != ''
+        shell: pwsh
+        run: ./tools/audit-kotlin-migration.ps1
+
+      - name: Build debug APK
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug \
+            --project-prop VERSION_NAME="${{ steps.version.outputs.version_name }}" \
+            --project-prop VERSION_CODE="${{ steps.version.outputs.version_code }}"
+
+      - name: Build release APK
+        run: |
+          ./gradlew assembleRelease \
+            --project-prop VERSION_NAME="${{ steps.version.outputs.version_name }}" \
+            --project-prop VERSION_CODE="${{ steps.version.outputs.version_code }}"
+
+      - name: Prepare CI artifact
+        env:
+          CI_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/*.apk "dist/BetterHeybox-${CI_VERSION}.apk"
+          printf '%s\n' "$CI_VERSION" > dist/version.txt
+
+      - name: Upload CI artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: BetterHeybox-${{ steps.version.outputs.version }}
+          path: dist/
+          retention-days: 14

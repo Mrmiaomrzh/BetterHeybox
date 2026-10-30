@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
+
+    <application
+        android:name=".App"
+        android:label="@string/app_name"
+        android:description="@string/module_description"
+        tools:ignore="MissingApplicationIcon">
+
+
+        <receiver
+            android:name=".PreferenceReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.better.heybox.SET_BOOLEAN" />
+                <action android:name="com.better.heybox.RELOAD_MODULE" />
+            </intent-filter>
+        </receiver>
+    </application>
+
+</manifest>
