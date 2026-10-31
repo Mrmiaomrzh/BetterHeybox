@@ -132,6 +132,21 @@ class TargetHintHook(private val module: MainModule) {
         @Volatile private var mHiddenText: String? = hiddenText
         private val mDensity = context.resources.displayMetrics.density
 
+        init {
+            val night = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
+                Configuration.UI_MODE_NIGHT_YES
+            val color = if (night) Color.WHITE else Color.BLACK
+            val textSize = android.util.TypedValue.applyDimension(
+                android.util.TypedValue.COMPLEX_UNIT_SP, 14f, context.resources.displayMetrics
+            )
+            mVisiblePaint.color = color
+            mVisiblePaint.alpha = VISIBLE_ALPHA
+            mVisiblePaint.textSize = textSize
+            mHiddenPaint.color = color
+            mHiddenPaint.alpha = HIDDEN_ALPHA
+            mHiddenPaint.textSize = textSize
+        }
+
         fun setHiddenText(text: String?) {
             mHiddenText = text
         }

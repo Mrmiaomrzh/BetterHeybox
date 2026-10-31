@@ -211,6 +211,7 @@ object LiquidGlassInstaller {
             val content = findViewByName<View>(activity, ID_CONTENT)
             unwrapCheckedListener(bar)
             removeMidPreDraw(midTab)
+            removeSearchVisibilityListener()
             if (content != null && snap != null) {
                 val clp = content.getLayoutParams()
                 if (clp is RelativeLayout.LayoutParams) {
@@ -756,6 +757,7 @@ object LiquidGlassInstaller {
             bar.setVisibility(View.INVISIBLE)
 
             setupTabSelectionSync(bar, tabBar)
+            installSearchVisibilityListener(activity)
             startTabVisibilitySync(bar, tabBar)
 
             (host as LiquidGlassHostLayout).setExternalRendererActive(true)
@@ -1573,13 +1575,38 @@ object LiquidGlassInstaller {
         }
     }
 
+    private var sSearchVisibilityRoot: WeakReference<View> = WeakReference(null)
+    private var sSearchVisibilityListener: ViewTreeObserver.OnGlobalLayoutListener? = null
+
+    private fun installSearchVisibilityListener(activity: Activity) {
+        removeSearchVisibilityListener()
+        val root = activity.window.decorView
+        val listener = ViewTreeObserver.OnGlobalLayoutListener {
+            val tabBar = sTabBarRef.get() as? LiquidGlassTabBar
+            val searchApplied = sTabBarActive && tabBar != null && sSearchTabIndex >= 0
+                    && findTabsRow(tabBar, sVisibleButtons.size) != null
+            syncTopSearchIconVisibility(activity, searchApplied)
+        }
+        sSearchVisibilityRoot = WeakReference(root)
+        sSearchVisibilityListener = listener
+        root.viewTreeObserver.addOnGlobalLayoutListener(listener)
+    }
+
+    private fun removeSearchVisibilityListener() {
+        val root = sSearchVisibilityRoot.get()
+        val listener = sSearchVisibilityListener
+        if (root != null && listener != null && root.viewTreeObserver.isAlive) {
+            root.viewTreeObserver.removeOnGlobalLayoutListener(listener)
+        }
+        sSearchVisibilityRoot.clear()
+        sSearchVisibilityListener = null
+    }
+
     private fun syncTopSearchIconVisibility(context: Context, searchApplied: Boolean) {
         try {
-            if (!searchApplied) {
+            if (!searchApplied || !isHomeTabSelected(context)) {
                 restoreHiddenSearchIcons()
-                return
-            }
-            if (!isHomeTabSelected(context)) {
+                invalidateSearchIconCache()
                 return
             }
             val icon = findSearchIcon(context) ?: return
@@ -3117,6 +3144,8 @@ object LiquidGlassInstaller {
     private fun setupTabSelectionSync(bar: RadioGroup,
                                       tabBar: LiquidGlassTabBar) {
         wrapCheckedListener(bar) { _, checkedId ->
+            syncTopSearchIconVisibility(tabBar.context, sSearchTabIndex >= 0
+                    && findTabsRow(tabBar, sVisibleButtons.size) != null)
             for (i in 0 until sVisibleButtons.size) {
                 val rb = sVisibleButtons[i]
                 if (rb != null && rb.getId() == checkedId

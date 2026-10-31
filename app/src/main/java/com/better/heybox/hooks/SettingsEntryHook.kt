@@ -803,7 +803,7 @@ class SettingsEntryHook(private val module: MainModule) {
             val footer = TextView(activity)
             val displayVersion = moduleVersionName(activity)
             footer.setText("BetterHeybox v" + displayVersion)
-            footer.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12f)
+            footer.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f)
             footer.setGravity(android.view.Gravity.CENTER)
             footer.setTextColor(hostColor(activity, "color_text_tertiary_day_night", 0xFF8A8A8A.toInt()))
             val footerLp = LinearLayout.LayoutParams(
