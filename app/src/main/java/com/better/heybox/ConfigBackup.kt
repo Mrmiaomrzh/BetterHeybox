@@ -49,6 +49,7 @@ object ConfigBackup {
         App.KEY_POST_KEYWORDS,
         App.KEY_POST_TAGS,
         App.KEY_COMMENT_KEYWORDS,
+        "comment_panel_actions",
         App.KEY_GAME_LIB_HIDE_TYPES,
         App.KEY_GAME_LIB_HIDE_ENTRIES,
         App.KEY_GAME_LIB_HIDE_SECTION_NAMES,

@@ -31,6 +31,7 @@ import com.better.heybox.App
 import com.better.heybox.BuildFlags
 import com.better.heybox.Checkpoint
 import com.better.heybox.ConfigBackup
+import com.better.heybox.CommentPanelSettings
 import com.better.heybox.DexKitResolver
 import com.better.heybox.GlassProvider
 import com.better.heybox.HeyboxPrefs
@@ -1048,6 +1049,10 @@ class SettingsEntryHook(private val module: MainModule) {
 
                     Action.COMMENT_KEYWORDS -> setRowClick(itemCls, item, View.OnClickListener { _ ->
                         showCommentKeywordsDialog(activity)
+                    })
+
+                    Action.COMMENT_PANEL -> setRowClick(itemCls, item, View.OnClickListener {
+                        CommentPanelSettings.show(activity)
                     })
 
                     Action.COMMENT_FILTER_DIAG -> setRowClick(itemCls, item, View.OnClickListener { _ ->
@@ -3332,6 +3337,13 @@ class SettingsEntryHook(private val module: MainModule) {
                 )
             )
         )
+        groups.add(
+            SettingsGroup(
+                "评论交互", arrayOf(
+                    SwitchDef("长按面板按钮管理", "排序、隐藏或恢复按钮", null, false, false, true, null, Action.COMMENT_PANEL),
+                )
+            )
+        )
         return groups
     }
 
@@ -4406,7 +4418,7 @@ class SettingsEntryHook(private val module: MainModule) {
         WATCH_TOPIC_SEARCH, GAME_LIB_TYPES, GAME_LIB_ENTRIES, GAME_LIB_SECTIONS, GAME_LIB_DIAG,
         MESSAGE_BADGE_ENTRIES, MESSAGE_FULL_HIDE_ENTRIES, MESSAGE_BADGE_DIAG,
         POST_DETAIL_HIDE_IDS, POST_DETAIL_DIAG, FAKE_USAGE_DIAG,
-        SCREENSHOT_HIDE_CUSTOM,
+        SCREENSHOT_HIDE_CUSTOM, COMMENT_PANEL,
         MY_TASK_RUN, MY_TASK_REFRESH, MY_TASK_VIEW, MY_TASK_CLEAR
     }
 

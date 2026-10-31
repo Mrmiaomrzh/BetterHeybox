@@ -8,8 +8,11 @@ import android.view.ViewGroup
 import android.view.ViewParent
 import android.widget.Toast
 import com.better.heybox.App
+import com.better.heybox.CommentPanelConfig
 import com.better.heybox.MainModule
 import com.better.heybox.ViewUtils
+import com.better.heybox.arrangePanelActions
+import com.better.heybox.uniquePanelActionIds
 import java.lang.ref.WeakReference
 import java.lang.reflect.Constructor
 import java.lang.reflect.Field
@@ -25,6 +28,7 @@ class CommentSharePanelHook(private val module: MainModule) {
         try {
             resolveClasses(cl)
             hookPanelActions(cl)
+            hookPanelLayout(cl)
             hookPanelClick(cl)
             capture = hookReplyHandlerCapture(cl)
             blocked = hookTapReply(cl)
@@ -121,6 +125,75 @@ class CommentSharePanelHook(private val module: MainModule) {
             }
             result
         }
+    }
+
+    private fun hookPanelLayout(cl: ClassLoader) {
+        try {
+            val manager = Class.forName("com.max.common.common.share.ShareViewManager", false, cl)
+            val model = Class.forName("com.max.data.model.share.BaseActionModel", false, cl)
+            val method = manager.declaredMethods.single {
+                val p = it.parameterTypes
+                it.name == "i" && p.size == 10 && p[0] == Context::class.java &&
+                    p[1] == List::class.java && p[8] == model
+            }
+            module.hook(method).intercept { chain ->
+                try {
+                    val actions = chain.arg(1)
+                    if (actions is MutableList<*> && isCommentForward(chain.arg(8), cl)) {
+                        @Suppress("UNCHECKED_CAST")
+                        configurePanelActions(actions as MutableList<Any?>)
+                    }
+                } catch (t: Throwable) {
+                    module.logd(Log.WARN, MainModule.TAG, "评论面板自定义失败: $t")
+                }
+                chain.proceed()
+            }
+        } catch (t: Throwable) {
+            module.logd(Log.WARN, MainModule.TAG, "评论面板自定义挂点不可用: $t")
+        }
+    }
+
+    private fun configurePanelActions(actions: MutableList<Any?>) {
+        val original = actions.toList()
+        val ids = original.map { actionId(it) }
+        val uniqueIds = uniquePanelActionIds(ids)
+        val discovered = original.mapIndexedNotNull { index, item ->
+            val id = uniqueIds[index] ?: return@mapIndexedNotNull null
+            CommentPanelConfig.Action(id, actionName(item) ?: id)
+        }
+        CommentPanelConfig.recordDiscovered(discovered)
+        val visible = CommentPanelConfig.orderedVisibleIds(uniqueIds.filterNotNull())
+        val result = arrangePanelActions(original, uniqueIds, visible)
+        if (result == original) return
+        try {
+            actions.clear()
+            actions.addAll(result)
+        } catch (t: Throwable) {
+            try {
+                actions.clear()
+                actions.addAll(original)
+            } catch (_: Throwable) { }
+            module.logd(Log.WARN, MainModule.TAG, "评论面板排序失败，尝试恢复原列表: $t")
+        }
+    }
+
+    private fun actionId(item: Any?): String? {
+        return try {
+            val action = item?.javaClass?.getMethod("getAction")?.invoke(item) ?: return null
+            (action.javaClass.getMethod("getActionTag").invoke(action) as? String)
+                ?.trim()?.takeIf { it.isNotEmpty() }
+        } catch (_: Throwable) { null }
+    }
+
+    private fun actionName(item: Any?): String? {
+        if (item == null) return null
+        for (name in arrayOf("getName", "getTitle", "getLabel", "getText")) {
+            try {
+                val value = item.javaClass.getMethod(name).invoke(item) as? CharSequence
+                if (!value.isNullOrBlank()) return value.toString()
+            } catch (_: Throwable) { }
+        }
+        return null
     }
 
     private fun isCommentForward(forward: Any?, cl: ClassLoader): Boolean {

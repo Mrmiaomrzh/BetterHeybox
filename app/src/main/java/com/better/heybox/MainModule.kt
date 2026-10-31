@@ -291,8 +291,7 @@ class MainModule private constructor(private val param: PackageParam) {
         registerHook("评论自由复制", CommentCopyHook(this)::install, cl,
             App.KEY_COMMENT_FREE_COPY, App.KEY_CUSTOM_TEXT_SELECT,
             App.KEY_SCREENSHOT_ENABLED, App.KEY_COMMENT_REPLY_PANEL)
-        registerHook("评论分享面板", CommentSharePanelHook(this)::install, cl,
-            App.KEY_SCREENSHOT_ENABLED, App.KEY_COMMENT_REPLY_PANEL)
+        registerHook("评论分享面板", CommentSharePanelHook(this)::install, cl)
         registerHook("评论过滤", CommentFilterHook(this)::install, cl,
             App.KEY_BLOCK_CY_COMMENT, App.KEY_HOST_HIDE_CY, App.KEY_BLOCK_GAME_RELAY,
             App.KEY_CY_KEEP_FIRST, App.KEY_COMMENT_KEYWORDS)
