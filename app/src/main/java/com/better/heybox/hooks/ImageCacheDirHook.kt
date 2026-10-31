@@ -25,16 +25,13 @@ class ImageCacheDirHook(private val module: MainModule) {
             }
             val directory = File(path)
             if (!directory.isAbsolute) {
-                module.logd(Log.WARN, MainModule.TAG, "图片缓存目录不是绝对路径，忽略: $path")
-                return
+                throw IllegalArgumentException("图片缓存目录不是绝对路径: $path")
             }
             if (!directory.isDirectory && !directory.mkdirs()) {
-                module.logd(Log.ERROR, MainModule.TAG, "图片缓存目录创建失败，保持宿主默认: $path")
-                return
+                throw IllegalStateException("图片缓存目录创建失败: $path")
             }
             if (!directory.canWrite()) {
-                module.logd(Log.ERROR, MainModule.TAG, "图片缓存目录不可写，保持宿主默认: $path")
-                return
+                throw IllegalStateException("图片缓存目录不可写: $path")
             }
 
             val builderClass = Class.forName(GLIDE_BUILDER, false, cl)
@@ -101,6 +98,7 @@ class ImageCacheDirHook(private val module: MainModule) {
             }
         } catch (t: Throwable) {
             module.logd(Log.ERROR, MainModule.TAG, "✘ 图片缓存目录 Hook 失败", t)
+            throw t
         }
     }
 

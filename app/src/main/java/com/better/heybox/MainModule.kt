@@ -34,6 +34,7 @@ import com.better.heybox.hooks.PostDetailCleanHook
 import com.better.heybox.hooks.PostFilterHook
 import com.better.heybox.hooks.PromotePostHook
 import com.better.heybox.hooks.ScreenshotCaptureHook
+import com.better.heybox.hooks.SearchContextTracker
 import com.better.heybox.hooks.SearchPageCleanHook
 import com.better.heybox.hooks.SettingsEntryHook
 import com.better.heybox.hooks.ShareLinkPurifyHook
@@ -252,6 +253,7 @@ class MainModule private constructor(private val param: PackageParam) {
         HeyboxTargets.setHitProbe { method, onHit -> probe(method, onHit) }
         HeyboxTargets.init(cl, App.resolveAppContext())
         Checkpoint.mark("目标解析: %s", HeyboxTargets.report().replace('\n', ' '))
+        SearchContextTracker.install(this)
 
         val postFilter = PostFilterHook(this)
         registerHook("通用", GeneralHook(this)::install, cl)
@@ -303,7 +305,6 @@ class MainModule private constructor(private val param: PackageParam) {
         registerHook("自动展开回复", SubCommentExpandHook(this)::install, cl,
             App.KEY_COMMENT_AUTO_EXPAND)
 
-        forceInstallHook(App.KEY_IMAGE_CACHE_DIR)
         registerHook("消息红点", MessageRedDotHook(this)::install, cl,
             App.KEY_HIDE_MSG_DOT, App.KEY_HIDE_MSG_BADGE)
         registerHook("分享链接净化", ShareLinkPurifyHook(this)::install, cl,

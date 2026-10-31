@@ -766,16 +766,15 @@ class ScreenshotCaptureHook(private val module: MainModule) {
         val shareNoSave = HeyboxPrefs.getBoolean(App.KEY_SCREENSHOT_SHARE_NO_SAVE, true)
         Thread(Runnable {
             var result: Uri? = null
-            var fellBackToGallery = false
             var fellBackToCache = false
             var failure: String? = null
             try {
                 if (share) {
                     if (shareNoSave) {
+                        // The no-save option is strict: never fall back to MediaStore/gallery.
                         result = ScreenshotExporter.prepareShareScreenshot(image, context)
                         if (result == null) {
-                            fellBackToGallery = true
-                            result = ScreenshotExporter.saveScreenshot(image, context)
+                            failure = "临时分享文件创建失败"
                         }
                     } else {
                         result = ScreenshotExporter.saveScreenshot(image, context)
@@ -791,7 +790,6 @@ class ScreenshotCaptureHook(private val module: MainModule) {
                 failure = throwable.toString()
             }
             val uri = result
-            val fellBack = fellBackToGallery
             val cacheFallback = fellBackToCache
             val error = failure
             mainHandler.post {
@@ -804,9 +802,7 @@ class ScreenshotCaptureHook(private val module: MainModule) {
                     return@post
                 }
                 if (share) {
-                    if (fellBack) {
-                        module.logd(Log.WARN, TAG, "FileProvider 不可用，已回退相册并分享: $uri")
-                    } else if (cacheFallback) {
+                    if (cacheFallback) {
                         module.logd(Log.WARN, TAG, "相册保存失败，已回退缓存临时文件并分享: $uri")
                     } else if (shareNoSave) {
                         module.logd(Log.INFO, TAG, "分享截图使用缓存临时文件: $uri")

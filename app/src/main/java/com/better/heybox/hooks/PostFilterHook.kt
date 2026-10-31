@@ -392,6 +392,27 @@ class PostFilterHook(module: MainModule) {
                 || name.startsWith("com.max.xiaoheihe.module.account.specificsearch."))
     }
 
+    private fun isEngagementFilteringExcludedContext(): Boolean {
+        if (SearchContextTracker.isSearchContext() || SearchContextTracker.isFollowContext()) {
+            return true
+        }
+        return try {
+            for (frame in Thread.currentThread().stackTrace) {
+                val name = frame.className
+                if (name.startsWith("com.max.hbsearch.SearchNew")
+                    || name.startsWith("com.max.xiaoheihe.module.account.MeHomeActivity")
+                    || name.startsWith("com.max.xiaoheihe.module.account.FollowingAndFansActivity")
+                    || name.startsWith("com.max.xiaoheihe.module.account.specificsearch.")
+                ) {
+                    return true
+                }
+            }
+            false
+        } catch (ignored: Throwable) {
+            false
+        }
+    }
+
     private fun hasSyncRule(): Boolean {
         return cfg().anyRule
     }
@@ -1319,7 +1340,11 @@ class PostFilterHook(module: MainModule) {
         if (levelBlocked(item)) {
             return levelReason(item)
         }
-        val engagement = engagementReason(item)
+        val engagement = if (isEngagementFilteringExcludedContext()) {
+            null
+        } else {
+            engagementReason(item)
+        }
         if (engagement != null) {
             return engagement
         }

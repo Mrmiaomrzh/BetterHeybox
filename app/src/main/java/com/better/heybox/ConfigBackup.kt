@@ -41,6 +41,7 @@ object ConfigBackup {
         App.KEY_GLASS_BAR_LAYOUT,
         App.KEY_GLASS_DARK_PRESET,
         App.KEY_GLASS_LIGHT_PRESET,
+        App.KEY_IMAGE_CACHE_DIR,
         App.KEY_POST_MIN_LEVEL,
         App.KEY_POST_MIN_LIKE,
         App.KEY_POST_MIN_COMMENT,
@@ -79,7 +80,8 @@ object ConfigBackup {
         App.KEY_HIDE_TAB_HOME,
         App.KEY_HIDE_TAB_HOT,
         App.KEY_HIDE_TAB_GAME,
-        App.KEY_HIDE_ADD
+        App.KEY_HIDE_ADD,
+        App.KEY_IMAGE_CACHE_DIR
     )
 
     interface Reader<T> {

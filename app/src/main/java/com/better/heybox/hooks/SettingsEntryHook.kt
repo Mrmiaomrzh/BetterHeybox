@@ -986,6 +986,10 @@ class SettingsEntryHook(private val module: MainModule) {
                         showSaveDirDialog(activity)
                     })
 
+                    Action.IMAGE_CACHE_DIR -> setRowClick(itemCls, item, View.OnClickListener { _ ->
+                        showImageCacheDirDialog(activity)
+                    })
+
                     Action.RUNTIME_STATUS -> setRowClick(itemCls, item, View.OnClickListener { _ ->
                         showEmbeddedRuntimeStatus(activity)
                     })
@@ -2411,6 +2415,110 @@ class SettingsEntryHook(private val module: MainModule) {
         if (panel != null && panel.parent != null) showEmbeddedSettings(activity)
     }
 
+    private fun showImageCacheDirDialog(activity: Activity) {
+        val current = HeyboxPrefs.getString(App.KEY_IMAGE_CACHE_DIR, "") ?: ""
+        withHeyboxDialog(
+            activity,
+            NativeDialogCall { spec -> showImageCacheDirDialogNative(activity, current, spec) },
+            Runnable { showImageCacheDirDialogFallback(activity, current) }
+        )
+    }
+
+    @Throws(Exception::class)
+    private fun showImageCacheDirDialogNative(
+        activity: Activity, current: String, spec: DexKitResolver.HeyboxDialogSpec
+    ) {
+        val input = EditText(activity)
+        val pad = module.dp(activity, 10f)
+        val lp = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+        lp.setMargins(0, pad, 0, pad * 2)
+        input.setLayoutParams(lp)
+        input.setPadding(pad, pad, pad, pad)
+        input.setGravity(Gravity.CENTER_VERTICAL)
+        input.setInputType(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
+        input.setSingleLine(true)
+        input.setHint("例如：/storage/emulated/0/Android/data/com.max.xiaoheihe/cache")
+        input.setText(current)
+        input.setSelection(input.length())
+        val save = DialogInterface.OnClickListener { dialog, _ ->
+            val normalized = normalizeImageCachePath(activity, input.text.toString())
+            if (normalized == null) {
+                return@OnClickListener
+            }
+            HeyboxPrefs.setString(App.KEY_IMAGE_CACHE_DIR, normalized)
+            Toast.makeText(activity, "已保存，重启小黑盒后生效", Toast.LENGTH_LONG).show()
+            showRestartAppDialog(activity, activity.classLoader, "图片缓存目录修改需重启小黑盒后生效")
+            dialog.dismiss()
+        }
+        spec.buildAndShow(
+            activity, "图片缓存目录", input, "保存", save, "取消",
+            DialogInterface.OnClickListener { dialog, _ -> dialog.dismiss() }
+        )
+    }
+
+    private fun showImageCacheDirDialogFallback(activity: Activity, current: String) {
+        try {
+            val input = EditText(activity)
+            input.setInputType(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
+            input.setSingleLine(true)
+            input.setHint("例如：/storage/emulated/0/Android/data/com.max.xiaoheihe/cache")
+            input.setText(current)
+            input.setSelection(input.length())
+            AlertDialog.Builder(activity)
+                .setTitle("图片缓存目录")
+                .setMessage("填写绝对路径；留空恢复宿主默认目录。修改后需重启小黑盒。")
+                .setView(input)
+                .setPositiveButton("保存", DialogInterface.OnClickListener { dialog, _ ->
+                    val normalized = normalizeImageCachePath(activity, input.text.toString())
+                    if (normalized == null) {
+                        return@OnClickListener
+                    }
+                    HeyboxPrefs.setString(App.KEY_IMAGE_CACHE_DIR, normalized)
+                    Toast.makeText(activity, "已保存，重启小黑盒后生效", Toast.LENGTH_LONG).show()
+                    showRestartAppDialog(activity, activity.classLoader, "图片缓存目录修改需重启小黑盒后生效")
+                })
+                .setNeutralButton("恢复默认", DialogInterface.OnClickListener { _, _ ->
+                    HeyboxPrefs.setString(App.KEY_IMAGE_CACHE_DIR, "")
+                    Toast.makeText(activity, "已恢复默认，重启小黑盒后生效", Toast.LENGTH_LONG).show()
+                    showRestartAppDialog(activity, activity.classLoader, "图片缓存目录修改需重启小黑盒后生效")
+                })
+                .setNegativeButton("取消", null)
+                .show()
+        } catch (t: Throwable) {
+            module.logd(Log.WARN, MainModule.TAG, "打开图片缓存目录编辑框失败: " + t)
+        }
+    }
+
+    /** Returns an absolute, writable directory path; null means invalid input. */
+    private fun normalizeImageCachePath(activity: Activity, raw: String): String? {
+        val path = raw.trim()
+        if (path.isEmpty()) {
+            return ""
+        }
+        return try {
+            val directory = File(path)
+            if (!directory.isAbsolute) {
+                Toast.makeText(activity, "请输入绝对路径", Toast.LENGTH_SHORT).show()
+                return null
+            }
+            if (!directory.exists() && !directory.mkdirs()) {
+                Toast.makeText(activity, "目录创建失败，请检查路径和权限", Toast.LENGTH_SHORT).show()
+                return null
+            }
+            if (!directory.isDirectory || !directory.canWrite()) {
+                Toast.makeText(activity, "目录不可写，请选择可写目录", Toast.LENGTH_SHORT).show()
+                return null
+            }
+            directory.canonicalPath
+        } catch (t: Throwable) {
+            module.logd(Log.WARN, MainModule.TAG, "校验图片缓存目录失败: " + t)
+            Toast.makeText(activity, "目录无效，请检查路径和权限", Toast.LENGTH_SHORT).show()
+            null
+        }
+    }
+
     private fun showEditLinkDialog(activity: Activity, title: String?, key: String?) {
         withHeyboxDialog(
             activity,
@@ -2496,19 +2604,22 @@ class SettingsEntryHook(private val module: MainModule) {
         }
     }
 
-    private fun showRestartAppDialog(activity: Activity, cl: ClassLoader) {
+    private fun showRestartAppDialog(
+        activity: Activity, cl: ClassLoader,
+        message: String = "底栏改动需重启小黑盒后生效"
+    ) {
         try {
             val ktCls: Class<*> = Class.forName(
                 "com.max.xiaoheihe.accelworld.AccelWorldWebkitKt", false, cl
             )
             val x = ktCls.getDeclaredMethod("x", Context::class.java, String::class.java)
-            x.invoke(null, activity, "底栏改动需重启小黑盒后生效")
+            x.invoke(null, activity, message)
         } catch (t: Throwable) {
             module.logd(Log.WARN, MainModule.TAG, "复用小黑盒重启 Dialog 失败，回退系统 AlertDialog: " + t)
             try {
                 AlertDialog.Builder(activity)
                     .setTitle("重新启动APP生效")
-                    .setMessage("底栏改动需重启小黑盒后生效")
+                    .setMessage(message)
                     .setPositiveButton("我知道了", null)
                     .show()
             } catch (t2: Throwable) {
@@ -4282,7 +4393,7 @@ class SettingsEntryHook(private val module: MainModule) {
 
     internal enum class Action {
         NONE, EDIT_LINK, CLEAR_DAILY, CHANNEL, EXPORT, IMPORT,
-        EXPORT_LOG, CLEAR_LOG, VIEW_LOG, RUNTIME_STATUS, TARGET_STATUS, RELOAD_MODULE, OPEN_WEB, PICK_DIR, RESET_GLASS,
+        EXPORT_LOG, CLEAR_LOG, VIEW_LOG, RUNTIME_STATUS, TARGET_STATUS, RELOAD_MODULE, OPEN_WEB, PICK_DIR, IMAGE_CACHE_DIR, RESET_GLASS,
         CHOOSE_GLASS, GLASS_SHEET,
         TEST_CRASH,
         POST_LEVEL, POST_KEYWORDS, POST_TAGS, COMMENT_KEYWORDS, COMMENT_FILTER_DIAG, AI_PROVIDER, AI_PROMPT, AI_TEST,
@@ -4381,6 +4492,14 @@ class SettingsEntryHook(private val module: MainModule) {
                             null, false, false, true, App.KEY_SCREENSHOT_HIDE_CUSTOM,
                             Action.SCREENSHOT_HIDE_CUSTOM),
                     SwitchDef("添加水印", "BetterHeybox 水印", App.KEY_SCREENSHOT_ADD_WATERMARK, false, false),
+                    SwitchDef("截图分享不落相册", "截图选择分享时只写临时缓存，不保存到相册",
+                            App.KEY_SCREENSHOT_SHARE_NO_SAVE, true, false),
+                )
+            ),
+            SettingsGroup(
+                "图片缓存", arrayOf(
+                    SwitchDef("图片缓存目录", "绝对路径；留空恢复默认，修改后需重启小黑盒",
+                            null, false, false, true, null, Action.IMAGE_CACHE_DIR),
                 )
             ),
             SettingsGroup(
