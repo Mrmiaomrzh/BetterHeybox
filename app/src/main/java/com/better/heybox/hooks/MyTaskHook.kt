@@ -1030,11 +1030,6 @@ class MyTaskHook(private val module: MainModule) {
 
     fun clearToday() {
         HeyboxPrefs.setString(App.KEY_MY_TASK_DONE, "")
-        try {
-            val remote = module.getRemotePreferences(App.PREFS_GROUP)
-            remote?.edit()?.remove(App.KEY_MY_TASK_DONE)?.apply()
-        } catch (ignored: Throwable) {
-        }
         log(Log.INFO, "我的任务：已清除今日完成记录")
     }
 

@@ -33,8 +33,16 @@ object HeyboxPrefs {
 
     @JvmStatic
     fun getBoolean(key: String, defaultValue: Boolean): Boolean {
-        val prefs = get()
-        return if (prefs != null) prefs.getBoolean(key, defaultValue) else defaultValue
+        val prefs = get() ?: return defaultValue
+        if (key == App.KEY_SCREENSHOT_HIDE_IMAGE_COUNT) {
+            val legacyValue = prefs.all[key]
+            if (legacyValue is String) {
+                val repaired = legacyValue.toBooleanStrictOrNull() ?: defaultValue
+                prefs.edit().putBoolean(key, repaired).apply()
+                return repaired
+            }
+        }
+        return prefs.getBoolean(key, defaultValue)
     }
 
     @JvmStatic

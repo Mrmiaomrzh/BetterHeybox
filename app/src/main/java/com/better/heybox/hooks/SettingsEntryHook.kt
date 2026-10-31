@@ -3282,20 +3282,6 @@ class SettingsEntryHook(private val module: MainModule) {
             "内嵌面板开关已写入小黑盒本地配置: key=" + key +
                     ", value=" + value + ", ok=" + localOk
         )
-        try {
-            val request = Intent(PreferenceReceiver.ACTION_SET_BOOLEAN)
-                .setComponent(
-                    android.content.ComponentName(
-                        modulePackageName(), PreferenceReceiver::class.java.name
-                    )
-                )
-                .putExtra(PreferenceReceiver.EXTRA_KEY, key)
-                .putExtra(PreferenceReceiver.EXTRA_VALUE, value)
-                .addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
-            activity.sendBroadcast(request)
-        } catch (t: Throwable) {
-            module.logd(Log.WARN, MainModule.TAG, "远程镜像广播失败（本地配置已生效，不影响使用）: " + key, t)
-        }
         if (App.KEY_CUSTOM_TEXT_SELECT == key || App.KEY_COPY_POST == key) {
             TextSelectHook.refresh()
         }

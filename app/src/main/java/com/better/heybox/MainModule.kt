@@ -7,8 +7,6 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInfo
 import android.content.res.Resources
 import android.os.Build
-import android.os.Handler
-import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import com.better.heybox.hooks.AdFilterHook
@@ -69,7 +67,6 @@ class MainModule private constructor(private val param: PackageParam) {
 
     private val pendingHookCount = AtomicInteger()
 
-    private var settingsListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
     fun hook(member: Member): HookHandle = HookHandle(member)
 
     inner class HookHandle(private val member: Member) {
@@ -95,8 +92,8 @@ class MainModule private constructor(private val param: PackageParam) {
         }
     }
 
-    fun getRemotePreferences(group: String): SharedPreferences? = try {
-        val prefs = param.preferences(group)
+    private fun legacyPreferences(): SharedPreferences? = try {
+        val prefs = param.preferences(App.PREFS_GROUP)
         prefs.javaClass.getMethod("getCurrent\$yukihook_core").invoke(prefs) as SharedPreferences
     } catch (t: Throwable) {
         null
@@ -108,13 +105,7 @@ class MainModule private constructor(private val param: PackageParam) {
         val taskHook = myTaskHook
         myTaskHook = null
         taskHook?.shutdown()
-        val listener = settingsListener ?: return
-        settingsListener = null
-        try {
-            getRemotePreferences(App.PREFS_GROUP)?.unregisterOnSharedPreferenceChangeListener(listener)
-        } catch (t: Throwable) {
-            logv(TAG, "设置变更监听注销失败: $t")
-        }
+
     }
 
 
@@ -161,6 +152,7 @@ class MainModule private constructor(private val param: PackageParam) {
             val appContext = app as? Context
             if (appContext != null) {
                 HeyboxPrefs.init(appContext)
+                migrateLegacyPreferences()
             }
         } catch (ignored: Throwable) {
         }
@@ -234,6 +226,8 @@ class MainModule private constructor(private val param: PackageParam) {
     }
 
     private fun installHooks() {
+        App.resolveAppContext()?.let { HeyboxPrefs.init(it) }
+        migrateLegacyPreferences()
         var cl = targetClassLoader
         if (cl == null) {
             cl = param.hostClassLoader
@@ -325,12 +319,10 @@ class MainModule private constructor(private val param: PackageParam) {
         registerHook("动态推送", WatchHook(this)::install, cl,
             App.KEY_WATCH_ENABLED, App.KEY_LOG)
 
-        watchSettingsChanges()
         Checkpoint.mark(">>> Hook 安装完成，总耗时 %d ms", SystemClock.elapsedRealtime() - t0)
         logd(Log.INFO, TAG, "Hook 安装流程结束（因开关关闭延迟安装 ${pendingHookCount.get()} 个）")
 
         CrashGuard.installLate()
-        stashRuntimeStatus()
     }
 
     fun interface HookInstaller {
@@ -455,25 +447,6 @@ class MainModule private constructor(private val param: PackageParam) {
         }
     }
 
-    private fun watchSettingsChanges() {
-        try {
-            val prefs = getRemotePreferences(App.PREFS_GROUP) ?: return
-            settingsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-                if (key == null) {
-                    return@OnSharedPreferenceChangeListener
-                }
-                try {
-                    mainHandler().post { onSettingChanged(key) }
-                } catch (ignored: Throwable) {
-                    onSettingChanged(key)
-                }
-            }
-            prefs.registerOnSharedPreferenceChangeListener(settingsListener)
-        } catch (t: Throwable) {
-            logv(TAG, "设置变更监听注册失败（不影响面板内打开开关即时生效）: $t")
-        }
-    }
-
     private fun installHook(label: String, installer: HookInstaller, cl: ClassLoader): Boolean {
         val t0 = SystemClock.elapsedRealtime()
         return try {
@@ -493,49 +466,37 @@ class MainModule private constructor(private val param: PackageParam) {
         hook?.invalidateConfig()
     }
 
-    private fun stashRuntimeStatus() {
-        if (!BuildFlags.DEBUG) {
-            return
-        }
+    private fun migrateLegacyPreferences() {
+        val local = HeyboxPrefs.get() ?: return
         try {
-            val prefs = getRemotePreferences(App.PREFS_GROUP)
-            if (prefs != null) {
-                prefs.edit().putString(App.KEY_RUNTIME_STATUS, Checkpoint.dump()).commit()
-                logd(Log.INFO, TAG, "运行状态检查点已写入 RemotePreferences")
+            if (local.getBoolean(LEGACY_MIGRATION_COMPLETE, false)) return
+            val remote = legacyPreferences() ?: return
+            // Obtain the complete snapshot before staging any changes, so a failed read is retryable.
+            val snapshot = remote.all ?: return
+            val editor = local.edit()
+            for ((key, value) in snapshot) {
+                if (key !in LEGACY_SUPPORTED_KEYS || local.contains(key)) continue
+                val booleanKey = key in App.BOOLEAN_DEFAULTS ||
+                    key == App.KEY_DAILY_TASK_RESET || key == App.KEY_DAILY_TASK_SILENT
+                when {
+                    booleanKey && value is Boolean -> editor.putBoolean(key, value)
+                    !booleanKey && value is String -> editor.putString(key, value)
+                }
+            }
+            editor.putBoolean(LEGACY_MIGRATION_COMPLETE, true)
+            if (!editor.commit()) {
+                // SharedPreferences updates its in-memory map even when disk persistence fails.
+                local.edit().remove(LEGACY_MIGRATION_COMPLETE).apply()
+                log(Log.WARN, TAG, "旧配置迁移提交失败，将在下次启动重试")
             }
         } catch (t: Throwable) {
-            logv(TAG, "运行状态检查点写入失败（框架只读）")
+            log(Log.WARN, TAG, "旧配置迁移失败，将在下次启动重试", t)
         }
     }
 
-    fun isEnabled(key: String, def: Boolean): Boolean {
-        if (HeyboxPrefs.contains(key)) {
-            return HeyboxPrefs.getBoolean(key, def)
-        }
-        try {
-            val prefs = getRemotePreferences(App.PREFS_GROUP)
-            if (prefs != null && prefs.contains(key)) {
-                return prefs.getBoolean(key, def)
-            }
-        } catch (t: Throwable) {
-        }
-        return def
-    }
+    fun isEnabled(key: String, def: Boolean): Boolean = HeyboxPrefs.getBoolean(key, def)
 
-    fun getString(key: String, def: String?): String? {
-        if (HeyboxPrefs.contains(key)) {
-            return HeyboxPrefs.getString(key, def)
-        }
-        try {
-            val prefs = getRemotePreferences(App.PREFS_GROUP)
-            if (prefs != null && prefs.contains(key)) {
-                return prefs.getString(key, def)
-            }
-        } catch (t: Throwable) {
-        }
-        return def
-    }
-
+    fun getString(key: String, def: String?): String? = HeyboxPrefs.getString(key, def)
 
     @Volatile private var logSwitchEnabled = false
     @Volatile private var logSwitchVerbose = false
@@ -634,6 +595,169 @@ class MainModule private constructor(private val param: PackageParam) {
     }
 
     companion object {
+        private const val LEGACY_MIGRATION_COMPLETE = "legacy_remote_migration_complete"
+        private val LEGACY_SUPPORTED_KEYS = setOf(
+            App.KEY_OPEN_SCREEN,
+            App.KEY_FEED_AD,
+            App.KEY_BUBBLE_AD,
+            App.KEY_CORNER_AD,
+            App.KEY_PROMOTE_AD,
+            App.KEY_HIDE_TAB_HOME,
+            App.KEY_HIDE_TAB_HOT,
+            App.KEY_HIDE_TAB_GAME,
+            App.KEY_HIDE_ADD,
+            App.KEY_COPY_POST,
+            App.KEY_CUSTOM_TEXT_SELECT,
+            App.KEY_COMMENT_FREE_COPY,
+            App.KEY_COMMENT_REPLY_PANEL,
+            App.KEY_SEARCH_HIDE_BANNER,
+            App.KEY_SEARCH_HIDE_DISCOVER,
+            App.KEY_SEARCH_HIDE_HOT_RANK,
+            App.KEY_GAME_LIB_HIDE_BANNER,
+            App.KEY_GAME_LIB_HIDE_MENU,
+            App.KEY_GAME_LIB_HIDE_SECTIONS,
+            App.KEY_GAME_LIB_HIDE_TYPES,
+            App.KEY_GAME_LIB_HIDE_ENTRIES,
+            App.KEY_GAME_LIB_HIDE_SECTION_NAMES,
+            App.KEY_BLOCK_UPDATE,
+            App.KEY_SYSTEM_SHARE,
+            App.KEY_DAILY_TASK_ENABLED,
+            App.KEY_DAILY_TASK_PICTURE,
+            App.KEY_DAILY_TASK_NORMAL,
+            App.KEY_DAILY_TASK_CHANNEL,
+            App.KEY_DAILY_TASK_DONE_DATE,
+            App.KEY_DAILY_TASK_RESET,
+            App.KEY_SHARE_CHANNEL,
+            App.KEY_DAILY_TASK_BACK_HOME,
+            App.KEY_DAILY_TASK_SILENT,
+            App.KEY_MY_TASK_ENABLED,
+            App.KEY_MY_TASK_AUTO_POST,
+            App.KEY_MY_TASK_AUTO_WARNED,
+            App.KEY_MY_TASK_TEXT,
+            App.KEY_MY_TASK_KEYWORDS,
+            App.KEY_MY_TASK_URGENT_ONLY,
+            App.KEY_MY_TASK_DELETE_AFTER,
+            App.KEY_MY_TASK_CLAIM,
+            App.KEY_MY_TASK_MAX_PER_DAY,
+            App.KEY_MY_TASK_DONE,
+            App.KEY_FAKE_NOTIFICATION,
+            App.KEY_VIDEO_DOWNLOAD,
+            App.KEY_VIDEO_DIR,
+            App.KEY_VIDEO_TO_MP4,
+            App.KEY_SCREENSHOT_ENABLED,
+            App.KEY_SCREENSHOT_HIDE_TAGS,
+            App.KEY_SCREENSHOT_HIDE_TIMESTAMPS,
+            App.KEY_SCREENSHOT_HIDE_ACTIONS,
+            App.KEY_SCREENSHOT_ADD_WATERMARK,
+            App.KEY_SCREENSHOT_HIDE_IRRELEVANT,
+            App.KEY_SCREENSHOT_HIDE_CLOSE,
+            App.KEY_SCREENSHOT_HIDE_FOLLOW,
+            App.KEY_SCREENSHOT_HIDE_LIKE_COUNT,
+            App.KEY_SCREENSHOT_HIDE_CUSTOM,
+            App.KEY_SCREENSHOT_HIDE_IMAGE_COUNT,
+            App.KEY_PURIFY_SHARE_LINK,
+            App.KEY_BROWSER_REDIRECT,
+            App.KEY_BROWSER_REDIRECT_KNOWN,
+            App.KEY_BROWSER_REDIRECT_FORCE,
+            App.KEY_BROWSER_REDIRECT_BLOCK,
+            App.KEY_BROWSER_TARGET,
+            App.KEY_WEB_LOG,
+            App.KEY_WEB_LOG_DATA,
+            App.KEY_LOG,
+            App.KEY_WEBVIEW_DEVTOOLS,
+            App.KEY_LIQUID_GLASS,
+            App.KEY_GLASS_IMMERSIVE,
+            App.KEY_GLASS_ADAPTIVE,
+            App.KEY_GLASS_DARK_COLOR,
+            App.KEY_GLASS_DARK_ALPHA,
+            App.KEY_GLASS_LIGHT_COLOR,
+            App.KEY_GLASS_LIGHT_ALPHA,
+            App.KEY_GLASS_BAR_HEIGHT,
+            App.KEY_GLASS_BAR_OFFSET,
+            App.KEY_GLASS_SIDE_MARGIN,
+            App.KEY_GLASS_FIT_TABS,
+            App.KEY_GLASS_BAR_WIDTH_MODE,
+            App.KEY_GLASS_BAR_WIDTH_PCT,
+            App.KEY_GLASS_TAB_WIDTH_PCT,
+            App.KEY_GLASS_BAR_LAYOUT,
+            App.KEY_GLASS_SEARCH_IN_BAR,
+            App.KEY_GLASS_PROVIDER,
+            App.KEY_SINGLE_COLUMN_FEED,
+            App.KEY_POST_MIN_LEVEL,
+            App.KEY_POST_MIN_LIKE,
+            App.KEY_POST_MIN_COMMENT,
+            App.KEY_POST_MIN_FAVOUR,
+            App.KEY_GLASS_TAB_SELECT_COLOR,
+            App.KEY_GLASS_TAB_SELECT_ALPHA,
+            App.KEY_GLASS_TAB_ORDER,
+            App.KEY_POST_FILTER_SKIP_SEARCH,
+            App.KEY_POST_FILTER_SKIP_FOLLOW,
+            App.KEY_IMAGE_AUTO_ORIGINAL,
+            App.KEY_IMAGE_CACHE_DIR,
+            App.KEY_COMMENT_AUTO_EXPAND,
+            App.KEY_SCREENSHOT_SHARE_NO_SAVE,
+            App.KEY_IMAGE_SHARE_NO_SAVE,
+            App.KEY_POST_NO_LEVEL,
+            App.KEY_POST_KEYWORDS,
+            App.KEY_POST_TAGS,
+            App.KEY_POST_AI_ENABLED,
+            App.KEY_BLOCK_VIDEO_POST,
+            App.KEY_HOST_HIDE_CY,
+            App.KEY_BLOCK_CY_COMMENT,
+            App.KEY_COMMENT_KEYWORDS,
+            App.KEY_BLOCK_GAME_RELAY,
+            App.KEY_RELAY_IGNORE_EMOJI,
+            App.KEY_CY_KEEP_FIRST,
+            App.KEY_FEED_REFRESH_UNDO,
+            App.KEY_FEED_KEEP_PREVIOUS,
+            App.KEY_FLOW_DIAGNOSE,
+            App.KEY_VERBOSE_LOG,
+            App.KEY_POST_DETAIL_CLEAN,
+            App.KEY_POST_DETAIL_TOPIC_NO_CLICK,
+            App.KEY_POST_DETAIL_TOPIC_HIDE,
+            App.KEY_POST_DETAIL_HIDE_IDS,
+            App.KEY_FAKE_USAGE_ACCESS,
+            App.KEY_FAKE_USAGE_EMPTY_DATA,
+            App.KEY_FAVOUR_AUTO_CLEAN,
+            App.KEY_HIDE_MSG_DOT,
+            App.KEY_HIDE_MSG_BADGE,
+            App.KEY_MSG_BADGE_ENTRIES,
+            App.KEY_MSG_FULL_HIDE_ENTRIES,
+            App.KEY_AI_PROVIDER,
+            App.KEY_AI_BASE_URL,
+            App.KEY_AI_MODEL,
+            App.KEY_AI_TOKEN,
+            App.KEY_AI_PROMPT,
+            App.KEY_AI_MAX_TOKENS,
+            App.KEY_GLASS_DARK_PRESET,
+            App.KEY_GLASS_LIGHT_PRESET,
+            App.KEY_WEBVIEW_ENTRY_URL,
+            App.KEY_DISCLAIMER_ACCEPTED,
+            App.KEY_MODULE_VERSION_FLOOR,
+            App.KEY_DEBUG_NO_DOWNGRADE,
+            App.KEY_TARGET_HINT_VISIBLE,
+            App.KEY_WATCH_ENABLED,
+            App.KEY_WATCH_USERS,
+            App.KEY_WATCH_KEYWORDS,
+            App.KEY_WATCH_BANNER,
+            App.KEY_WATCH_NOTIFY,
+            App.KEY_WATCH_INTERVAL_MIN,
+            App.KEY_WATCH_WINDOW_DAYS,
+            App.KEY_WATCH_WINDOW_MIN,
+            App.KEY_WATCH_TOPICS,
+            App.KEY_WATCH_RECENT_TOPICS,
+            App.KEY_WATCH_TITLE_ONLY,
+            App.KEY_WATCH_STREAM_FETCH,
+            App.KEY_WATCH_PUSH_ENABLED,
+            App.KEY_WATCH_PUSH_DINGTALK,
+            App.KEY_WATCH_PUSH_WXPUSHER,
+            App.KEY_WATCH_PUSH_ONEBOT,
+            App.KEY_WATCH_PUSH_CUSTOM,
+            App.KEY_WATCH_SEEN,
+            App.KEY_WATCH_LAST_CHECK,
+            App.KEY_WATCH_BASELINED,
+            "comment_panel_actions"
+        )
         private const val LOG_SWITCH_TTL_MS = 1_000L
 
         @JvmField
@@ -655,18 +779,11 @@ class MainModule private constructor(private val param: PackageParam) {
         @Volatile
         private var sInstance: MainModule? = null
 
-        @Volatile
-        private var sMainHandler: Handler? = null
-
-        private fun mainHandler(): Handler {
-            return sMainHandler ?: Handler(Looper.getMainLooper()).also { sMainHandler = it }
-        }
-
         @JvmStatic
         fun attach(param: PackageParam) {
             val module = MainModule(param)
             sInstance = module
-            module.logd(Log.INFO, TAG, ">>> 命中小黑盒，安装 Hook")
+            module.log(Log.INFO, TAG, ">>> 命中小黑盒，安装 Hook")
             module.deferInstallForDowngradeCheck()
         }
 

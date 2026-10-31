@@ -2,9 +2,6 @@ package com.better.heybox
 
 import android.app.Application
 import android.content.Context
-import android.content.SharedPreferences
-import android.os.Handler
-import android.os.Looper
 import android.os.Process
 import io.github.libxposed.service.XposedService
 import io.github.libxposed.service.XposedServiceHelper
@@ -27,17 +24,8 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
     override fun onServiceBind(service: XposedService) {
         sService = service
         Checkpoint.mark("XposedService 已绑定: %s", describe(service))
-        LogRecorder.setEnabled(readBoolean(KEY_LOG, false))
-        LogRecorder.setVerbose(readBoolean(KEY_VERBOSE_LOG, false))
         LogRecorder.recordEvent("XposedService 已绑定: " + describe(service))
-        val pending = getSharedPreferences(PENDING_PREFS, MODE_PRIVATE)
-        Logs.i(
-            TAG,
-            "XposedService 已绑定: service=" + describe(service) +
-                    ", pendingCount=" + pending.all.size
-        )
-        PreferenceReceiver.tryFlush(this, pending)
-        notifyServiceBound()
+        Logs.i(TAG, "XposedService 已绑定: service=" + describe(service))
     }
 
     override fun onServiceDied(service: XposedService) {
@@ -46,16 +34,11 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
         sService = null
     }
 
-    fun interface OnServiceBoundListener {
-        fun onServiceBound()
-    }
-
     companion object {
 
         private const val TAG = "BetterHeybox"
 
     const val PREFS_GROUP = "betterheybox"
-    const val PENDING_PREFS = "betterheybox_pending"
     const val KEY_OPEN_SCREEN = "open_screen"
     const val KEY_FEED_AD = "feed_ad"
     const val KEY_BUBBLE_AD = "bubble_ad"
@@ -231,7 +214,6 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
     const val KEY_GLASS_DARK_PRESET = "glass_dark_preset"
     const val KEY_GLASS_LIGHT_PRESET = "glass_light_preset"
     const val KEY_WEBVIEW_ENTRY_URL = "webview_entry_url"
-    const val KEY_RUNTIME_STATUS = "runtime_status"
     const val KEY_DISCLAIMER_ACCEPTED = "disclaimer_accepted"
     const val KEY_MODULE_VERSION_FLOOR = "module_version_floor"
     const val KEY_DEBUG_NO_DOWNGRADE = "debug_no_downgrade"
@@ -357,116 +339,6 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
         @Volatile private var sService: XposedService? = null
 
         @Volatile private var sApp: App? = null
-
-        private val sBoundListeners = ArrayList<OnServiceBoundListener>()
-
-        @JvmStatic
-        fun getPrefs(): SharedPreferences? {
-            val service = sService
-            if (service == null) {
-                Logs.w(TAG, "获取 RemotePreferences 失败: XposedService 未绑定")
-                return null
-            }
-            return try {
-                val prefs = service.getRemotePreferences(PREFS_GROUP)
-                if (prefs == null) {
-                    Logs.e(TAG, "获取 RemotePreferences 失败: service 返回 null, group=" + PREFS_GROUP)
-                } else {
-                    Logs.i(TAG, "获取 RemotePreferences 成功: group=" + PREFS_GROUP)
-                }
-                prefs
-            } catch (t: Throwable) {
-                Logs.e(TAG, "获取 RemotePreferences 异常: group=" + PREFS_GROUP, t)
-                null
-            }
-        }
-
-        @JvmStatic
-        fun readBoolean(key: String, defaultValue: Boolean): Boolean {
-            val app = sApp
-            if (app != null) {
-                val pending = app.getSharedPreferences(PENDING_PREFS, Context.MODE_PRIVATE)
-                if (pending.contains(key)) {
-                    return pending.getBoolean(key, defaultValue)
-                }
-            }
-            val remote = getPrefs()
-            return if (remote != null) remote.getBoolean(key, defaultValue) else defaultValue
-        }
-
-        @JvmStatic
-        fun readString(key: String, defaultValue: String?): String? {
-            val app = sApp
-            if (app != null) {
-                val pending = app.getSharedPreferences(PENDING_PREFS, Context.MODE_PRIVATE)
-                if (pending.contains(key)) {
-                    return pending.getString(key, defaultValue)
-                }
-            }
-            val remote = getPrefs()
-            return if (remote != null) remote.getString(key, defaultValue) else defaultValue
-        }
-
-        @JvmStatic
-        fun writeString(key: String, value: String?) {
-            val app = sApp
-            val remote = getPrefs()
-            if (remote != null) {
-                remote.edit().putString(key, value).apply()
-                LogRecorder.recordEvent("字符串已写入 RemotePreferences: key=" + key)
-                return
-            }
-            if (app != null) {
-                val pending = app.getSharedPreferences(PENDING_PREFS, Context.MODE_PRIVATE)
-                pending.edit().putString(key, value).commit()
-                LogRecorder.recordEvent("字符串写入待提交缓存: key=" + key)
-                PreferenceReceiver.tryFlush(app, pending)
-            }
-        }
-
-        @JvmStatic
-        fun writeBoolean(key: String, value: Boolean) {
-            val app = sApp
-            val remote = getPrefs()
-            if (remote != null) {
-                remote.edit().putBoolean(key, value).apply()
-                LogRecorder.recordEvent("开关已写入 RemotePreferences: key=" + key + ", value=" + value)
-                return
-            }
-            if (app != null) {
-                val pending = app.getSharedPreferences(PENDING_PREFS, Context.MODE_PRIVATE)
-                pending.edit().putBoolean(key, value).commit()
-                LogRecorder.recordEvent("服务未连接，开关写入待提交缓存: key=" + key + ", value=" + value)
-                PreferenceReceiver.tryFlush(app, pending)
-            }
-        }
-
-        @JvmStatic
-        fun addOnServiceBoundListener(listener: OnServiceBoundListener) {
-            synchronized(sBoundListeners) {
-                if (!sBoundListeners.contains(listener)) {
-                    sBoundListeners.add(listener)
-                }
-            }
-        }
-
-        private fun notifyServiceBound() {
-            val snapshot: List<OnServiceBoundListener>
-            synchronized(sBoundListeners) {
-                snapshot = ArrayList(sBoundListeners)
-            }
-            if (snapshot.isEmpty()) {
-                return
-            }
-            Handler(Looper.getMainLooper()).post {
-                for (listener in snapshot) {
-                    try {
-                        listener.onServiceBound()
-                    } catch (ignored: Throwable) {
-                    }
-                }
-            }
-        }
 
         private fun describe(service: XposedService?): String =
             if (service == null) "null"

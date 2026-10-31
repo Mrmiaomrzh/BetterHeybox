@@ -32,11 +32,6 @@ object LogExport {
         if (moduleProcess) {
             sb.append("框架服务: ").append(if (App.getService() == null) "未连接" else "已连接")
                 .append('\n')
-            val heyboxStatus = App.readString(App.KEY_RUNTIME_STATUS, "")
-            if (!heyboxStatus.isNullOrEmpty()) {
-                sb.append('\n').append("----- 小黑盒进程运行状态（跨进程检查点快照） -----\n")
-                    .append(heyboxStatus).append('\n')
-            }
         }
 
         sb.append('\n')

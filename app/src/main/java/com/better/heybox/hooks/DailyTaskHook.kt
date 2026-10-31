@@ -1071,13 +1071,6 @@ class DailyTaskHook(private val module: MainModule) {
         }
         clearDoneDate()
         HeyboxPrefs.setBoolean(App.KEY_DAILY_TASK_RESET, false)
-        try {
-            val remote = module.getRemotePreferences(App.PREFS_GROUP)
-            if (remote != null) {
-                remote.edit().remove(App.KEY_DAILY_TASK_RESET).apply()
-            }
-        } catch (ignored: Throwable) {
-        }
         module.logd(Log.INFO, MainModule.TAG, "检测到清除今日打卡标志，已重置完成状态")
     }
 
@@ -1153,15 +1146,6 @@ class DailyTaskHook(private val module: MainModule) {
         if (today() == HeyboxPrefs.getString(App.KEY_DAILY_TASK_DONE_DATE, "")) {
             return true
         }
-        try {
-            val remote = module.getRemotePreferences(App.PREFS_GROUP)
-            if (remote != null && today() ==
-                remote.getString(App.KEY_DAILY_TASK_DONE_DATE, "")
-            ) {
-                return true
-            }
-        } catch (ignored: Throwable) {
-        }
         return false
     }
 
@@ -1195,17 +1179,6 @@ class DailyTaskHook(private val module: MainModule) {
                 return
             }
             HeyboxPrefs.setString(App.KEY_DAILY_TASK_DONE_DATE, value)
-            try {
-                val remote = targetModule.getRemotePreferences(App.PREFS_GROUP)
-                if (remote != null) {
-                    if (value == null || value.isEmpty()) {
-                        remote.edit().remove(App.KEY_DAILY_TASK_DONE_DATE).apply()
-                    } else {
-                        remote.edit().putString(App.KEY_DAILY_TASK_DONE_DATE, value).apply()
-                    }
-                }
-            } catch (ignored: Throwable) {
-            }
         }
 
         @JvmStatic

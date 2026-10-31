@@ -965,11 +965,7 @@ class ScreenshotSelectionManager private constructor() {
         @JvmStatic
         fun refreshDebug() {
             DEBUG = HeyboxPrefs.getBoolean(App.KEY_VERBOSE_LOG, false)
-                    || App.readBoolean(App.KEY_VERBOSE_LOG, false)
-            Log.i(
-                "BetterHeybox", "截图诊断 调试开关=$DEBUG"
-                        + " prefs=" + (App.getPrefs() != null)
-            )
+            Log.i("BetterHeybox", "截图诊断 调试开关=$DEBUG")
         }
 
         @JvmStatic
