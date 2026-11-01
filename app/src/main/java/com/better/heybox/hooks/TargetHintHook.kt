@@ -69,17 +69,30 @@ class TargetHintHook(private val module: MainModule) {
 
     private fun resolveUid(cl: ClassLoader): String? {
         sUidCache?.let { return it }
-        try {
-            val userCls = Class.forName("com.max.xiaoheihe.bean.account.User", false, cl)
-            val detailCls =
-                Class.forName("com.max.xiaoheihe.bean.account.AccountDetailObj", false, cl)
-            val util = Class.forName("com.max.xiaoheihe.utils.u0", false, cl)
+        val userCls = try {
+            Class.forName("com.max.xiaoheihe.bean.account.User", false, cl)
+        } catch (t: Throwable) {
+            return sCapturedUid
+        }
+        val detailCls = try {
+            Class.forName("com.max.xiaoheihe.bean.account.AccountDetailObj", false, cl)
+        } catch (t: Throwable) {
+            return sCapturedUid
+        }
+        for (name in ACCOUNT_UTIL_CLASSES) {
+            val util = try {
+                Class.forName(name, false, cl)
+            } catch (t: Throwable) {
+                continue
+            }
+            var hasUserGetter = false
             for (m in util.declaredMethods) {
                 if (m.parameterTypes.size != 0 || !Modifier.isStatic(m.modifiers) ||
                     !userCls.equals(m.returnType)
                 ) {
                     continue
                 }
+                hasUserGetter = true
                 try {
                     val user = m.invoke(null) ?: continue
                     val login = userCls.getMethod("isLoginFlag")
@@ -95,13 +108,53 @@ class TargetHintHook(private val module: MainModule) {
                 } catch (ignored: Throwable) {
                 }
             }
-        } catch (t: Throwable) {
-            module.logd(Log.WARN, MainModule.TAG, "反射读取部分数据失败: $t")
+            if (!hasUserGetter) {
+                continue
+            }
+            try {
+                val uid = util.getDeclaredMethod("j").invoke(null)
+                if (uid is String && uid.isNotEmpty() && uid != "-1") {
+                    sUidCache = uid
+                    return sUidCache
+                }
+            } catch (ignored: Throwable) {
+            }
         }
         return sCapturedUid
     }
 
     private fun hookUidCapture(cl: ClassLoader) {
+        for (name in ACCOUNT_UTIL_CLASSES) {
+            val util = try {
+                Class.forName(name, false, cl)
+            } catch (t: Throwable) {
+                continue
+            }
+            val isAccountUtil = util.declaredMethods.any {
+                it.parameterTypes.isEmpty() && Modifier.isStatic(it.modifiers) &&
+                    it.returnType.name == "com.max.xiaoheihe.bean.account.User"
+            }
+            if (!isAccountUtil) {
+                continue
+            }
+            try {
+                val extract = util.getDeclaredMethod("j")
+                module.hook(extract).intercept { chain ->
+                    val result = chain.proceed()
+                    try {
+                        if (result is String && result.isNotEmpty() && result != "-1") {
+                            sCapturedUid = result
+                        }
+                    } catch (ignored: Throwable) {
+                    }
+                    result
+                }
+                module.logd(Log.INFO, MainModule.TAG, "✔ 提示信息被动 Hook: $name#j")
+                return
+            } catch (t: Throwable) {
+                module.logd(Log.WARN, MainModule.TAG, "提示信息被动 Hook 跳过 $name#j: $t")
+            }
+        }
         try {
             val x0 = Class.forName("com.max.xiaoheihe.utils.x0", false, cl)
             val extract = x0.getDeclaredMethod("U", String::class.java, String::class.java)
@@ -202,6 +255,10 @@ class TargetHintHook(private val module: MainModule) {
     companion object {
         private const val TAG_OVERLAY = "betterheybox_target_hint"
         private const val VISIBLE_TEXT = "免费模块 请勿在小黑盒宣传"
+        private val ACCOUNT_UTIL_CLASSES = arrayOf(
+            "com.max.xiaoheihe.utils.x0",
+            "com.max.xiaoheihe.utils.g1",
+        )
 
         @Volatile private var sUidCache: String? = null
         @Volatile private var sCapturedUid: String? = null

@@ -771,7 +771,10 @@ class MainModule private constructor(private val param: PackageParam) {
                 java.util.LinkedHashSet(
                     java.util.Arrays.asList(
                         "1.3.396",
-                        "1.3.397"
+                        "1.3.397",
+                        "1.3.398",
+                        "1.3.399",
+                        "1.3.400"
                     )
                 )
             )

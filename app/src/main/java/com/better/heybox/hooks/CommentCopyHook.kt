@@ -90,8 +90,8 @@ class CommentCopyHook(private val module: MainModule) {
 
 
     private fun hookCopyHelpers(cl: ClassLoader): Boolean {
-        var any = false
-        any = any or hookNamedCopyHelper(cl, "com.max.xiaoheihe.utils.h", "t")
+        var any = hookNamedCopyHelper(cl, "com.max.xiaoheihe.utils.k", "t")
+                || hookNamedCopyHelper(cl, "com.max.xiaoheihe.utils.h", "t")
         any = any or hookCopyOnlyClass(cl, "com.max.hbutils.utils.y")
         any = any or hookCopyOnlyClass(cl, "com.max.accelworld.c")
         return any

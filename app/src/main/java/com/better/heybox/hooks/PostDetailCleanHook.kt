@@ -355,7 +355,7 @@ class PostDetailCleanHook(private val module: MainModule) {
 
         private val FRAGMENT_FALLBACK_CLASSES = arrayOf(
             "com.max.hbcommon.base.e",
-            "com.max.hbcommon.base.BaseFragment",
+            "com.max.xiaoheihe.base.mvvm.BaseFragment",
             "androidx.fragment.app.Fragment",
         )
 

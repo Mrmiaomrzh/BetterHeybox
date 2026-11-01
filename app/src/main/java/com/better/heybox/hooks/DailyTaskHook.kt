@@ -1222,7 +1222,6 @@ class DailyTaskHook(private val module: MainModule) {
 
         private val SHARE_PANEL_CLASSES = arrayOf(
             "com.max.hbcommon.component.m",
-            "com.max.hbcommon.component.i",
         )
 
         private const val SHARE_PANEL_SUPER = "com.max.hbcustomview.swipebacklayout.a"
