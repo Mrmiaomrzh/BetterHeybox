@@ -1008,7 +1008,7 @@ class DailyTaskHook(private val module: MainModule) {
             context.startActivity(intent)
             module.logd(
                 Log.INFO, MainModule.TAG,
-                "每日任务：打开 " + stepName(step) + ": " + link.trim()
+                "每日任务：打开 " + stepName(step)
             )
         } catch (t: Throwable) {
             module.logd(Log.WARN, MainModule.TAG, "RouterActivity 打开失败，尝试 link_id 直开: " + t)
@@ -1094,7 +1094,7 @@ class DailyTaskHook(private val module: MainModule) {
     private fun finishDailyTask(context: Context?) {
         reset()
         writeDoneDate(today())
-        module.logd(Log.INFO, MainModule.TAG, "每日任务：3 种分享类型全部完成，已记录今日状态")
+        module.logd(Log.INFO, MainModule.TAG, "每日任务：流程结束并记录本地今日状态；跳过或超时的步骤未确认服务端完成")
         val ctx = context ?: autoContext
         if (ctx == null) {
             return

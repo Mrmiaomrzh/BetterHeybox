@@ -53,12 +53,15 @@ object DailyShareApiRunner {
     fun maybeStart(module: MainModule, context: Context): Boolean {
         synchronized(this) {
             if (sRunning.get()) {
+                module.logd(Log.DEBUG, MainModule.TAG, "静默分享：跳过，已有运行中的任务")
                 return false
             }
             if (DailyTaskHook.isAutoActive()) {
+                module.logd(Log.DEBUG, MainModule.TAG, "静默分享：跳过，自动任务正在运行")
                 return false
             }
             if (!DailyTaskHook.tryAcquireBusy()) {
+                module.logd(Log.DEBUG, MainModule.TAG, "静默分享：跳过，任务锁被占用")
                 return false
             }
             sRunning.set(true)
@@ -69,7 +72,7 @@ object DailyShareApiRunner {
         } catch (t: Throwable) {
             sRunning.set(false)
             DailyTaskHook.releaseBusy()
-            module.logd(Log.ERROR, MainModule.TAG, "✘ 静默分享提交失败", t)
+            module.logd(Log.ERROR, MainModule.TAG, "✘ 静默分享提交失败")
             return false
         }
     }
@@ -78,11 +81,12 @@ object DailyShareApiRunner {
         try {
             runInner(module, context)
         } catch (t: Throwable) {
-            module.logd(Log.ERROR, MainModule.TAG, "✘ 静默分享执行异常: " + t, t)
+            module.logd(Log.ERROR, MainModule.TAG, "✘ 静默分享执行异常")
             notify(context, "静默分享执行异常：" + clip(t.message ?: t.javaClass.simpleName, 120))
         } finally {
             DailyTaskHook.releaseBusy()
             sRunning.set(false)
+            module.logd(Log.DEBUG, MainModule.TAG, "静默分享：运行结束，已释放任务锁")
         }
     }
 
@@ -97,6 +101,7 @@ object DailyShareApiRunner {
             notify(context, "静默分享失败：任务列表获取失败")
             return
         }
+        logStates(module, "初始", states)
         val missing = TASK_IDS.filter { !states.containsKey(it) }
         if (missing.isNotEmpty()) {
             module.logd(Log.WARN, MainModule.TAG, "✘ 静默分享：任务列表缺少 " + missing + "，协议可能已变化")
@@ -106,16 +111,18 @@ object DailyShareApiRunner {
         val failures = LinkedHashMap<String, String>()
         for (id in TASK_IDS) {
             if (isSettled(states[id])) {
+                module.logd(Log.DEBUG, MainModule.TAG, "静默分享[" + name(id) + "]跳过：已结算")
                 continue
             }
             try {
                 runOneTask(module, id)
             } catch (t: Throwable) {
                 failures[id] = clip(t.message ?: t.javaClass.simpleName, 80)
-                module.logd(Log.WARN, MainModule.TAG, "✘ 静默分享[" + name(id) + "]失败: " + t)
+                module.logd(Log.WARN, MainModule.TAG, "✘ 静默分享[" + name(id) + "]执行失败")
             }
         }
         val finalStates = fetchTaskStates(module)
+        logStates(module, "最终", finalStates)
         for (id in TASK_IDS) {
             val settled = finalStates != null && isSettled(finalStates[id])
             if (settled) {
@@ -131,28 +138,31 @@ object DailyShareApiRunner {
         } else {
             val ok = TASK_IDS.size - failures.size
             val detail = failures.entries.joinToString("；") { name(it.key) + "：" + it.value }
-            module.logd(Log.WARN, MainModule.TAG, "✘ 静默分享未全部完成: " + detail)
+            module.logd(Log.WARN, MainModule.TAG, "✘ 静默分享未全部完成：已结算 " + ok + "/" + TASK_IDS.size)
             notify(context, "静默分享未全部完成（" + ok + "/3）：" + detail)
         }
     }
 
     private fun awaitBridgeReady(module: MainModule): Boolean {
         var waited = 0L
+        module.logd(Log.DEBUG, MainModule.TAG, "静默分享：等待网络桥就绪")
         while (waited < READY_TIMEOUT_MS) {
             if (HttpBridge.ready() && HttpBridge.heyboxId() != null) {
+                module.logd(Log.DEBUG, MainModule.TAG, "静默分享：网络桥已就绪，等待 " + waited + "ms")
                 return true
             }
             sleep(READY_POLL_MS)
             waited += READY_POLL_MS
         }
-        module.logd(Log.WARN, MainModule.TAG, "✘ 静默分享：宿主 HTTP 桥未就绪（" + HttpBridge.describe() + "）")
+        module.logd(Log.WARN, MainModule.TAG, "✘ 静默分享：网络桥等待超时，等待 " + waited + "ms")
         return false
     }
 
     private fun runOneTask(module: MainModule, id: String) {
+        module.logd(Log.DEBUG, MainModule.TAG, "静默分享[" + name(id) + "]开始选择内容")
         val addition = selectShareContent(id)
         val sessionId = UUID.randomUUID().toString()
-        module.logd(Log.INFO, MainModule.TAG, "静默分享[" + name(id) + "]已选定内容: " + addition)
+        module.logd(Log.DEBUG, MainModule.TAG, "静默分享[" + name(id) + "]内容已选定")
         for (action in arrayOf("show", "tap", "success")) {
             val timeSec = (System.currentTimeMillis() / 1000).toString()
             val event = buildEvent(action, addition, sessionId, timeSec)
@@ -162,9 +172,11 @@ object DailyShareApiRunner {
                 sleep(TAP_SLEEP_MS)
             }
         }
-        for (delay in POLL_DELAYS_MS) {
+        for ((index, delay) in POLL_DELAYS_MS.withIndex()) {
+            module.logd(Log.DEBUG, MainModule.TAG, "静默分享[" + name(id) + "]轮询 " + (index + 1) + "/" + POLL_DELAYS_MS.size + "，等待 " + delay + "ms")
             sleep(delay)
             val states = fetchTaskStates(module)
+            module.logd(Log.DEBUG, MainModule.TAG, "静默分享[" + name(id) + "]轮询结果：" + stateLabel(states, id))
             if (states != null && isSettled(states[id])) {
                 module.logd(Log.INFO, MainModule.TAG, "✔ 静默分享[" + name(id) + "]服务端已结算")
                 return
@@ -336,7 +348,7 @@ object DailyShareApiRunner {
         val body = try {
             HttpBridge.get(HttpBridge.BASE + TaskListClient.TASK_LIST_PATH, JSON_HEADERS)
         } catch (t: Throwable) {
-            module.logd(Log.WARN, MainModule.TAG, "✘ 静默分享：任务列表请求异常: " + t)
+            module.logd(Log.WARN, MainModule.TAG, "✘ 静默分享：任务列表获取异常")
             null
         } ?: return null
         if (body.trim().isEmpty()) {
@@ -346,7 +358,7 @@ object DailyShareApiRunner {
         try {
             walkStates(JSONObject(body), out, 0)
         } catch (t: Throwable) {
-            module.logd(Log.WARN, MainModule.TAG, "✘ 静默分享：任务列表解析失败: " + t)
+            module.logd(Log.WARN, MainModule.TAG, "✘ 静默分享：任务列表解析失败")
             return null
         }
         return out
@@ -481,6 +493,18 @@ object DailyShareApiRunner {
             }
         }
         return ""
+    }
+
+    private fun stateLabel(states: Map<String, String>?, id: String): String = when {
+        states == null -> "获取失败"
+        !states.containsKey(id) -> "缺失"
+        isSettled(states[id]) -> "已结算"
+        else -> "未结算"
+    }
+
+    private fun logStates(module: MainModule, phase: String, states: Map<String, String>?) {
+        val summary = TASK_IDS.joinToString("，") { name(it) + "=" + stateLabel(states, it) }
+        module.logd(Log.DEBUG, MainModule.TAG, "静默分享：" + phase + "状态：" + summary)
     }
 
     private fun isSettled(state: String?): Boolean = state == "finish" || state == "can_reward"

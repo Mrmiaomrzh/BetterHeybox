@@ -64,7 +64,7 @@ class AsyncLogWriter(private val storage: LogStorage, private val config: LogCon
             while (batch < config.maxBatch && entry != null) {
                 writeOne(entry)
                 batch++
-                entry = queue.poll()
+                entry = if (batch < config.maxBatch) queue.poll() else null
             }
             storage.flush()
         }

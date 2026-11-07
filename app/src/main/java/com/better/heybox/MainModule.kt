@@ -11,6 +11,7 @@ import android.os.SystemClock
 import android.util.Log
 import com.better.heybox.hooks.AdFilterHook
 import com.better.heybox.hooks.BottomTabHook
+import com.better.heybox.hooks.BottomTabUpdateHook
 import com.better.heybox.hooks.BrowserRedirectHook
 import com.better.heybox.hooks.CommentCopyHook
 import com.better.heybox.hooks.CommentFilterHook
@@ -254,6 +255,7 @@ class MainModule private constructor(private val param: PackageParam) {
         registerHook("广告过滤", AdFilterHook(this)::install, cl,
             App.KEY_OPEN_SCREEN, App.KEY_FEED_AD, App.KEY_BUBBLE_AD, App.KEY_CORNER_AD)
         registerHook("设置入口", SettingsEntryHook(this)::install, cl)
+        registerHook("禁止底栏热更新", BottomTabUpdateHook(this)::install, cl, App.KEY_BLOCK_BOTTOM_TAB_UPDATE)
         registerHook("底部导航", BottomTabHook(this)::install, cl,
             App.KEY_HIDE_TAB_HOME, App.KEY_HIDE_TAB_HOT, App.KEY_HIDE_TAB_GAME, App.KEY_HIDE_ADD)
         registerHook("液态玻璃底栏", LiquidGlassBottomBarHook(this)::install, cl,

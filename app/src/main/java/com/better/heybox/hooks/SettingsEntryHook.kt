@@ -4762,7 +4762,8 @@ class SettingsEntryHook(private val module: MainModule) {
                 MainModule.getHeyboxTabLabel(activity, "bbs", "社区")
             )
             return SettingsGroup(
-                "底部导航栏隐藏", arrayOf(
+                "底部导航栏", arrayOf(
+                    SwitchDef("禁止底栏热更新", "保留已有底栏策略和图标；仅支持 1.3.400 (1149)，重启生效", App.KEY_BLOCK_BOTTOM_TAB_UPDATE, false, true),
                     SwitchDef("隐藏「" + home + "」", null, App.KEY_HIDE_TAB_HOME, false, true),
                     SwitchDef("隐藏「" + slot2 + "」", null, App.KEY_HIDE_TAB_HOT, false, true),
                     SwitchDef("隐藏「" + slot4 + "」", null, App.KEY_HIDE_TAB_GAME, false, true),

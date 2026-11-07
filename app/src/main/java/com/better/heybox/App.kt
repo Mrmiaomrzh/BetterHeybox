@@ -44,6 +44,7 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
     const val KEY_BUBBLE_AD = "bubble_ad"
     const val KEY_CORNER_AD = "corner_ad"
     const val KEY_PROMOTE_AD = "promote_ad"
+    const val KEY_BLOCK_BOTTOM_TAB_UPDATE = "block_bottom_tab_update"
     const val KEY_HIDE_TAB_HOME = "hide_tab_home"
     const val KEY_HIDE_TAB_HOT = "hide_tab_hot"
     const val KEY_HIDE_TAB_GAME = "hide_tab_game"
@@ -249,6 +250,7 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
             m.put(KEY_BUBBLE_AD, true);
             m.put(KEY_CORNER_AD, true);
             m.put(KEY_PROMOTE_AD, true);
+            m.put(KEY_BLOCK_BOTTOM_TAB_UPDATE, false);
             m.put(KEY_HIDE_TAB_HOME, false);
             m.put(KEY_HIDE_TAB_HOT, false);
             m.put(KEY_HIDE_TAB_GAME, false);

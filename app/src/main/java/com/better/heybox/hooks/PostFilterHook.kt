@@ -169,7 +169,7 @@ class PostFilterHook(module: MainModule) {
                     + module.getString(App.KEY_POST_MIN_COMMENT, "0") + "|"
                     + module.getString(App.KEY_POST_MIN_FAVOUR, "0"))
             if (thr != thresholdsRaw) {
-                val parts = thr.split("\\|".toRegex(), -1)
+                val parts = thr.split("|")
                 minLike = parseIntSafe(if (parts.isNotEmpty()) parts[0] else "0")
                 minComment = parseIntSafe(if (parts.size > 1) parts[1] else "0")
                 minFavour = parseIntSafe(if (parts.size > 2) parts[2] else "0")

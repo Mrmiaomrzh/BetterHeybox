@@ -77,6 +77,7 @@ object ConfigBackup {
     )
 
     private val RESTART_KEYS = arrayOf(
+        App.KEY_BLOCK_BOTTOM_TAB_UPDATE,
         App.KEY_HIDE_TAB_HOME,
         App.KEY_HIDE_TAB_HOT,
         App.KEY_HIDE_TAB_GAME,
