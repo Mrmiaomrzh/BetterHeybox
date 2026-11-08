@@ -32,6 +32,7 @@ import com.better.heybox.hooks.MyTaskHook
 import com.better.heybox.hooks.PostDetailCleanHook
 import com.better.heybox.hooks.PostFilterHook
 import com.better.heybox.hooks.PromotePostHook
+import com.better.heybox.hooks.ScanShortcutHook
 import com.better.heybox.hooks.ScreenshotCaptureHook
 import com.better.heybox.hooks.SearchContextTracker
 import com.better.heybox.hooks.SearchPageCleanHook
@@ -60,6 +61,8 @@ class MainModule private constructor(private val param: PackageParam) {
     private var dailyTaskHook: DailyTaskHook? = null
 
     private var myTaskHook: MyTaskHook? = null
+
+    private val scanShortcutHook = ScanShortcutHook(this) { isEnabled(App.KEY_SCAN_SHORTCUT, false) }
 
     @Volatile
     private var targetClassLoader: ClassLoader? = param.hostClassLoader
@@ -255,6 +258,7 @@ class MainModule private constructor(private val param: PackageParam) {
         registerHook("广告过滤", AdFilterHook(this)::install, cl,
             App.KEY_OPEN_SCREEN, App.KEY_FEED_AD, App.KEY_BUBBLE_AD, App.KEY_CORNER_AD)
         registerHook("设置入口", SettingsEntryHook(this)::install, cl)
+        registerHook("扫一扫快捷方式", scanShortcutHook::install, cl)
         registerHook("禁止底栏热更新", BottomTabUpdateHook(this)::install, cl, App.KEY_BLOCK_BOTTOM_TAB_UPDATE)
         registerHook("底部导航", BottomTabHook(this)::install, cl,
             App.KEY_HIDE_TAB_HOME, App.KEY_HIDE_TAB_HOT, App.KEY_HIDE_TAB_GAME, App.KEY_HIDE_ADD)
@@ -407,6 +411,9 @@ class MainModule private constructor(private val param: PackageParam) {
             return
         }
         invalidatePostFilterConfig()
+        if (key == App.KEY_SCAN_SHORTCUT) {
+            scanShortcutHook.refresh()
+        }
         if (key.startsWith("post_detail_")) {
             com.better.heybox.hooks.PostDetailCleanHook.refresh()
         }

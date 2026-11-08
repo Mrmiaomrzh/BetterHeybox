@@ -95,6 +95,7 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
 
     const val KEY_MY_TASK_DONE = "my_task_done"
 
+    const val KEY_SCAN_SHORTCUT = "scan_shortcut"
     const val KEY_FAKE_NOTIFICATION = "fake_notification"
     const val KEY_VIDEO_DOWNLOAD = "video_download"
     const val KEY_VIDEO_DIR = "video_download_dir"
@@ -291,6 +292,7 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
             m.put(KEY_MY_TASK_URGENT_ONLY, true);
             m.put(KEY_MY_TASK_DELETE_AFTER, true);
             m.put(KEY_MY_TASK_CLAIM, true);
+            m.put(KEY_SCAN_SHORTCUT, false);
             m.put(KEY_FAKE_NOTIFICATION, false);
             m.put(KEY_LOG, false);
             m.put(KEY_WEBVIEW_DEVTOOLS, false);

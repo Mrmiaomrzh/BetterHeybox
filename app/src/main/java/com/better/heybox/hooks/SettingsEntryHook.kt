@@ -4609,6 +4609,7 @@ class SettingsEntryHook(private val module: MainModule) {
             ),
             SettingsGroup(
                 "通用", arrayOf(
+                    SwitchDef("扫一扫快捷方式", "长按小黑盒桌面图标，快速打开扫一扫", App.KEY_SCAN_SHORTCUT, false, false),
                     SwitchDef("伪装通知权限", "伪装通知已开启，获得签到加成", App.KEY_FAKE_NOTIFICATION, false, false),
                     SwitchDef("伪装使用情况权限",
                             "伪装「使用情况访问」已开启",
