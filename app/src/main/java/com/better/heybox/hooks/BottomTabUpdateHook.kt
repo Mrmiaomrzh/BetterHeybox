@@ -9,8 +9,11 @@ import java.lang.reflect.Method
 /** Freeze the last cached bottom-tab configuration on the analyzed host build. */
 class BottomTabUpdateHook(private val module: MainModule) {
     fun install(cl: ClassLoader) {
-        if (!VersionUtils.isHeyboxBuild(App.resolveAppContext(), "1.3.400", 1149L)) {
-            module.logd(Log.WARN, MainModule.TAG, "禁止底栏热更新：仅支持小黑盒 1.3.400 (1149)，已跳过")
+        val context = App.resolveAppContext()
+        if (!VersionUtils.isHeyboxBuild(context, "1.3.400", 1149L) &&
+            !VersionUtils.isHeyboxBuild(context, "1.3.401", 1150L)
+        ) {
+            module.logd(Log.WARN, MainModule.TAG, "禁止底栏热更新：仅支持小黑盒 1.3.400 (1149) 和 1.3.401 (1150)，已跳过")
             return
         }
         val targets = try {

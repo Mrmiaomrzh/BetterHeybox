@@ -34,10 +34,11 @@ class SubCommentExpandHook(private val module: MainModule) {
     fun install(cl: ClassLoader) {
         try {
             val adapterClass = Class.forName(ADAPTER_CLASS, false, cl)
-            val holderClass = Class.forName(HOLDER_CLASS, false, cl)
             val commentsObjClass = Class.forName(COMMENTS_OBJ_CLASS, false, cl)
             val commentObjClass = Class.forName(COMMENT_OBJ_CLASS, false, cl)
             val subCommentViewClass = Class.forName(SUB_COMMENT_VIEW_CLASS, false, cl)
+            val bind = findBindMethod(adapterClass, commentsObjClass, subCommentViewClass, cl)
+            val holderClass = bind.parameterTypes[0]
 
             sFieldHolderSub = findField(holderClass, FIELD_HOLDER_SUB)
             sFieldHasMore = findField(subCommentViewClass, FIELD_HAS_MORE)
@@ -58,10 +59,6 @@ class SubCommentExpandHook(private val module: MainModule) {
             )
             sMethodRenderFooter!!.isAccessible = true
 
-            val bind = adapterClass.getDeclaredMethod(
-                BIND_METHOD,
-                holderClass, commentsObjClass
-            )
             bind.isAccessible = true
             module.hook(bind).intercept { chain ->
                 val holder = chain.arg(0)
@@ -86,7 +83,7 @@ class SubCommentExpandHook(private val module: MainModule) {
             module.logd(
                 if (ready) Log.INFO else Log.WARN, MainModule.TAG,
                 (if (ready) "✔ 自动展开回复 Hook 已安装：" else "△ 自动展开回复 Hook 已挂，但字段解析不全：")
-                        + ADAPTER_CLASS + "#" + BIND_METHOD + "(" + HOLDER_CLASS + ", "
+                        + ADAPTER_CLASS + "#" + BIND_METHOD + "(" + holderClass.name + ", "
                         + COMMENTS_OBJ_CLASS + ")"
                         + " [hasMore=" + (sFieldHasMore != null || sMethodHasMore != null)
                         + " loading=" + (sFieldLoading != null)
@@ -99,14 +96,14 @@ class SubCommentExpandHook(private val module: MainModule) {
             module.logd(
                 Log.WARN, MainModule.TAG,
                 "△ 自动展开回复 Hook 跳过：当前版本无 " + ADAPTER_CLASS + "#" + BIND_METHOD
-                        + "(" + HOLDER_CLASS + ", " + COMMENTS_OBJ_CLASS + ") 挂点"
+                        + "(holder, " + COMMENTS_OBJ_CLASS + ") 挂点"
             )
         } catch (e: NoSuchMethodException) {
             Checkpoint.mark("自动展开回复安装: 跳过（本版本无该挂点）")
             module.logd(
                 Log.WARN, MainModule.TAG,
                 "△ 自动展开回复 Hook 跳过：当前版本无 " + ADAPTER_CLASS + "#" + BIND_METHOD
-                        + "(" + HOLDER_CLASS + ", " + COMMENTS_OBJ_CLASS + ") 挂点"
+                        + "(holder, " + COMMENTS_OBJ_CLASS + ") 挂点"
             )
         } catch (t: Throwable) {
             Checkpoint.mark("自动展开回复安装: 失败")
@@ -322,7 +319,7 @@ class SubCommentExpandHook(private val module: MainModule) {
 
         private const val ADAPTER_CLASS =
             "com.max.xiaoheihe.module.bbs.adapter.CommentAdapterV2"
-        private const val HOLDER_CLASS = "ii.xf0"
+        private val HOLDER_CLASSES = arrayOf("hi.cg0", "ii.cg0", "ii.xf0")
         private const val COMMENTS_OBJ_CLASS = "com.max.basebbs.bean.BBSCommentsObj"
         private const val COMMENT_OBJ_CLASS = "com.max.basebbs.bean.BBSCommentObj"
         private const val SUB_COMMENT_VIEW_CLASS = "com.max.xiaoheihe.view.SubCommentView"
@@ -541,6 +538,29 @@ class SubCommentExpandHook(private val module: MainModule) {
             } catch (ignored: Throwable) {
                 null
             }
+        }
+
+        private fun findBindMethod(
+            adapterClass: Class<*>, commentsObjClass: Class<*>,
+            subCommentViewClass: Class<*>, cl: ClassLoader
+        ): Method {
+            for (name in HOLDER_CLASSES) {
+                val holderClass = try {
+                    Class.forName(name, false, cl)
+                } catch (_: ClassNotFoundException) {
+                    continue
+                }
+                val bind = try {
+                    adapterClass.getDeclaredMethod(BIND_METHOD, holderClass, commentsObjClass)
+                } catch (_: NoSuchMethodException) {
+                    continue
+                }
+                val field = findField(holderClass, FIELD_HOLDER_SUB)
+                if (field != null && subCommentViewClass.isAssignableFrom(field.type)) {
+                    return bind
+                }
+            }
+            throw NoSuchMethodException("No compatible $ADAPTER_CLASS#$BIND_METHOD binding")
         }
 
         private fun findField(cls: Class<*>, name: String): Field? {

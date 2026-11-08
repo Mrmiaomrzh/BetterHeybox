@@ -527,8 +527,7 @@ class CommentFilterHook(module: MainModule) {
             }
             countHit("列表", "游戏名接龙（正文仅游戏链接）")
             module.logd(
-                Log.INFO, MainModule.TAG, "屏蔽评论[新评论行] 原因=游戏名接龙, commentid="
-                        + safeGet(item, "Y") + ", 正文=" + abbreviate(text)
+                Log.INFO, MainModule.TAG, "屏蔽评论[新评论行] 原因=游戏名接龙, 正文=" + abbreviate(text)
             )
             hideCyView(view as View)
         } catch (t: Throwable) {
@@ -555,10 +554,10 @@ class CommentFilterHook(module: MainModule) {
         if (item == null) {
             return ""
         }
+        // 1149 uses c0(): String; 1150 uses d0(): String and c0() is an enum.
+        // A recognized getter is authoritative even for plain or empty text.
+        knownCommentItemText(item)?.let { return it }
         val direct = safeGet(item, "c0")
-        if (looksLikeMarkup(direct)) {
-            return direct
-        }
         for (method in item.javaClass.methods) {
             if (method.parameterCount != 0 || method.returnType !== String::class.java) {
                 continue

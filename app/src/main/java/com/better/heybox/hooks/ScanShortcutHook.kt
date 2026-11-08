@@ -7,6 +7,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ShortcutInfo
 import android.content.pm.ShortcutManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.Bundle
@@ -117,10 +119,24 @@ class ScanShortcutHook(
             }
             val intent = Intent(ACTION_SCAN).setComponent(component)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            val drawable = context.getDrawable(android.R.drawable.ic_menu_camera)
+                ?: error("扫一扫快捷方式：无法加载图标")
+            val fallbackSize = (48 * context.resources.displayMetrics.density).toInt().coerceAtLeast(1)
+            val width = drawable.intrinsicWidth.takeIf { it > 0 } ?: fallbackSize
+            val height = drawable.intrinsicHeight.takeIf { it > 0 } ?: fallbackSize
+            val scale = minOf(1f, manager.iconMaxWidth.coerceAtLeast(1).toFloat() / width,
+                manager.iconMaxHeight.coerceAtLeast(1).toFloat() / height)
+            val bitmap = Bitmap.createBitmap(
+                (width * scale).toInt().coerceAtLeast(1),
+                (height * scale).toInt().coerceAtLeast(1),
+                Bitmap.Config.ARGB_8888
+            )
+            drawable.setBounds(0, 0, bitmap.width, bitmap.height)
+            drawable.draw(Canvas(bitmap))
             val shortcut = ShortcutInfo.Builder(context, SHORTCUT_ID)
                 .setShortLabel("扫一扫")
                 .setLongLabel("扫一扫")
-                .setIcon(Icon.createWithResource("android", android.R.drawable.ic_menu_camera))
+                .setIcon(Icon.createWithBitmap(bitmap))
                 .setActivity(component)
                 .setIntent(intent)
                 .build()

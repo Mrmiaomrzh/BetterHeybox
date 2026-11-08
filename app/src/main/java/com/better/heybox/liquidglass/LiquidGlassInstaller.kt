@@ -1703,12 +1703,16 @@ object LiquidGlassInstaller {
             val cl = context.getClassLoader()
             val outer = Class.forName(HOST_SEARCH_ACTIVITY_CLASS, false, cl)
             val companion = Class.forName(HOST_SEARCH_COMPANION_CLASS, false, cl)
-            var instance: Any? = null
-            try {
-                val f = outer.getField("a")
-                instance = f.get(null)
-            } catch (ignored: Throwable) {
-            }
+            val instance = sequenceOf("a", "Y").mapNotNull { name ->
+                try {
+                    val field = outer.getField(name)
+                    if (field.type == companion && java.lang.reflect.Modifier.isStatic(field.modifiers)) {
+                        field.get(null)
+                    } else null
+                } catch (ignored: ReflectiveOperationException) {
+                    null
+                }
+            }.firstOrNull()
             if (instance != null) {
                 for (m in companion.getDeclaredMethods()) {
                     val types = m.getParameterTypes()
@@ -1741,7 +1745,7 @@ object LiquidGlassInstaller {
                 }
             } else {
                 LiquidGlassLog.log(Log.WARN,
-                    "search page launcher: companion instance field a is null")
+                    "search page launcher: no compatible companion instance found")
             }
         } catch (t: Throwable) {
             LiquidGlassLog.log(Log.WARN, "search page launcher failed: $t")

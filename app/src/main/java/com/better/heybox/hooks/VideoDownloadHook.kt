@@ -30,6 +30,7 @@ import com.better.heybox.App
 import com.better.heybox.MainModule
 import com.better.heybox.ThemeUtils
 import com.better.heybox.VideoDownloadManager
+import com.better.heybox.VersionUtils
 import com.better.heybox.ViewUtils
 import java.lang.ref.WeakReference
 import java.util.WeakHashMap
@@ -41,22 +42,26 @@ class VideoDownloadHook(private val module: MainModule) {
     }
 
     private fun hookW(cl: ClassLoader) {
-        var firstError: Throwable? = null
-        val methods = arrayOf(
-            "setVideoRes",
-            "setVideoRes",
-            "W"
+        val context = App.resolveAppContext()
+        val hasVerifiedA0 = VersionUtils.isHeyboxBuild(context, "1.3.400", 1149L) ||
+            VersionUtils.isHeyboxBuild(context, "1.3.401", 1150L)
+        val targets = mutableListOf(
+            "setVideoRes" to arrayOf(String::class.java),
+            "setVideoRes" to arrayOf(String::class.java, java.util.Map::class.java),
+            "W" to arrayOf(String::class.java, java.util.Map::class.java)
         )
-        val signatures: Array<Array<Class<*>>> = arrayOf(
-            arrayOf(String::class.java),
-            arrayOf(String::class.java, java.util.Map::class.java),
-            arrayOf(String::class.java, java.util.Map::class.java)
-        )
-        for (i in methods.indices) {
+        if (hasVerifiedA0) targets.add("a0" to arrayOf(String::class.java, java.util.Map::class.java))
+        var installed = 0
+        for ((name, signature) in targets) {
             try {
                 val absVideoView = Class.forName("com.max.video.AbsVideoView", false, cl)
-                val method = absVideoView.getDeclaredMethod(methods[i], *signatures[i])
-                val label = methods[i] + if (signatures[i].size == 2) "(String, Map)" else "(String)"
+                val method = try {
+                    absVideoView.getDeclaredMethod(name, *signature)
+                } catch (_: NoSuchMethodException) {
+                    continue
+                }
+                if (method.returnType != Void.TYPE || java.lang.reflect.Modifier.isStatic(method.modifiers)) continue
+                val label = name + if (signature.size == 2) "(String, Map)" else "(String)"
                 module.hook(method).intercept { chain ->
                     val result = chain.proceed()
                     try {
@@ -78,19 +83,17 @@ class VideoDownloadHook(private val module: MainModule) {
                     }
                     result
                 }
+                installed++
                 module.logd(
                     Log.INFO, MainModule.TAG,
                     "✔ 视频下载入口 Hook 已安装: AbsVideoView." + label
                 )
             } catch (t: Throwable) {
-                if (firstError == null) {
-                    firstError = t
-                }
-                module.logd(Log.WARN, MainModule.TAG, "✘ 视频 URL 入口 Hook 失败: " + methods[i], t)
+                module.logd(Log.WARN, MainModule.TAG, "✘ 视频 URL 入口 Hook 失败: " + name, t)
             }
         }
-        if (firstError != null) {
-            module.logd(Log.WARN, MainModule.TAG, "部分视频 URL 入口未安装（见上）")
+        if (installed == 0) {
+            module.logd(Log.WARN, MainModule.TAG, "未安装任何视频 URL 入口 Hook")
         }
     }
 
