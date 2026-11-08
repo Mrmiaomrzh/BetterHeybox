@@ -1,6 +1,7 @@
 package com.better.heybox
 
 import android.app.Activity
+import android.app.ActivityManager
 import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
@@ -137,7 +138,7 @@ object SessionGuard {
                 newSession = previousPid > 0 && previousPid != currentPid
             }
             if (newSession) {
-                reportPrevious(previousPid, startedAt, wasForeground, javaCrash, now)
+                reportPrevious(context, previousPid, startedAt, wasForeground, javaCrash, now)
             }
 
             prefs.edit()
@@ -235,16 +236,38 @@ object SessionGuard {
         }
     }
 
+    private fun previousExitDetails(context: Context?, previousPid: Int, startedAt: Long, now: Long): String {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || previousPid <= 0 || startedAt <= 0L || now < startedAt) {
+            return "system_exit=unknown"
+        }
+        return try {
+            val appContext = context ?: App.resolveAppContext()
+            val manager = appContext?.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+                ?: return "system_exit=unknown"
+            val exit = manager.getHistoricalProcessExitReasons(null, previousPid, 0)
+                .filter { it.pid == previousPid && it.timestamp in startedAt..now }
+                .maxByOrNull { it.timestamp }
+                ?: return "system_exit=unknown"
+            "system_exit_reason=${exit.reason} system_exit_description=${exit.description ?: "unknown"}" +
+                    " system_exit_timestamp_ms=${exit.timestamp} system_exit_pss_kb=${exit.pss}" +
+                    " system_exit_rss_kb=${exit.rss} system_exit_status=${exit.status}" +
+                    " system_exit_importance=${exit.importance}"
+        } catch (ignored: Throwable) {
+            "system_exit=unknown"
+        }
+    }
+
     private fun reportPrevious(
-        previousPid: Int, startedAt: Long, wasForeground: Boolean,
+        context: Context?, previousPid: Int, startedAt: Long, wasForeground: Boolean,
         javaCrash: Boolean, now: Long
     ) {
         val livedMs = maxOf(0L, now - startedAt)
+        val exitDetails = previousExitDetails(context, previousPid, startedAt, now)
         if (javaCrash) {
             LogRecorder.recordBlocking(
                 Log.WARN, TAG,
                 "Previous session terminated: pid=$previousPid cause=java_exception" +
-                        " uptime=" + (livedMs / 1000L) + "s"
+                        " elapsed_since_start=" + (livedMs / 1000L) + "s " + exitDetails
             )
             return
         }
@@ -253,14 +276,15 @@ object SessionGuard {
             LogRecorder.recordBlocking(
                 Log.WARN, TAG,
                 "Previous session abnormal exit: pid=$previousPid state=foreground" +
-                        " uptime=" + (livedMs / 1000L) + "s java_crash=false" +
-                        " likely_cause=native_crash|ANR|LMK memory=" + CrashGuard.memorySnapshot()
+                        " elapsed_since_start=" + (livedMs / 1000L) + "s java_crash=false" +
+                        " module_exit_cause=unknown current_process_memory=" + CrashGuard.memorySnapshot() +
+                        " " + exitDetails
             )
         } else {
             LogRecorder.recordBlockingGated(
                 Log.INFO, TAG,
                 "Previous session background exit: pid=$previousPid state=background" +
-                        " uptime=" + (livedMs / 1000L) + "s cause=system_reclaim|user_kill"
+                        " elapsed_since_start=" + (livedMs / 1000L) + "s module_exit_cause=unknown " + exitDetails
             )
         }
     }
