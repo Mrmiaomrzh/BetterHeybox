@@ -753,6 +753,11 @@ class DailyTaskHook(private val module: MainModule) {
             return
         }
         if (module.isEnabled(App.KEY_DAILY_TASK_SILENT, false)) {
+            if (!HttpBridge.installCapture(module, targetCl)) {
+                module.logd(Log.WARN, MainModule.TAG, "✘ 静默分享：无法安装宿主网络捕获，请检查宿主版本")
+                Toast.makeText(activity.applicationContext, "静默分享不可用：无法安装网络捕获，请查看模块日志", Toast.LENGTH_LONG).show()
+                return
+            }
             val started = DailyShareApiRunner.maybeStart(module, activity.applicationContext)
             module.logd(
                 if (started) Log.INFO else Log.WARN, MainModule.TAG,

@@ -10,6 +10,7 @@ import com.better.heybox.Checkpoint
 import com.better.heybox.MainModule
 import java.lang.reflect.Field
 import java.lang.reflect.Method
+import java.lang.reflect.Modifier
 import java.util.ArrayDeque
 
 class SubCommentExpandHook(private val module: MainModule) {
@@ -83,7 +84,7 @@ class SubCommentExpandHook(private val module: MainModule) {
             module.logd(
                 if (ready) Log.INFO else Log.WARN, MainModule.TAG,
                 (if (ready) "✔ 自动展开回复 Hook 已安装：" else "△ 自动展开回复 Hook 已挂，但字段解析不全：")
-                        + ADAPTER_CLASS + "#" + BIND_METHOD + "(" + holderClass.name + ", "
+                        + ADAPTER_CLASS + "#" + bind.name + "(" + holderClass.name + ", "
                         + COMMENTS_OBJ_CLASS + ")"
                         + " [hasMore=" + (sFieldHasMore != null || sMethodHasMore != null)
                         + " loading=" + (sFieldLoading != null)
@@ -95,14 +96,14 @@ class SubCommentExpandHook(private val module: MainModule) {
             Checkpoint.mark("自动展开回复安装: 跳过（本版本无该挂点）")
             module.logd(
                 Log.WARN, MainModule.TAG,
-                "△ 自动展开回复 Hook 跳过：当前版本无 " + ADAPTER_CLASS + "#" + BIND_METHOD
+                "△ 自动展开回复 Hook 跳过：无法唯一确认 " + ADAPTER_CLASS + " 的已知绑定方法"
                         + "(holder, " + COMMENTS_OBJ_CLASS + ") 挂点"
             )
         } catch (e: NoSuchMethodException) {
             Checkpoint.mark("自动展开回复安装: 跳过（本版本无该挂点）")
             module.logd(
                 Log.WARN, MainModule.TAG,
-                "△ 自动展开回复 Hook 跳过：当前版本无 " + ADAPTER_CLASS + "#" + BIND_METHOD
+                "△ 自动展开回复 Hook 跳过：无法唯一确认 " + ADAPTER_CLASS + " 的已知绑定方法"
                         + "(holder, " + COMMENTS_OBJ_CLASS + ") 挂点"
             )
         } catch (t: Throwable) {
@@ -319,11 +320,14 @@ class SubCommentExpandHook(private val module: MainModule) {
 
         private const val ADAPTER_CLASS =
             "com.max.xiaoheihe.module.bbs.adapter.CommentAdapterV2"
-        private val HOLDER_CLASSES = arrayOf("hi.cg0", "ii.cg0", "ii.xf0")
+        // 绑定类名与方法名必须成对使用；相同参数形状还有其他方法。
+        private val BIND_TARGETS = arrayOf(
+            "hi.cg0" to "m0", "ii.cg0" to "m0", "ii.xf0" to "m0",
+            "ii.dg0" to "l0"
+        )
         private const val COMMENTS_OBJ_CLASS = "com.max.basebbs.bean.BBSCommentsObj"
         private const val COMMENT_OBJ_CLASS = "com.max.basebbs.bean.BBSCommentObj"
         private const val SUB_COMMENT_VIEW_CLASS = "com.max.xiaoheihe.view.SubCommentView"
-        private const val BIND_METHOD = "m0"
 
         private const val FIELD_HOLDER_SUB = "f"
         private const val FIELD_HAS_MORE = "p"
@@ -544,23 +548,28 @@ class SubCommentExpandHook(private val module: MainModule) {
             adapterClass: Class<*>, commentsObjClass: Class<*>,
             subCommentViewClass: Class<*>, cl: ClassLoader
         ): Method {
-            for (name in HOLDER_CLASSES) {
+            val matches = ArrayList<Method>()
+            for ((holderName, methodName) in BIND_TARGETS) {
                 val holderClass = try {
-                    Class.forName(name, false, cl)
+                    Class.forName(holderName, false, cl)
                 } catch (_: ClassNotFoundException) {
                     continue
                 }
                 val bind = try {
-                    adapterClass.getDeclaredMethod(BIND_METHOD, holderClass, commentsObjClass)
+                    adapterClass.getDeclaredMethod(methodName, holderClass, commentsObjClass)
                 } catch (_: NoSuchMethodException) {
                     continue
                 }
                 val field = findField(holderClass, FIELD_HOLDER_SUB)
-                if (field != null && subCommentViewClass.isAssignableFrom(field.type)) {
-                    return bind
+                if (bind.returnType == Void.TYPE && !Modifier.isStatic(bind.modifiers)
+                    && field != null && !Modifier.isStatic(field.modifiers)
+                    && subCommentViewClass.isAssignableFrom(field.type)
+                ) {
+                    matches.add(bind)
                 }
             }
-            throw NoSuchMethodException("No compatible $ADAPTER_CLASS#$BIND_METHOD binding")
+            return matches.singleOrNull()
+                ?: throw NoSuchMethodException("No unique compatible $ADAPTER_CLASS binding")
         }
 
         private fun findField(cls: Class<*>, name: String): Field? {

@@ -11,9 +11,12 @@ class BottomTabUpdateHook(private val module: MainModule) {
     fun install(cl: ClassLoader) {
         val context = App.resolveAppContext()
         if (!VersionUtils.isHeyboxBuild(context, "1.3.400", 1149L) &&
-            !VersionUtils.isHeyboxBuild(context, "1.3.401", 1150L)
+            !VersionUtils.isHeyboxBuild(context, "1.3.401", 1150L) &&
+            !VersionUtils.isHeyboxBuild(context, "1.3.401", 1151L) &&
+            !VersionUtils.isHeyboxBuild(context, "1.3.402", 1152L) &&
+            !VersionUtils.isHeyboxBuild(context, "1.3.402", 1153L)
         ) {
-            module.logd(Log.WARN, MainModule.TAG, "禁止底栏热更新：仅支持小黑盒 1.3.400 (1149) 和 1.3.401 (1150)，已跳过")
+            module.logd(Log.WARN, MainModule.TAG, "禁止底栏热更新：仅支持小黑盒 1.3.400 (1149)、1.3.401 (1150/1151)、1.3.402 (1152/1153)，已跳过")
             return
         }
         val targets = try {

@@ -35,6 +35,8 @@ object ModuleStats {
 
     @JvmField val bbsListItemsHidden = AtomicInteger()
 
+    @JvmField val trackerBlocked = AtomicInteger()
+
     @JvmField val topicFeedRequests = AtomicInteger()
 
     @JvmField val topicFeedStallRuns = AtomicInteger()
@@ -142,6 +144,7 @@ object ModuleStats {
         sb.append('\n').append("社区/话题列表(#41)：数据层条目=").append(bbsListItemsSeen.get())
             .append(" / 数据层删除=").append(bbsListItemsDropped.get())
             .append(" / 视图隐藏=").append(bbsListItemsHidden.get())
+        sb.append('\n').append("埋点上报屏蔽：拦截=").append(trackerBlocked.get())
         sb.append('\n').append("话题信息流分页(#41)：宿主请求=").append(topicFeedRequests.get())
             .append(" / 疑似空转告警=").append(topicFeedStallRuns.get())
         sb.append('\n').append("我的任务(#42)：检查=").append(myTaskResumeChecks.get())

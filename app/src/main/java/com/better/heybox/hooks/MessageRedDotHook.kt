@@ -9,7 +9,9 @@ import com.better.heybox.App
 import com.better.heybox.Checkpoint
 import com.better.heybox.HeyboxPrefs
 import com.better.heybox.MainModule
+import com.better.heybox.VersionUtils
 import java.lang.reflect.Field
+import java.lang.reflect.Modifier
 import java.util.ArrayList
 import java.util.Collections
 import java.util.LinkedHashSet
@@ -44,15 +46,26 @@ class MessageRedDotHook(private val module: MainModule) {
 
     private fun hookUnreadFlag(cl: ClassLoader): Boolean {
         return try {
-            val cls: Class<*> = Class.forName(HOST_CACHE_CLASS, false, cl)
+            val context = App.resolveAppContext()
+            // These builds use f.v() to read HAS_UNREAD_MSG; older builds used c.v().
+            val cacheClass = if (VersionUtils.isHeyboxBuild(context, "1.3.400", 1149L) ||
+                VersionUtils.isHeyboxBuild(context, "1.3.401", 1150L) ||
+                VersionUtils.isHeyboxBuild(context, "1.3.401", 1151L) ||
+                VersionUtils.isHeyboxBuild(context, "1.3.402", 1152L) ||
+                VersionUtils.isHeyboxBuild(context, "1.3.402", 1153L)
+            ) "com.max.hbcache.f" else "com.max.hbcache.c"
+            val cls: Class<*> = Class.forName(cacheClass, false, cl)
             val getter = cls.getDeclaredMethod(UNREAD_METHOD)
+            require(Modifier.isStatic(getter.modifiers) && getter.returnType == Boolean::class.javaPrimitiveType) {
+                "Unexpected unread flag signature: $getter"
+            }
             getter.setAccessible(true)
             module.hook(getter).intercept { chain ->
                 if (sHideDot) false else chain.proceed()
             }
             module.logd(
                 Log.INFO, MainModule.TAG,
-                "✔ 消息红点：未读标记挂点 " + HOST_CACHE_CLASS + "#" + UNREAD_METHOD + "()Z"
+                "✔ 消息红点：未读标记挂点 " + cacheClass + "#" + UNREAD_METHOD + "()Z"
             )
             true
         } catch (t: Throwable) {
@@ -106,7 +119,6 @@ class MessageRedDotHook(private val module: MainModule) {
 
     companion object {
 
-        private const val HOST_CACHE_CLASS = "com.max.hbcache.c"
         private const val UNREAD_METHOD = "v"
         private const val ID_BADGE = "badge"
         private val ID_TITLES = arrayOf("tv_title", "tv_name")

@@ -15,6 +15,7 @@ import com.better.heybox.hooks.BottomTabUpdateHook
 import com.better.heybox.hooks.BrowserRedirectHook
 import com.better.heybox.hooks.CommentCopyHook
 import com.better.heybox.hooks.CommentFilterHook
+import com.better.heybox.hooks.CommentImageSaveHook
 import com.better.heybox.hooks.CommentSharePanelHook
 import com.better.heybox.hooks.DailyTaskHook
 import com.better.heybox.hooks.FakeUsageAccessHook
@@ -26,6 +27,8 @@ import com.better.heybox.hooks.GeneralHook
 import com.better.heybox.hooks.ImageCacheDirHook
 import com.better.heybox.hooks.ImageOriginalHook
 import com.better.heybox.hooks.ImageShareHook
+import com.better.heybox.hooks.PostImageSaveButtonHook
+import com.better.heybox.hooks.PostShareImageSaveHook
 import com.better.heybox.hooks.LiquidGlassBottomBarHook
 import com.better.heybox.hooks.MessageRedDotHook
 import com.better.heybox.hooks.MyTaskHook
@@ -41,6 +44,7 @@ import com.better.heybox.hooks.ShareLinkPurifyHook
 import com.better.heybox.hooks.SingleColumnFeedHook
 import com.better.heybox.hooks.SubCommentExpandHook
 import com.better.heybox.hooks.TargetHintHook
+import com.better.heybox.hooks.TrackerBlockHook
 import com.better.heybox.hooks.TextSelectHook
 import com.better.heybox.hooks.VideoDownloadHook
 import com.better.heybox.hooks.WatchHook
@@ -292,11 +296,13 @@ class MainModule private constructor(private val param: PackageParam) {
             App.KEY_COMMENT_FREE_COPY, App.KEY_CUSTOM_TEXT_SELECT,
             App.KEY_SCREENSHOT_ENABLED, App.KEY_COMMENT_REPLY_PANEL)
         registerHook("评论分享面板", CommentSharePanelHook(this)::install, cl)
+        registerHook("评论图片批量保存", CommentImageSaveHook(this)::install, cl)
+        registerHook("帖子分享批量保存", PostShareImageSaveHook(this)::install, cl)
         registerHook("评论过滤", CommentFilterHook(this)::install, cl,
             App.KEY_BLOCK_CY_COMMENT, App.KEY_HOST_HIDE_CY, App.KEY_BLOCK_GAME_RELAY,
             App.KEY_CY_KEEP_FIRST, App.KEY_COMMENT_KEYWORDS)
-        registerHook("图片分享", ImageShareHook(this)::install, cl,
-            App.KEY_SYSTEM_SHARE, App.KEY_IMAGE_SHARE_NO_SAVE)
+        registerHook("图片分享与批量保存", ImageShareHook(this)::install, cl)
+        registerHook("帖子批量保存按钮", PostImageSaveButtonHook(this)::install, cl)
         registerHook("图片缓存目录", ImageCacheDirHook(this)::install, cl,
             App.KEY_IMAGE_CACHE_DIR)
         registerHook("大图自动原图", ImageOriginalHook(this)::install, cl,
@@ -322,6 +328,8 @@ class MainModule private constructor(private val param: PackageParam) {
         registerHook("我的任务", HookInstaller { ignored ->
             myTaskHook = MyTaskHook(this).also { it.install(ignored) }
         }, cl, App.KEY_MY_TASK_ENABLED)
+        registerHook("埋点上报屏蔽", TrackerBlockHook(this)::install, cl,
+            App.KEY_TRACKER_BLOCK_LOGS, App.KEY_TRACKER_BLOCK_RISK)
         registerHook("动态推送", WatchHook(this)::install, cl,
             App.KEY_WATCH_ENABLED, App.KEY_LOG)
 
@@ -630,6 +638,7 @@ class MainModule private constructor(private val param: PackageParam) {
             App.KEY_GAME_LIB_HIDE_SECTION_NAMES,
             App.KEY_BLOCK_UPDATE,
             App.KEY_SYSTEM_SHARE,
+            App.KEY_COMMENT_BATCH_IMAGES,
             App.KEY_DAILY_TASK_ENABLED,
             App.KEY_DAILY_TASK_PICTURE,
             App.KEY_DAILY_TASK_NORMAL,
@@ -783,7 +792,9 @@ class MainModule private constructor(private val param: PackageParam) {
                         "1.3.397",
                         "1.3.398",
                         "1.3.399",
-                        "1.3.400"
+                        "1.3.400",
+                        "1.3.401",
+                        "1.3.402"
                     )
                 )
             )

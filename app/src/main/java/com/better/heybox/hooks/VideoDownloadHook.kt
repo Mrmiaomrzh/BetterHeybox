@@ -44,7 +44,10 @@ class VideoDownloadHook(private val module: MainModule) {
     private fun hookW(cl: ClassLoader) {
         val context = App.resolveAppContext()
         val hasVerifiedA0 = VersionUtils.isHeyboxBuild(context, "1.3.400", 1149L) ||
-            VersionUtils.isHeyboxBuild(context, "1.3.401", 1150L)
+            VersionUtils.isHeyboxBuild(context, "1.3.401", 1150L) ||
+            VersionUtils.isHeyboxBuild(context, "1.3.401", 1151L) ||
+            VersionUtils.isHeyboxBuild(context, "1.3.402", 1152L) ||
+            VersionUtils.isHeyboxBuild(context, "1.3.402", 1153L)
         val targets = mutableListOf(
             "setVideoRes" to arrayOf(String::class.java),
             "setVideoRes" to arrayOf(String::class.java, java.util.Map::class.java),

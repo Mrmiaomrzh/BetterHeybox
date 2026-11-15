@@ -154,7 +154,11 @@ object DailyShareApiRunner {
             sleep(READY_POLL_MS)
             waited += READY_POLL_MS
         }
-        module.logd(Log.WARN, MainModule.TAG, "✘ 静默分享：网络桥等待超时，等待 " + waited + "ms")
+        module.logd(
+            Log.WARN, MainModule.TAG,
+            "✘ 静默分享：网络桥等待超时，等待 " + waited + "ms；客户端已捕获=" +
+                HttpBridge.ready() + "，账号标识已捕获=" + (HttpBridge.heyboxId() != null)
+        )
         return false
     }
 
@@ -356,7 +360,7 @@ object DailyShareApiRunner {
         }
         val out = LinkedHashMap<String, String>()
         try {
-            walkStates(JSONObject(body), out, 0)
+            walkStates(parseResult(body, "任务列表"), out, 0)
         } catch (t: Throwable) {
             module.logd(Log.WARN, MainModule.TAG, "✘ 静默分享：任务列表解析失败")
             return null

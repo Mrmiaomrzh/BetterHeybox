@@ -53,6 +53,7 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
     const val KEY_CUSTOM_TEXT_SELECT = "custom_text_select"
     const val KEY_COMMENT_FREE_COPY = "comment_free_copy"
     const val KEY_COMMENT_REPLY_PANEL = "comment_reply_panel"
+    const val KEY_COMMENT_BATCH_IMAGES = "comment_batch_images"
     const val KEY_SEARCH_HIDE_BANNER = "search_hide_banner"
     const val KEY_SEARCH_HIDE_DISCOVER = "search_hide_discover"
     const val KEY_SEARCH_HIDE_HOT_RANK = "search_hide_hot_rank"
@@ -220,6 +221,8 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
     const val KEY_MODULE_VERSION_FLOOR = "module_version_floor"
     const val KEY_DEBUG_NO_DOWNGRADE = "debug_no_downgrade"
     const val KEY_TARGET_HINT_VISIBLE = "target_hint_visible"
+    const val KEY_TRACKER_BLOCK_LOGS = "tracker_block_logs"
+    const val KEY_TRACKER_BLOCK_RISK = "tracker_block_risk"
     const val KEY_WATCH_ENABLED = "watch_enabled"
     const val KEY_WATCH_USERS = "watch_users"
     const val KEY_WATCH_KEYWORDS = "watch_keywords"
@@ -260,6 +263,7 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
             m.put(KEY_CUSTOM_TEXT_SELECT, false);
             m.put(KEY_COMMENT_FREE_COPY, true);
             m.put(KEY_COMMENT_REPLY_PANEL, true);
+            m.put(KEY_COMMENT_BATCH_IMAGES, true);
             m.put(KEY_SEARCH_HIDE_BANNER, false);
             m.put(KEY_SEARCH_HIDE_DISCOVER, false);
             m.put(KEY_SEARCH_HIDE_HOT_RANK, false);
@@ -325,6 +329,8 @@ class App : Application(), XposedServiceHelper.OnServiceListener {
             m.put(KEY_DISCLAIMER_ACCEPTED, false);
             m.put(KEY_TARGET_HINT_VISIBLE, true);
             m.put(KEY_DEBUG_NO_DOWNGRADE, false);
+            m.put(KEY_TRACKER_BLOCK_LOGS, false);
+            m.put(KEY_TRACKER_BLOCK_RISK, false);
             m.put(KEY_WATCH_ENABLED, false);
             m.put(KEY_WATCH_BANNER, true);
             m.put(KEY_WATCH_NOTIFY, true);

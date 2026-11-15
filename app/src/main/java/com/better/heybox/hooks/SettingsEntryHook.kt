@@ -3388,6 +3388,10 @@ class SettingsEntryHook(private val module: MainModule) {
             addBase(groups, "我的任务（限时任务）")
             return groups
         }
+        groups.add(SettingsGroup("埋点上报屏蔽", arrayOf(
+            SwitchDef("日志与性能上报", "屏蔽第三方日志、性能监控及广告归因配置请求", App.KEY_TRACKER_BLOCK_LOGS, false, false),
+            SwitchDef("风控与设备指纹上报", "可能影响登录态校验、抽奖/下单类接口", App.KEY_TRACKER_BLOCK_RISK, false, false)
+        )))
         addBase(groups, TITLE_GENERAL)
         appendExtraRows(groups, TITLE_GENERAL, DebugSettings.generalRows())
         if (BuildFlags.DEBUG) {
@@ -4516,6 +4520,8 @@ class SettingsEntryHook(private val module: MainModule) {
             ),
             SettingsGroup(
                 "评论交互", arrayOf(
+                    SwitchDef("评论图片批量保存", "在评论分享面板添加批量保存原图",
+                            App.KEY_COMMENT_BATCH_IMAGES, true, false),
                     SwitchDef("回复改长按面板", "单击评论不再弹回复框；长按评论在分享面板点「回复」",
                             App.KEY_COMMENT_REPLY_PANEL, true, false),
                     SwitchDef("自动展开回复",
@@ -4764,7 +4770,7 @@ class SettingsEntryHook(private val module: MainModule) {
             )
             return SettingsGroup(
                 "底部导航栏", arrayOf(
-                    SwitchDef("禁止底栏热更新", "保留已有底栏策略和图标；仅支持 1.3.400 (1149) 和 1.3.401 (1150)，重启生效", App.KEY_BLOCK_BOTTOM_TAB_UPDATE, false, true),
+                    SwitchDef("禁止底栏热更新", "保留已有底栏策略和图标；仅支持 1.3.400 (1149)、1.3.401 (1150/1151)、1.3.402 (1152/1153)，重启生效", App.KEY_BLOCK_BOTTOM_TAB_UPDATE, false, true),
                     SwitchDef("隐藏「" + home + "」", null, App.KEY_HIDE_TAB_HOME, false, true),
                     SwitchDef("隐藏「" + slot2 + "」", null, App.KEY_HIDE_TAB_HOT, false, true),
                     SwitchDef("隐藏「" + slot4 + "」", null, App.KEY_HIDE_TAB_GAME, false, true),
