@@ -25,6 +25,8 @@ captures/
 analysis/
 .tools/
 hbcap/
+tools/mcp/
+app/src/main/java/com/better/heybox/McpSwitchBridge.kt
 
 keystore/
 keystore.properties

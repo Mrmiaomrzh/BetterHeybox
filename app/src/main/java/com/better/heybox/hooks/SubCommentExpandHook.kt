@@ -323,7 +323,7 @@ class SubCommentExpandHook(private val module: MainModule) {
         // 绑定类名与方法名必须成对使用；相同参数形状还有其他方法。
         private val BIND_TARGETS = arrayOf(
             "hi.cg0" to "m0", "ii.cg0" to "m0", "ii.xf0" to "m0",
-            "ii.dg0" to "l0"
+            "ii.dg0" to "l0", "hi.dg0" to "m0"
         )
         private const val COMMENTS_OBJ_CLASS = "com.max.basebbs.bean.BBSCommentsObj"
         private const val COMMENT_OBJ_CLASS = "com.max.basebbs.bean.BBSCommentObj"

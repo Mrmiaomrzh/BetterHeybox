@@ -52,7 +52,9 @@ class MessageRedDotHook(private val module: MainModule) {
                 VersionUtils.isHeyboxBuild(context, "1.3.401", 1150L) ||
                 VersionUtils.isHeyboxBuild(context, "1.3.401", 1151L) ||
                 VersionUtils.isHeyboxBuild(context, "1.3.402", 1152L) ||
-                VersionUtils.isHeyboxBuild(context, "1.3.402", 1153L)
+                VersionUtils.isHeyboxBuild(context, "1.3.402", 1153L) ||
+                VersionUtils.isHeyboxBuild(context, "1.3.402", 1154L) ||
+                VersionUtils.isHeyboxBuild(context, "1.3.402", 1155L)
             ) "com.max.hbcache.f" else "com.max.hbcache.c"
             val cls: Class<*> = Class.forName(cacheClass, false, cl)
             val getter = cls.getDeclaredMethod(UNREAD_METHOD)

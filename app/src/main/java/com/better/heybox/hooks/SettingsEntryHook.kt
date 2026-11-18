@@ -3356,7 +3356,7 @@ class SettingsEntryHook(private val module: MainModule) {
             if (VersionUtils.isHeyboxBuildAtLeast(
                     activity, EXPERIMENTAL_HEYBOX_VERSION,
                     EXPERIMENTAL_HEYBOX_MIN_CODE
-                )
+                ) || VersionUtils.isHeyboxBuild(activity, "1.3.402", 1155L)
             ) {
                 groups.add(
                     SettingsGroup(
@@ -4770,7 +4770,7 @@ class SettingsEntryHook(private val module: MainModule) {
             )
             return SettingsGroup(
                 "底部导航栏", arrayOf(
-                    SwitchDef("禁止底栏热更新", "保留已有底栏策略和图标；仅支持 1.3.400 (1149)、1.3.401 (1150/1151)、1.3.402 (1152/1153)，重启生效", App.KEY_BLOCK_BOTTOM_TAB_UPDATE, false, true),
+                    SwitchDef("禁止底栏热更新", "保留已有底栏策略和图标；仅支持 1.3.400 (1149)、1.3.401 (1150/1151)、1.3.402 (1152/1153/1154/1155)，重启生效", App.KEY_BLOCK_BOTTOM_TAB_UPDATE, false, true),
                     SwitchDef("隐藏「" + home + "」", null, App.KEY_HIDE_TAB_HOME, false, true),
                     SwitchDef("隐藏「" + slot2 + "」", null, App.KEY_HIDE_TAB_HOT, false, true),
                     SwitchDef("隐藏「" + slot4 + "」", null, App.KEY_HIDE_TAB_GAME, false, true),

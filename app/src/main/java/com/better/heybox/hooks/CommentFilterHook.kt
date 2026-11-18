@@ -31,11 +31,6 @@ class CommentFilterHook(module: MainModule) {
     private val autoLoadCounts: MutableMap<Any?, Int> =
         Collections.synchronizedMap(WeakHashMap<Any?, Int>())
 
-    private val subScans: MutableMap<Any?, SubScan> =
-        Collections.synchronizedMap(WeakHashMap<Any?, SubScan>())
-
-    private class SubScan(val size: Int, val lastId: String, val hidden: Int)
-
     @Volatile
     private var lastAutoLoadAt = 0L
 
@@ -103,10 +98,11 @@ class CommentFilterHook(module: MainModule) {
             module.hook(getter).intercept { chain ->
                 val raw = chain.proceed()
                 try {
-                    if (!commentFilterActive() || raw !is List<*>) {
-                        return@intercept raw
-                    }
-                    val filtered = filterFloors(raw as List<*>)
+                    if (raw !is List<*>) return@intercept raw
+                    val started = SystemClock.elapsedRealtime()
+                    val config = captureFilterConfig()
+                    if (!config.active) return@intercept raw
+                    val filtered = filterFloors(raw, config, started)
                     return@intercept filtered ?: raw
                 } catch (t: Throwable) {
                     module.logd(Log.WARN, MainModule.TAG, "评论数据层过滤异常，放行: " + t)
@@ -122,12 +118,11 @@ class CommentFilterHook(module: MainModule) {
         }
     }
 
-    private fun filterFloors(raw: List<*>): List<*>? {
+    private fun filterFloors(raw: List<*>, config: FilterConfig, started: Long): List<*>? {
         val keep: MutableList<Any?> = ArrayList<Any?>(raw.size)
         var blocked = 0
-        val started = SystemClock.elapsedRealtime()
         var budgetLogged = false
-        if (keepFirstCyEnabled()) {
+        if (config.keepFirstCy) {
             pickKeepFirstCyId(raw, false)
         }
         for (item in raw) {
@@ -143,7 +138,7 @@ class CommentFilterHook(module: MainModule) {
                 keep.add(item)
                 continue
             }
-            val reason = floorReason(item)
+            val reason = floorReason(item, config)
             if (reason == null) {
                 keep.add(item)
                 continue
@@ -193,7 +188,9 @@ class CommentFilterHook(module: MainModule) {
                 return result
             }
             probeRow(comment, safeGet(comment, "getText"))
-            val reason = commentReason(comment)
+            val reason = commentReason(comment, subKeep = {
+                isFirstSubCy(subCommentGroup(self, index, comment), comment)
+            })
             if (reason == null) {
                 restoreCyView(row)
                 return result
@@ -205,6 +202,18 @@ class CommentFilterHook(module: MainModule) {
             module.logd(Log.WARN, MainModule.TAG, "楼中楼视图行过滤异常，放行: " + t)
         }
         return result
+    }
+
+    private fun subCommentGroup(view: Any?, index: Int, comment: Any?): List<*>? {
+        if (view == null || comment == null || index < 0) return null
+        return try {
+            val field = view.javaClass.getDeclaredField("o")
+            field.isAccessible = true
+            val list = field.get(view) as? List<*> ?: return null
+            if (index < list.size - 1 && list[index + 1] === comment) list else null
+        } catch (_: Throwable) {
+            null
+        }
     }
 
     private fun rowItem(rowView: Any?, index: Int): Any? {
@@ -447,13 +456,9 @@ class CommentFilterHook(module: MainModule) {
                     comment = alt
                 }
             }
-            if (keepFirstCyEnabled()) {
-                val subList = commentList(chain.arg(4))
-                if (subList != null) {
-                    pickKeepFirstCyId(subList, true)
-                }
-            }
-            val reason = commentReason(comment)
+            val reason = commentReason(comment, subKeep = {
+                isFirstSubCy(commentList(chain.arg(4)), comment)
+            })
             if (reason != null) {
                 countHit("楼中楼行", reason)
                 hideCyView(row)
@@ -582,15 +587,15 @@ class CommentFilterHook(module: MainModule) {
         var hidden = 0
         var floorKey: Any? = null
         try {
-            if (commentFilterActive() && arg is List<*>) {
-                val list = arg as List<*>
-                if (keepFirstCyEnabled()) {
-                    pickKeepFirstCyId(list, true)
-                }
-                if (list.size > 1) {
-                    floorKey = list[0]
-                    if (autoLoadDone(floorKey) < MAX_AUTO_LOADS) {
-                        hidden = countFilteredSubComments(floorKey, list)
+            if (arg is List<*>) {
+                val config = captureFilterConfig()
+                if (config.active) {
+                    val list = arg
+                    if (list.size > 1) {
+                        floorKey = list[0]
+                        if (autoLoadDone(floorKey) < MAX_AUTO_LOADS) {
+                            hidden = countFilteredSubComments(list, config)
+                        }
                     }
                 }
             }
@@ -621,22 +626,14 @@ class CommentFilterHook(module: MainModule) {
         return result
     }
 
-    private fun countFilteredSubComments(floor: Any?, list: List<*>): Int {
-        val lastId = stringify(safeGet(list[list.size - 1], "getCommentid"))
-        synchronized(subScans) {
-            val prev = subScans[floor]
-            if (prev != null && prev.size == list.size && lastId == prev.lastId) {
-                return prev.hidden
-            }
-        }
+    private fun countFilteredSubComments(list: List<*>, config: FilterConfig): Int {
         var hidden = 0
+        val first by lazy { selectFirstSubCy(list) }
         for (i in 1 until list.size) {
-            if (commentReason(list[i]) != null) {
+            val comment = list[i]
+            if (commentReason(comment, config, subKeep = { sameComment(first, comment) }) != null) {
                 hidden++
             }
-        }
-        synchronized(subScans) {
-            subScans[floor] = SubScan(list.size, lastId, hidden)
         }
         return hidden
     }
@@ -818,8 +815,8 @@ class CommentFilterHook(module: MainModule) {
         return "obj@" + System.identityHashCode(comment)
     }
 
-    private fun isKeptCy(comment: Any?): Boolean {
-        if (!keepFirstCyEnabled() || comment == null) {
+    private fun isKeptCy(comment: Any?, keepFirstCy: Boolean): Boolean {
+        if (!keepFirstCy || comment == null) {
             return false
         }
         val id = commentIdOf(comment)
@@ -827,6 +824,19 @@ class CommentFilterHook(module: MainModule) {
             return keptCyIds.containsKey(id)
         }
     }
+
+    private fun subCySelector() = CyGroupSelector<Any?, Any>(
+        ::firstCommentOf, ::isCyComment, ::cyBodyOf, SystemClock::elapsedRealtime,
+        { a, b -> commentIdOf(a) == commentIdOf(b) },
+    )
+
+    private fun isFirstSubCy(list: List<*>?, comment: Any?): Boolean =
+        subCySelector().isFirstEligible(list, comment, skipHead = true)
+
+    private fun selectFirstSubCy(list: List<*>?): Any? = subCySelector().select(list, skipHead = true)
+
+    private fun sameComment(first: Any?, comment: Any?): Boolean =
+        first != null && comment != null && commentIdOf(first) == commentIdOf(comment)
 
     private fun pickKeepFirstCyId(list: List<*>?, skipHead: Boolean): String? {
         if (list == null || list.size < 2) {
@@ -902,43 +912,86 @@ class CommentFilterHook(module: MainModule) {
         return cyMarkFilterActive() || gameRelayEnabled()
     }
 
-    private fun commentReason(comment: Any?): String? {
-        if (comment == null) {
-            return null
-        }
+    private data class FilterConfig(
+        val enabled: Boolean,
+        val hostHideCy: Boolean,
+        val gameRelay: Boolean,
+        val keepFirstCy: Boolean,
+        val ignoreEmoji: Boolean,
+        val keywords: List<Any?>,
+    ) {
+        val active: Boolean get() = enabled || hostHideCy || gameRelay
+    }
+
+    private fun captureFilterConfig(): FilterConfig {
+        val enabled = isEnabled()
+        val hostHideCy = isHostHideCyEnabled()
+        val gameRelay = gameRelayEnabled()
+        return FilterConfig(
+            enabled, hostHideCy, gameRelay,
+            module.isEnabled(App.KEY_CY_KEEP_FIRST, false) && (enabled || hostHideCy),
+            module.isEnabled(App.KEY_RELAY_IGNORE_EMOJI, false),
+            if (enabled) keywordMatchers() else emptyList(),
+        )
+    }
+
+    private fun commentReason(comment: Any?, subKeep: (() -> Boolean)? = null): String? {
+        if (comment == null) return null
         if (isEnabled()) {
             val reason = singleReason(comment)
-            if (reason != null) {
-                return waiveKeptCy(comment, reason)
-            }
+            if (reason != null) return waiveKeptCy(comment, reason, keepFirstCyEnabled(), subKeep)
         } else if (isHostHideCyEnabled()) {
             val reason = cyMarkReason(comment)
-            if (reason != null) {
-                return waiveKeptCy(comment, reason)
-            }
+            if (reason != null) return waiveKeptCy(comment, reason, keepFirstCyEnabled(), subKeep)
         }
         return gameLinkReason(comment)
     }
 
-    private fun waiveKeptCy(comment: Any?, reason: String?): String? {
-        if (!isCyComment(comment) || !isKeptCy(comment)) {
+    private fun commentReason(comment: Any?, config: FilterConfig, subKeep: (() -> Boolean)? = null): String? {
+        if (comment == null) {
+            return null
+        }
+        if (config.enabled) {
+            val reason = singleReason(comment, config.keywords)
+            if (reason != null) {
+                return waiveKeptCy(comment, reason, config.keepFirstCy, subKeep)
+            }
+        } else if (config.hostHideCy) {
+            val reason = cyMarkReason(comment)
+            if (reason != null) {
+                return waiveKeptCy(comment, reason, config.keepFirstCy, subKeep)
+            }
+        }
+        return gameLinkReason(comment, config.gameRelay, config.ignoreEmoji)
+    }
+
+    private fun waiveKeptCy(comment: Any?, reason: String?, keepFirstCy: Boolean, subKeep: (() -> Boolean)? = null): String? {
+        if (!keepFirstCy || !isCyComment(comment) || !(subKeep?.invoke() ?: isKeptCy(comment, keepFirstCy))) {
             return reason
         }
         return null
     }
 
     private fun floorReason(floor: Any?): String? {
+        if (floor == null) return null
+        if (isEnabled() && isMeaninglessModel(floor)) return "无意义评论折叠行"
+        val comments = commentList(floor)
+        if (comments.isNullOrEmpty()) return null
+        return commentReason(comments[0])
+    }
+
+    private fun floorReason(floor: Any?, config: FilterConfig): String? {
         if (floor == null) {
             return null
         }
-        if (isEnabled() && isMeaninglessModel(floor)) {
+        if (config.enabled && isMeaninglessModel(floor)) {
             return "无意义评论折叠行"
         }
         val comments = commentList(floor)
         if (comments == null || comments.isEmpty()) {
             return null
         }
-        return commentReason(comments[0])
+        return commentReason(comments[0], config)
     }
 
     private fun gameFloorReason(floor: Any?): String? {
@@ -953,21 +1006,28 @@ class CommentFilterHook(module: MainModule) {
     }
 
     private fun gameLinkReason(comment: Any?): String? {
-        if (comment == null || !gameRelayEnabled()) {
+        if (comment == null || !gameRelayEnabled()) return null
+        return gameLinkReason(comment, true, module.isEnabled(App.KEY_RELAY_IGNORE_EMOJI, false))
+    }
+
+    private fun gameLinkReason(
+        comment: Any?, gameRelay: Boolean, ignoreEmoji: Boolean,
+    ): String? {
+        if (comment == null || !gameRelay) {
             return null
         }
         try {
-            return relayReason(safeGet(comment, "getText"), comment)
+            return relayReason(safeGet(comment, "getText"), comment, ignoreEmoji)
         } catch (t: Throwable) {
             return null
         }
     }
 
     private fun gameLinkReasonForText(text: String): String? {
-        return relayReason(text, null)
+        return relayReason(text, null, module.isEnabled(App.KEY_RELAY_IGNORE_EMOJI, false))
     }
 
-    private fun relayReason(text: String?, comment: Any?): String? {
+    private fun relayReason(text: String?, comment: Any?, ignoreEmoji: Boolean): String? {
         if (text == null || text.length == 0) {
             return null
         }
@@ -992,36 +1052,36 @@ class CommentFilterHook(module: MainModule) {
                 }
                 names.append(abbreviate(INVISIBLE.matcher(anchor.group(1)).replaceAll(""), 20))
             }
-            visible += relayVisibleCount(text, cursor, anchor.start())
+            visible += relayVisibleCount(text, cursor, anchor.start(), ignoreEmoji)
             if (visible > MAX_RELAY_VISIBLE_CHARS) {
                 probeSkip(comment, text, "锚点外可见字已超 " + MAX_RELAY_VISIBLE_CHARS)
                 return null
             }
             cursor = anchor.end()
         }
-        visible += relayVisibleCount(text, cursor, text.length)
+        visible += relayVisibleCount(text, cursor, text.length, ignoreEmoji)
         probeGameLink(comment, text, visible, links, names.toString())
         if (visible > MAX_RELAY_VISIBLE_CHARS) {
             probeSkip(
                 comment, text, "残留 " + visible + " 字: "
-                        + abbreviate(relayVisibleText(text, cursor, text.length), 40)
+                        + abbreviate(relayVisibleText(text, cursor, text.length, ignoreEmoji), 40)
             )
             return null
         }
         return "游戏名接龙（正文仅游戏链接）"
     }
 
-    private fun relayVisibleCount(text: String, from: Int, to: Int): Int {
-        return relayVisibleText(text, from, to).length
+    private fun relayVisibleCount(text: String, from: Int, to: Int, ignoreEmoji: Boolean): Int {
+        return relayVisibleText(text, from, to, ignoreEmoji).length
     }
 
-    private fun relayVisibleText(text: String, from: Int, to: Int): String {
+    private fun relayVisibleText(text: String, from: Int, to: Int, ignoreEmoji: Boolean): String {
         if (from >= to) {
             return ""
         }
         var segment = text.substring(from, to)
         segment = ANY_TAG.matcher(segment).replaceAll("")
-        if (module.isEnabled(App.KEY_RELAY_IGNORE_EMOJI, false)) {
+        if (ignoreEmoji) {
             segment = EMOJI_TOKEN.matcher(segment).replaceAll("")
         }
         return INVISIBLE.matcher(segment).replaceAll("")
@@ -1127,7 +1187,7 @@ class CommentFilterHook(module: MainModule) {
         return null
     }
 
-    private fun singleReason(comment: Any?): String? {
+    private fun singleReason(comment: Any?, keywords: List<Any?>? = null): String? {
         if (comment == null) {
             return null
         }
@@ -1141,7 +1201,7 @@ class CommentFilterHook(module: MainModule) {
         if (isCyText(text)) {
             return "cy 评论（纯插眼文本）"
         }
-        val keyword = keywordHit(text)
+        val keyword = keywordHit(text, keywords ?: keywordMatchers())
         return if (keyword == null) null else "命中关键词 " + keyword
     }
 
@@ -1203,11 +1263,10 @@ class CommentFilterHook(module: MainModule) {
     }
 
 
-    private fun keywordHit(text: String?): String? {
+    private fun keywordHit(text: String?, matchers: List<Any?>): String? {
         if (text == null || text.isEmpty()) {
             return null
         }
-        val matchers = keywordMatchers()
         if (matchers.isEmpty()) {
             return null
         }

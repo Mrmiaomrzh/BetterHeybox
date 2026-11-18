@@ -1252,21 +1252,26 @@ class PostFilterHook(module: MainModule) {
     }
 
 
-    private fun keywordHit(item: Any?): String? {
-        if (item == null) {
-            return null
-        }
+    private inner class FilterText(private val item: Any) {
+        val title by lazy { safeTitle(item) }
+        val text by lazy { safeText(item) }
+        val description by lazy { safeGet(item, "getDescription") }
+        val link by lazy { safeInvoke(item, "getLinkContent") }
+        val linkTitle by lazy { if (link == null) null else safeGet(link, "getTitle") }
+        val linkDescription by lazy { if (link == null) null else safeGet(link, "getDescription") }
+    }
+
+    private fun keywordHit(fields: FilterText): String? {
         val matchers = keywordMatchers()
         if (matchers.isEmpty()) {
             return null
         }
-        val hit = matchAny(matchers, safeTitle(item), safeText(item), safeGet(item, "getDescription"))
+        val hit = matchAny(matchers, fields.title, fields.text, fields.description)
         if (hit != null) {
             return hit
         }
-        val link = safeInvoke(item, "getLinkContent")
-        if (link != null) {
-            return matchAny(matchers, safeGet(link, "getTitle"), safeGet(link, "getDescription"))
+        if (fields.link != null) {
+            return matchAny(matchers, fields.linkTitle, fields.linkDescription)
         }
         return null
     }
@@ -1340,7 +1345,7 @@ class PostFilterHook(module: MainModule) {
         if (levelBlocked(item)) {
             return levelReason(item)
         }
-        val engagement = if (isEngagementFilteringExcludedContext()) {
+        val engagement = if (!hasEngagementRule() || isEngagementFilteringExcludedContext()) {
             null
         } else {
             engagementReason(item)
@@ -1348,11 +1353,12 @@ class PostFilterHook(module: MainModule) {
         if (engagement != null) {
             return engagement
         }
-        val keyword = keywordHit(item)
+        val fields = FilterText(item)
+        val keyword = keywordHit(fields)
         if (keyword != null) {
             return "命中关键词 $keyword"
         }
-        val tag = tagHit(item)
+        val tag = tagHit(item, fields)
         return if (tag == null) null else "命中标签 $tag"
     }
 
@@ -1373,14 +1379,14 @@ class PostFilterHook(module: MainModule) {
     private val HASHTAG_PATTERN: Pattern =
         Pattern.compile("#(?!#|heybox:)(((?!heybox:|\\[.+?]).)*?)#(?!heybox:)")
 
-    private fun tagHit(item: Any?): String? {
+    private fun tagHit(item: Any, fields: FilterText): String? {
         val matchers = cfg().tags
-        if (item == null || matchers.isEmpty()) {
+        if (matchers.isEmpty()) {
             return null
         }
         val names = ArrayList<String>()
         collectTags(item, names)
-        val link = safeInvoke(item, "getLinkContent")
+        val link = fields.link
         if (link != null) {
             collectTags(link, names)
         }
@@ -1392,9 +1398,7 @@ class PostFilterHook(module: MainModule) {
             }
         }
         val text = joinNonNull(
-            safeTitle(item), safeText(item), safeGet(item, "getDescription"),
-            if (link == null) null else safeGet(link, "getTitle"),
-            if (link == null) null else safeGet(link, "getDescription")
+            fields.title, fields.text, fields.description, fields.linkTitle, fields.linkDescription
         )
         if (text.indexOf('#') < 0 && text.indexOf('＃') < 0) {
             return null
