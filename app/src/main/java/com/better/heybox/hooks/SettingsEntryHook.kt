@@ -1052,7 +1052,11 @@ class SettingsEntryHook(private val module: MainModule) {
                     })
 
                     Action.COMMENT_PANEL -> setRowClick(itemCls, item, View.OnClickListener {
-                        CommentPanelSettings.show(activity)
+                        withHeyboxDialog(
+                            activity,
+                            NativeDialogCall { spec -> CommentPanelSettings.show(activity, spec) },
+                            Runnable { CommentPanelSettings.show(activity) }
+                        )
                     })
 
                     Action.COMMENT_FILTER_DIAG -> setRowClick(itemCls, item, View.OnClickListener { _ ->
