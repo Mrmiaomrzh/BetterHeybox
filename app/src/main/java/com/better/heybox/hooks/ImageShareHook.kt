@@ -168,6 +168,7 @@ class ImageShareHook(private val module: MainModule) {
     }
 
     private fun appendBatchSaveHandler(handlers: List<*>, mediaData: Any?, cl: ClassLoader) {
+        if (!module.isEnabled(App.KEY_VIEWER_BATCH_IMAGES, false)) return
         try {
             if (handlers.filterNotNull().any { it.javaClass.getMethod("getTarget").invoke(it) == "BatchSaveImages" }) return
             val callbackType = findLocalHandlerCallback(cl) ?: return
@@ -198,6 +199,7 @@ class ImageShareHook(private val module: MainModule) {
     }
 
     private fun appendBatchSaveAction(actions: List<*>, cl: ClassLoader, context: Context?) {
+        if (!module.isEnabled(App.KEY_VIEWER_BATCH_IMAGES, false)) return
         try {
             if (actions.filterNotNull().any {
                 val action = it.javaClass.getMethod("getAction").invoke(it)

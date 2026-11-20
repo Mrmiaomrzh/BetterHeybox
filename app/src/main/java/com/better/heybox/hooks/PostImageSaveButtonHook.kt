@@ -11,6 +11,7 @@ import android.webkit.WebView
 import android.widget.FrameLayout
 import android.widget.TextView
 import android.graphics.drawable.GradientDrawable
+import com.better.heybox.App
 import com.better.heybox.MainModule
 import com.better.heybox.ThemeUtils
 import com.better.heybox.util.ScreenshotIds
@@ -199,6 +200,10 @@ class PostImageSaveButtonHook(private val module: MainModule) {
     }
 
     private fun ensureButton(host: Activity) {
+        if (!module.isEnabled(App.KEY_POST_IMAGE_SAVE_BUTTON, false)) {
+            removeButton()
+            return
+        }
         val content = host.findViewById<View>(android.R.id.content) as? FrameLayout ?: return
         if (button?.parent === content) return
         removeButton()

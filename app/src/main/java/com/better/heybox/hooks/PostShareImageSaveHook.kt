@@ -3,6 +3,7 @@ package com.better.heybox.hooks
 import android.content.Context
 import android.util.Log
 import android.widget.Toast
+import com.better.heybox.App
 import com.better.heybox.MainModule
 import java.util.IdentityHashMap
 
@@ -21,7 +22,8 @@ class PostShareImageSaveHook(private val module: MainModule) {
                 try {
                     val model = chain.arg(1)
                     val actions = chain.arg(2)
-                    if (model != null && actions is MutableList<*> && imagesFor(model, chain.arg(0) as? Context).isNotEmpty()) {
+                    if (module.isEnabled(App.KEY_POST_BATCH_IMAGES, false) &&
+                        model != null && actions is MutableList<*> && imagesFor(model, chain.arg(0) as? Context).isNotEmpty()) {
                         @Suppress("UNCHECKED_CAST")
                         appendAction(actions as MutableList<Any?>, chain.arg(0) as? Context, cl)
                     }

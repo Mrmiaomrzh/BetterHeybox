@@ -4514,6 +4514,12 @@ class SettingsEntryHook(private val module: MainModule) {
                     SwitchDef("自绘制文本选择", "修复选区异常", App.KEY_CUSTOM_TEXT_SELECT, false, false),
                     SwitchDef("评论区自由复制", "长按菜单的复制可自由选择", App.KEY_COMMENT_FREE_COPY, true, false),
                     SwitchDef("系统分享图片", "图片长按加入系统分享", App.KEY_SYSTEM_SHARE, true, false),
+                    SwitchDef("图片查看器批量保存", "在图片长按分享面板添加批量保存原图",
+                            App.KEY_VIEWER_BATCH_IMAGES, false, false),
+                    SwitchDef("帖子图片批量保存", "在帖子分享面板添加批量保存原图",
+                            App.KEY_POST_BATCH_IMAGES, false, false),
+                    SwitchDef("帖子保存原图按钮", "在帖子页面显示保存原图按钮",
+                            App.KEY_POST_IMAGE_SAVE_BUTTON, false, false),
                     SwitchDef("大图自动原图",
                             "缩略图小于显示尺寸时换成原图",
                             App.KEY_IMAGE_AUTO_ORIGINAL, false, false),
@@ -4525,7 +4531,7 @@ class SettingsEntryHook(private val module: MainModule) {
             SettingsGroup(
                 "评论交互", arrayOf(
                     SwitchDef("评论图片批量保存", "在评论分享面板添加批量保存原图",
-                            App.KEY_COMMENT_BATCH_IMAGES, true, false),
+                            App.KEY_COMMENT_BATCH_IMAGES, false, false),
                     SwitchDef("回复改长按面板", "单击评论不再弹回复框；长按评论在分享面板点「回复」",
                             App.KEY_COMMENT_REPLY_PANEL, true, false),
                     SwitchDef("自动展开回复",

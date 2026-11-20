@@ -48,7 +48,7 @@ class CommentImageSaveHook(private val module: MainModule) {
                 try {
                     val model = chain.arg(1)
                     val actions = chain.arg(2)
-                    if (module.isEnabled(App.KEY_COMMENT_BATCH_IMAGES, true) &&
+                    if (module.isEnabled(App.KEY_COMMENT_BATCH_IMAGES, false) &&
                         model != null && forwardType.isInstance(model) && actions is MutableList<*>) {
                         val urls = snapshotFor(model) ?: current.get()
                         if (!urls.isNullOrEmpty()) {
